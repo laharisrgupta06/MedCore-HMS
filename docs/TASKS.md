@@ -189,10 +189,12 @@ Phase 6 Mac run 2026-11-16 23:07 (owner report): M-06 applied, generate ok, drif
 | 7-B3 | PHARM-003, NOTIF-008 | Low-stock state strictly below the reorder level, one `stock.low` per crossing, cleared on restock; alerts endpoint; Phase 5 badge rule aligned | Done (VM) | T-PHARM-HTTP-006, T-FE-026 |
 | 7-B4 | PHARM-004, PHARM-005 | Nightly expiry run at 02:00 hospital time (hourly scheduler), VERIFIED hospitals, auto-quarantine with ledger entry, 30-day report, once per day, failure isolation | Done (VM) | T-PHARM-HTTP-007, 008, T-PHARM-INT-001 |
 | 7-B5 | TEN-002/003, TEST-011 | Two-hospital isolation for every pharmacy route and the job | Done (VM) | T-PHARM-HTTP-009, T-PHARM-INT-001, T-RBAC-001g |
+| 7-B6 | DEC-043 | Timed jobs off in integration tests (`SCHEDULED_JOBS`, forced off by the test setup), on for `pnpm dev`; explicit runs for test hospitals only | Done (VM) | T-JOBS-001, T-PHARM-HTTP-012, T-PHARM-INT-001 |
+| 7-B7 | DEC-043 | Stock accounting across quarantine: physical quantity, QUARANTINE figure, ledger balance and available stock verified before and after manual and nightly quarantine and disposal | Done (VM) | T-PHARM-HTTP-010, 011, T-PHARM-INT-001 |
 | 7-C1 | Plan section 14 | Cross-module test: consultation to dispense and hand-over; consultation to lab approval and patient report | Written; Mac run pending | T-XMOD-INT-001 |
 | 7-D1 | FE | Pharmacy queue, prescription screen with verification, FIFO preview and hand-over; Inventory (renamed Medicines) with stock view, receive, quarantine, adjust, ledger; Pharmacy alerts; navigation | Done (VM) | T-FE-036..041, T-E2E-007 |
 
-Phase 7 built and checked in the VM 2026-11-16: API 1262/1262, web 54/54, lint, format, typecheck, build. Pending: owner approval of M-07/M-08/M-09, then on macOS `prisma:deploy`, `prisma:generate`, `prisma:drift`, `pnpm test:int`, Playwright.
+Phase 7 built and checked in the VM 2026-11-16 (after DEC-043): API 1271/1271, web 54/54, lint, format, typecheck, build. Pending: owner approval of M-07/M-08/M-09, then on macOS `prisma:deploy`, `prisma:generate`, `prisma:drift`, `pnpm test:int`, Playwright.
 
 ## Phases 2–14 (from the roadmap; detailed breakdown added when each phase starts)
 

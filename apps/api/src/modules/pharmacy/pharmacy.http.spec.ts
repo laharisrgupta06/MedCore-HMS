@@ -1,5 +1,5 @@
 import type { INestApplication } from '@nestjs/common';
-import { AUTH_COOKIES, CSRF_HEADER, addDays } from '@medcore/types';
+import { AUTH_COOKIES, CSRF_HEADER, addDays, availableUnits, ledgerBalance } from '@medcore/types';
 import type { Hospital, User } from '@prisma/client';
 import request from 'supertest';
 import { DomainEvents } from '../../common/events/domain-events';
@@ -683,6 +683,193 @@ describe('Phase 7: pharmacy and inventory', () => {
     const own = (await (await as(pharmacist)).get('/api/pharmacy/alerts').expect(200)).body.data;
     expect(own.lowStock.map((x: { id: string }) => x.id)).toEqual([m]);
     expect(own.latestReport).not.toBeNull();
+  });
+
+  describe('stock accounting across quarantine (DEC-043)', () => {
+    /** Physical units, ledger balance and available units of one medicine, from the stored rows. */
+    const account = (medicineId: string) => {
+      const bs = rows('MedicineBatch').filter((b) => b.medicineId === medicineId);
+      const asText = (b: Row) => ({
+        status: b.status as 'ACTIVE',
+        quantity: b.quantity as number,
+        expiresOn: (b.expiresOn as Date).toISOString().slice(0, 10),
+      });
+      const moves = (id: string) =>
+        rows('StockMovement').filter((m) => m.batchId === id) as {
+          type: 'RECEIPT';
+          quantity: number;
+        }[];
+      return {
+        physical: bs.reduce((s2, b) => s2 + (b.quantity as number), 0),
+        balances: bs.map((b) => [b.batchNumber, ledgerBalance(moves(b.id as string)), b.quantity]),
+        available: availableUnits(bs.map(asText), today()),
+      };
+    };
+    /** What doctors and the low-stock check see (through the API and its cache). */
+    const apiAvailable = async (name: string) =>
+      (await (await as(doctorUser)).get(`/api/medicines?search=${name}`).expect(200)).body.data[0]
+        .available as number;
+
+    it('manual quarantine: quantity stays physical, the QUARANTINE row records the remaining units, available drops by exactly those units', async () => {
+      const m = medicine('Acct', 3);
+      const ph = await as(pharmacist);
+      const body = (batchNumber: string, quantity: number, days: number) => ({
+        batchNumber,
+        manufacturedOn: addDays(today(), -10),
+        expiresOn: addDays(today(), days),
+        quantity,
+        unitCost: 1,
+        mrp: 2,
+      });
+      const b1 = (await ph.post(`/api/medicines/${m}/batches`, body('A1', 10, 50)).expect(201)).body
+        .data.id;
+      await ph.post(`/api/medicines/${m}/batches`, body('A2', 5, 300)).expect(201);
+      const rx = prescription([[m, 3]], { verifiedAt: new Date(), verifiedById: pharmacist.id });
+      await ph
+        .post(`/api/pharmacy/prescriptions/${rx.id}/dispense`, {
+          items: [{ itemId: rx.itemIds[0], quantity: 3 }],
+        })
+        .expect(201);
+
+      const before = account(m);
+      expect(before).toEqual({
+        physical: 12,
+        balances: [
+          ['A1', 7, 7],
+          ['A2', 5, 5],
+        ],
+        available: 12,
+      });
+      expect(await apiAvailable('Acct')).toBe(12);
+
+      await ph.patch(`/api/batches/${b1}/quarantine`, { reason: 'Damaged carton' }).expect(200);
+      const after = account(m);
+      // Not silently reduced: still 12 units on hand, and each batch's ledger still equals its quantity.
+      expect(after.physical).toBe(12);
+      expect(after.balances).toEqual([
+        ['A1', 7, 7],
+        ['A2', 5, 5],
+      ]);
+      // Not double-counted: the QUARANTINE row is the 7 remaining units (not the 10 received), outside the balance.
+      expect(rows('StockMovement').filter((x) => x.type === 'QUARANTINE')).toEqual([
+        expect.objectContaining({ batchId: b1, quantity: 7 }),
+      ]);
+      // Available drops by exactly the quarantined units, in the stored rows and through the API cache.
+      expect(after.available).toBe(5);
+      expect(await apiAvailable('Acct')).toBe(5);
+      // The ledger view shows the same numbers.
+      const ledger = (await ph.get(`/api/pharmacy/ledger?batchId=${b1}`).expect(200)).body.data as {
+        type: 'RECEIPT';
+        quantity: number;
+      }[];
+      // Same rows regardless of display order (timestamps can tie within one transaction).
+      expect(ledger.map((x) => `${x.type} ${x.quantity}`).sort()).toEqual([
+        'DISPENSE -3',
+        'QUARANTINE 7',
+        'RECEIPT 10',
+      ]);
+      expect(ledgerBalance(ledger)).toBe(7);
+
+      // Quarantined units are never dispensed: only A2's 5 can be given.
+      const rx2 = prescription([[m, 6]], { verifiedAt: new Date(), verifiedById: pharmacist.id });
+      expect(
+        (
+          await ph
+            .post(`/api/pharmacy/prescriptions/${rx2.id}/dispense`, {
+              items: [{ itemId: rx2.itemIds[0], quantity: 6 }],
+            })
+            .expect(422)
+        ).body.error.details.available,
+      ).toBe(5);
+      expect(account(m)).toEqual(after);
+
+      // Destroying the quarantined units is an explicit adjustment: physical falls, available does not.
+      await ph
+        .post(`/api/batches/${b1}/adjustments`, { quantity: -8, reason: 'Destroyed' })
+        .expect(400);
+      const destroyed = (
+        await ph
+          .post(`/api/batches/${b1}/adjustments`, {
+            quantity: -7,
+            reason: 'Destroyed under supervision',
+          })
+          .expect(201)
+      ).body.data;
+      expect(destroyed).toMatchObject({ quantity: 0, status: 'QUARANTINED' });
+      expect(account(m)).toEqual({
+        physical: 5,
+        balances: [
+          ['A1', 0, 0],
+          ['A2', 5, 5],
+        ],
+        available: 5,
+      });
+      expect(await apiAvailable('Acct')).toBe(5);
+    });
+
+    it('nightly quarantine of expired stock changes neither quantity, balance nor available stock', async () => {
+      const day = '2030-03-10';
+      const m = medicine('Night', 1);
+      const exp = batch(m, 'N1', 4, 0, { expiresOn: dateValue(addDays(day, -2)) });
+      const fresh = batch(m, 'N2', 6, 0, { expiresOn: dateValue(addDays(day, 100)) });
+      for (const [id, q] of [
+        [exp, 4],
+        [fresh, 6],
+      ] as const)
+        push('StockMovement', {
+          batchId: id,
+          type: 'RECEIPT',
+          quantity: q,
+          reason: null,
+          dispenseId: null,
+          performedById: pharmacist.id,
+        });
+      const at = (b: Row) => ({
+        status: b.status as 'ACTIVE',
+        quantity: b.quantity as number,
+        expiresOn: (b.expiresOn as Date).toISOString().slice(0, 10),
+      });
+      const snapshot = () => {
+        const bs = rows('MedicineBatch').filter((b) => b.medicineId === m);
+        return {
+          physical: bs.reduce((s2, b) => s2 + (b.quantity as number), 0),
+          balance: bs.map(
+            (b) =>
+              ledgerBalance(
+                rows('StockMovement').filter((x) => x.batchId === b.id) as {
+                  type: 'RECEIPT';
+                  quantity: number;
+                }[],
+              ) - (b.quantity as number),
+          ),
+          available: availableUnits(bs.map(at), day),
+        };
+      };
+      const before = snapshot();
+      // Expired by date, so already unavailable before the run.
+      expect(before).toEqual({ physical: 10, balance: [0, 0], available: 6 });
+      await app.get(ExpirySweep).runHospital(h.id, TZ, zonedToUtc(day, 150, TZ));
+      expect(batchRow(exp)).toMatchObject({ status: 'QUARANTINED', quantity: 4 });
+      expect(
+        rows('StockMovement').filter((x) => x.batchId === exp && x.type === 'QUARANTINE'),
+      ).toEqual([expect.objectContaining({ quantity: 4, performedById: null })]);
+      expect(snapshot()).toEqual(before);
+      const report = rows('ExpiryReport').find((r) => r.hospitalId === h.id)!;
+      expect(
+        (report.items as { batchId: string; quantity: number }[]).find((i) => i.batchId === exp)!
+          .quantity,
+      ).toBe(4);
+    });
+
+    it('an explicit run for one hospital never touches another hospital', async () => {
+      const mine = batch(medicine('One', 1), 'H1', 3, -1);
+      const theirs = batch(medicine('Two', 1, h2.id), 'H2', 3, -1, {}, h2.id);
+      await app.get(ExpirySweep).runHospital(h.id, TZ);
+      expect(batchRow(mine).status).toBe('QUARANTINED');
+      expect(batchRow(theirs)).toMatchObject({ status: 'ACTIVE', quantity: 3 });
+      expect(rows('StockMovement').some((x) => x.hospitalId === h2.id)).toBe(false);
+      expect(rows('ExpiryReport').map((r) => r.hospitalId)).toEqual([h.id]);
+    });
   });
 });
 

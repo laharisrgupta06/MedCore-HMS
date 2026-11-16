@@ -18,6 +18,11 @@ if (existsSync(envFile)) {
   }
 }
 
+// Timed jobs never run inside integration tests, whatever .env or the shell says: the test app
+// shares the development database, and the nightly expiry run would process real development
+// hospitals. Tests call ExpirySweep explicitly for the hospitals they create (DEC-043).
+process.env.SCHEDULED_JOBS = 'off';
+
 for (const key of ['DATABASE_URL', 'REDIS_URL']) {
   if (!process.env[key]) {
     throw new Error(

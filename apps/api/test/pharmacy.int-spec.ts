@@ -10,6 +10,10 @@ import { SessionStore } from '../src/common/auth/session.store';
 import { TokenService } from '../src/common/auth/token.service';
 import { localDate } from '../src/common/time/zoned';
 import { ExpirySweep } from '../src/modules/pharmacy/expiry-sweep';
+import {
+  ExpirySweepProcessor,
+  ExpirySweepScheduler,
+} from '../src/modules/pharmacy/pharmacy-jobs.module';
 
 /**
  * Phase 7 on real PostgreSQL (T-PHARM-INT-001): M-07/M-08/M-09 constraints and triggers, FIFO
@@ -52,6 +56,48 @@ describe('Phase 7 integration: pharmacy on PostgreSQL', () => {
       });
     const A = await hospital('a');
     const B = await hospital('b');
+
+    // ---- DEC-043: no timed job can run inside this test app ---------------------------------
+    expect(process.env.SCHEDULED_JOBS).toBe('off');
+    expect(() => app.get(ExpirySweepProcessor, { strict: false })).toThrow();
+    expect(() => app.get(ExpirySweepScheduler, { strict: false })).toThrow();
+    expect(app.get(ExpirySweep)).toBeDefined(); // explicit runs only
+    // A bystander hospital with expired stock that nothing in this test may touch. Its time zone
+    // puts it before 02:00 local, so even a separately running `pnpm dev` worker leaves it alone.
+    const h0 = (24 - new Date().getUTCHours()) % 24;
+    const bystanderTz = h0 === 0 ? 'Etc/GMT' : h0 <= 14 ? `Etc/GMT-${h0}` : `Etc/GMT+${24 - h0}`;
+    const C = await prisma.hospital.create({
+      data: {
+        name: `int-ph-c-${run}`,
+        code: `INTPC-${run}`.toUpperCase(),
+        email: `int-ph-c-${run}@example.com`,
+        phone: '+914400000008',
+        licenseNumber: `LP-c-${run}`,
+        status: 'VERIFIED',
+        timezone: bystanderTz,
+      },
+    });
+    const cMed = await prisma.medicine.create({
+      data: {
+        hospitalId: C.id,
+        name: `int-c-${run}`,
+        form: 'TABLET',
+        strength: '1 mg',
+        reorderLevel: 1,
+      },
+    });
+    const cBatch = await prisma.medicineBatch.create({
+      data: {
+        hospitalId: C.id,
+        medicineId: cMed.id,
+        batchNumber: 'C1',
+        manufacturedOn: D('2020-01-01'),
+        expiresOn: D('2021-01-01'),
+        quantity: 7,
+        unitCost: 1,
+        mrp: 2,
+      },
+    });
     const base = (hid: string, role: Role) => ({
       hospitalId: hid,
       email: `int-ph-${role.toLowerCase()}-${++n}-${run}@example.com`,
@@ -355,6 +401,38 @@ describe('Phase 7 integration: pharmacy on PostgreSQL', () => {
         mrp: 2,
       },
     });
+    // ---- DEC-043 accounting before the nightly run (crocin: SOON 0, LATER 26, OLD 9 expired) --
+    const account = async () => {
+      const rowsA = await prisma.$queryRaw<
+        {
+          id: string;
+          status: string;
+          quantity: number;
+          balance: bigint | null;
+          quarantined: bigint | null;
+        }[]
+      >`
+        SELECT b.id, b.status::text AS status, b.quantity,
+               (SELECT sum(m.quantity) FROM stock_movements m WHERE m."batchId" = b.id AND m.type <> 'QUARANTINE') AS balance,
+               (SELECT sum(m.quantity) FROM stock_movements m WHERE m."batchId" = b.id AND m.type = 'QUARANTINE') AS quarantined
+        FROM medicine_batches b WHERE b."medicineId" = ${crocin.id}::uuid ORDER BY b."batchNumber"`;
+      const search = (await a.get(`/api/medicines?search=int-crocin-${run}`).expect(200)).body
+        .data[0];
+      return {
+        physical: rowsA.reduce((s2, r) => s2 + r.quantity, 0),
+        balanced: rowsA.every((r) => Number(r.balance ?? 0) === r.quantity),
+        quarantined: rowsA.map((r) => Number(r.quarantined ?? 0)),
+        available: search.available as number,
+      };
+    };
+    const beforeRun = await account();
+    expect(beforeRun).toEqual({
+      physical: 35,
+      balanced: true,
+      quarantined: [0, 0, 0],
+      available: 26,
+    });
+
     const sweep = app.get(ExpirySweep);
     const repA = await sweep.runHospital(A.id, TZ);
     expect(repA).not.toBeNull();
@@ -362,6 +440,9 @@ describe('Phase 7 integration: pharmacy on PostgreSQL', () => {
     await sweep.runHospital(B.id, TZ);
     const oldNow = await prisma.medicineBatch.findUniqueOrThrow({ where: { id: old.id } });
     expect(oldNow).toMatchObject({ status: 'QUARANTINED', quantity: 9 });
+    // Quarantine neither reduced nor double-counted anything: same physical units and balances,
+    // same available stock; the 9 expired units are recorded once as set aside (LATER, OLD, SOON).
+    expect(await account()).toEqual({ ...beforeRun, quarantined: [0, 9, 0] });
     expect(
       await prisma.stockMovement.findFirst({ where: { batchId: old.id, type: 'QUARANTINE' } }),
     ).toMatchObject({ quantity: 9, performedById: null });
@@ -410,5 +491,12 @@ describe('Phase 7 integration: pharmacy on PostgreSQL', () => {
     const alertsA = (await a.get('/api/pharmacy/alerts').expect(200)).body.data;
     expect(alertsA.latestReport.id).toBe(repA!.id);
     expect(await qty(later.id)).toBe(26); // B's attempts changed nothing
+
+    // ---- The bystander hospital was never processed --------------------------------------------
+    expect(
+      await prisma.medicineBatch.findUniqueOrThrow({ where: { id: cBatch.id } }),
+    ).toMatchObject({ status: 'ACTIVE', quantity: 7 });
+    expect(await prisma.stockMovement.count({ where: { hospitalId: C.id } })).toBe(0);
+    expect(await prisma.expiryReport.count({ where: { hospitalId: C.id } })).toBe(0);
   }, 60_000);
 });

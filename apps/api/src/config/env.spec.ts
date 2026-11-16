@@ -1,4 +1,4 @@
-import { validateEnv } from './env';
+import { scheduledJobsEnabled, validateEnv } from './env';
 
 const valid = {
   DATABASE_URL: 'postgresql://medcore:pw@localhost:5432/medcore',
@@ -84,5 +84,16 @@ describe('validateEnv', () => {
     const env = validateEnv(valid);
     expect(env.AUTH_THROTTLE_LIMIT).toBe(100);
     expect(env.AUTH_THROTTLE_TTL_MS).toBe(900_000);
+  });
+
+  it('timed jobs: on by default, off under NODE_ENV=test, explicit SCHEDULED_JOBS wins (DEC-043)', () => {
+    expect(scheduledJobsEnabled({ NODE_ENV: 'development' })).toBe(true); // pnpm dev
+    expect(scheduledJobsEnabled({ NODE_ENV: 'production' })).toBe(true);
+    expect(scheduledJobsEnabled({})).toBe(true);
+    expect(scheduledJobsEnabled({ NODE_ENV: 'test' })).toBe(false);
+    expect(scheduledJobsEnabled({ NODE_ENV: 'development', SCHEDULED_JOBS: 'off' })).toBe(false);
+    expect(scheduledJobsEnabled({ NODE_ENV: 'test', SCHEDULED_JOBS: 'on' })).toBe(true);
+    expect(validateEnv({ ...valid, SCHEDULED_JOBS: 'off' }).SCHEDULED_JOBS).toBe('off');
+    expect(() => validateEnv({ ...valid, SCHEDULED_JOBS: 'yes' })).toThrow(/SCHEDULED_JOBS/);
   });
 });

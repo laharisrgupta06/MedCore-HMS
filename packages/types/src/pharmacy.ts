@@ -194,6 +194,31 @@ export function allocateFifo(
   return { allocations, short: left };
 }
 
+/**
+ * Stock accounting (DEC-043). A batch's `quantity` is the physical count on hand.
+ * - RECEIPT adds, DISPENSE subtracts, ADJUSTMENT corrects the count: these change `quantity`.
+ * - QUARANTINE changes the batch status only. Its figure records how many physical units were set
+ *   aside at that moment; it is not a change and is excluded from the balance, so the units are
+ *   neither double-counted nor silently removed. Destroying quarantined stock is a separate,
+ *   reasoned ADJUSTMENT.
+ * - Invariant: ledgerBalance(movements of a batch) === batch.quantity, before and after quarantine.
+ * - Available stock counts ACTIVE, unexpired batches only, so quarantined or expired units are on
+ *   hand but never available.
+ */
+export function ledgerBalance(movements: Pick<StockMovementView, 'type' | 'quantity'>[]): number {
+  return movements.reduce((sum, m) => (m.type === 'QUARANTINE' ? sum : sum + m.quantity), 0);
+}
+
+/** Units that can be dispensed today: ACTIVE, unexpired batches (PHARM-004; same rule as the API). */
+export function availableUnits(
+  batches: Pick<StockBatch, 'status' | 'quantity' | 'expiresOn'>[],
+  today: string,
+): number {
+  return batches
+    .filter((b) => b.status === 'ACTIVE' && !isExpired(b.expiresOn, today))
+    .reduce((sum, b) => sum + b.quantity, 0);
+}
+
 export interface StockMovementView {
   id: string;
   type: StockMovementType;

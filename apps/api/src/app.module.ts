@@ -28,7 +28,7 @@ import { PdfCoreModule, PdfQueueModule } from './infra/pdf/pdf-jobs';
 import { MedicinesModule } from './modules/medicines/medicines.module';
 import { PrescriptionsModule } from './modules/prescriptions/prescriptions.module';
 import { LabModule } from './modules/lab/lab.module';
-import { PharmacyJobsModule } from './modules/pharmacy/pharmacy-jobs.module';
+import { pharmacyJobs } from './modules/pharmacy/pharmacy-jobs.module';
 import { PharmacyModule } from './modules/pharmacy/pharmacy.module';
 import { RemindersModule, SchedulingModule } from './modules/appointments/appointments.module';
 
@@ -75,7 +75,9 @@ export { buildThrottlerOptions, isAuthRateLimited } from './infra/throttler/thro
     PrescriptionsModule,
     LabModule,
     PharmacyModule,
-    PharmacyJobsModule,
+    // The nightly expiry worker and its schedule exist only where timed jobs are enabled (never in
+    // integration tests); ExpirySweep itself stays available through PharmacyModule.
+    pharmacyJobs(),
   ],
   providers: GLOBAL_PIPELINE,
 })

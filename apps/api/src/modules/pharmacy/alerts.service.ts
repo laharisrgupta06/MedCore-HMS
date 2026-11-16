@@ -103,7 +103,8 @@ export class AlertsService {
       this.db.client.stockMovement.findMany({
         where,
         include: { batch: { include: { medicine: true } }, performedBy: true },
-        orderBy: { createdAt: 'desc' },
+        // Rows of one transaction can share a timestamp; the id keeps pages stable.
+        orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
         skip: (q.page - 1) * q.limit,
         take: q.limit,
       }),

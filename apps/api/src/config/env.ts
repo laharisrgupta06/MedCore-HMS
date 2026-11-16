@@ -53,6 +53,12 @@ export const envSchema = z
     TWILIO_ACCOUNT_SID: z.string().default(''),
     TWILIO_AUTH_TOKEN: z.string().default(''),
     TWILIO_FROM_NUMBER: z.string().default(''),
+    /**
+     * Timed background jobs (the nightly expiry run). "on" or "off"; when unset they are on except
+     * when NODE_ENV is "test". Integration tests always force "off" (test/load-env.ts) and call the
+     * job explicitly for their own hospitals.
+     */
+    SCHEDULED_JOBS: z.enum(['on', 'off']).optional(),
   })
   .superRefine((env, ctx) => {
     if (env.JWT_ACCESS_SECRET === env.JWT_REFRESH_SECRET) {
@@ -97,6 +103,13 @@ export const envSchema = z
   });
 
 export type Env = z.infer<typeof envSchema>;
+
+/** Whether timed jobs may be scheduled and run in this process (read from process.env at boot). */
+export function scheduledJobsEnabled(env: { NODE_ENV?: string; SCHEDULED_JOBS?: string }): boolean {
+  if (env.SCHEDULED_JOBS === 'on') return true;
+  if (env.SCHEDULED_JOBS === 'off') return false;
+  return env.NODE_ENV !== 'test';
+}
 
 /**
  * Validates environment variables at startup and refuses to boot on any problem.
