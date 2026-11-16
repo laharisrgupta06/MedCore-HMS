@@ -4,6 +4,7 @@ import { zodResolver } from '@hookform/resolvers/zod';
 import { BLOOD_GROUPS, Gender, type PatientSummary } from '@medcore/types';
 import { useQueryClient } from '@tanstack/react-query';
 import { PenLine, Plus, UserRound } from 'lucide-react';
+import Link from 'next/link';
 import { useState } from 'react';
 import { useForm } from 'react-hook-form';
 import { z } from 'zod';
@@ -52,6 +53,8 @@ function age(dob: string): number {
 export function PatientsView() {
   const role = useAuth((s) => s.me?.user.role);
   const canEdit = role === 'HOSPITAL_ADMIN' || role === 'RECEPTIONIST';
+  // API-019: only doctors and nurses open clinical charts.
+  const clinical = role === 'DOCTOR' || role === 'NURSE';
   const list = useList<PatientSummary>('patients', patientsApi.list);
   const [editing, setEditing] = useState<PatientSummary | 'new' | null>(null);
   return (
@@ -130,12 +133,28 @@ export function PatientsView() {
             },
           ]}
           actions={
-            canEdit
+            canEdit || clinical
               ? (p) => (
-                  <Button size="compact" variant="ghost" onClick={() => setEditing(p)}>
-                    <PenLine aria-hidden="true" />
-                    Edit
-                  </Button>
+                  <>
+                    {clinical && (
+                      <Link
+                        href={`/dashboard/patients/${p.id}`}
+                        className="inline-flex h-8 items-center px-3 text-body-sm font-medium text-sage-700 hover:underline"
+                      >
+                        Chart
+                        <span className="sr-only">
+                          {' '}
+                          for {p.firstName} {p.lastName}
+                        </span>
+                      </Link>
+                    )}
+                    {canEdit && (
+                      <Button size="compact" variant="ghost" onClick={() => setEditing(p)}>
+                        <PenLine aria-hidden="true" />
+                        Edit
+                      </Button>
+                    )}
+                  </>
                 )
               : undefined
           }

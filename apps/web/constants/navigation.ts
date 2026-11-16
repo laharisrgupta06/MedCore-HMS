@@ -5,6 +5,7 @@ import {
   CalendarDays,
   CalendarPlus,
   Building2,
+  HeartPulse,
   Home,
   Layers,
   type LucideIcon,
@@ -106,6 +107,7 @@ export const PATIENT_NAV: NavItem[] = [
     roles: ['PATIENT'],
   },
   { href: '/portal/book', label: 'Book appointment', icon: CalendarPlus, roles: ['PATIENT'] },
+  { href: '/portal/health', label: 'My health record', icon: HeartPulse, roles: ['PATIENT'] },
   { href: '/portal/account', label: 'My account', icon: UserRound, roles: ['PATIENT'] },
 ];
 

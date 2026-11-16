@@ -183,3 +183,30 @@ export function qs(params: Record<string, string | number | boolean | undefined 
   const s = p.toString();
   return s ? `?${s}` : '';
 }
+
+/** Downloads a binary response (file attachments) with the access token; errors use the API envelope. */
+export async function apiBlob(path: string, retried = false): Promise<Blob> {
+  const token = handlers?.getAccessToken();
+  let res: Response;
+  try {
+    res = await fetch(`${API_BASE}${path}`, {
+      credentials: 'same-origin',
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+    });
+  } catch {
+    throw new ApiClientError(
+      'NETWORK_ERROR',
+      'Could not reach the server. Check your connection and try again.',
+      0,
+    );
+  }
+  if (res.ok) return res.blob();
+  const body = (await res.json().catch(() => ({}))) as { error?: ApiErrorBody };
+  if (res.status === 401 && !retried && handlers && (await handlers.refresh()))
+    return apiBlob(path, true);
+  throw new ApiClientError(
+    body.error?.code ?? 'UNKNOWN_ERROR',
+    body.error?.message ?? 'The download failed.',
+    res.status,
+  );
+}

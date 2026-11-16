@@ -5,6 +5,7 @@ const valid = {
   REDIS_URL: 'redis://localhost:6379',
   JWT_ACCESS_SECRET: 'a'.repeat(64),
   JWT_REFRESH_SECRET: 'b'.repeat(64),
+  EMR_ENCRYPTION_KEY: 'e'.repeat(64),
   CORS_ORIGINS: 'http://localhost:3000, https://app.example.com',
 };
 

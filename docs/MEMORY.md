@@ -13,12 +13,12 @@ Claude (main session acting as Team Lead).
 
 | Area | Status |
 | --- | --- |
-| Phase | **1D, 2, 3: Done** (2026-11-16 17:17: unit + integration 14/14 + Playwright 20/20). 1A–1C Done. Phase 4 (EMR) not started: waits for owner go-ahead. Branch `feat/phase-1-auth`; nothing pushed |
+| Phase | **4: Review** (EMR API + screens, VM-verified, committed locally). 1D, 2, 3: Done. Branch `feat/phase-1-auth`; nothing pushed |
 | Phase 0 | Done and verified (VM + macOS). Open: CI never run on GitHub; browser checks of status page and Swagger UI |
 | Database | Schema revision 2 + DEC-031 declarations. Initial migration `20261116085814_init` **applied on macOS** by the owner; drift (4 SQL-only keys) fixed in schema.prisma (DEC-031), drift now empty. All unit + 4 integration suites pass on macOS (14:53). Migration 2 `20261116092500_hospital_id_db_default` (DEC-032, approved) created, not yet applied. No other migrations |
 | Backend | Foundation + Phase 1B auth (register, email/phone OTP, login, refresh rotation, logout one/all, forgot/reset, me, CSRF, auth rate limit, RBAC guard, audit of auth events, create-super-admin CLI). Phase 1C: tenant context + scoped Prisma client, permissions matrix, audit interceptor, users endpoints. Verified only with in-memory Prisma/Redis. Phase 2 org modules. **Phase 3** `modules/appointments`: schedules, exceptions, cached slots, locked booking, lifecycle, emergency, reminders (DEC-038), `GET /doctors/me` |
 | Frontend | **Phase 1D built**: tokens in Tailwind 4 `@theme`, base components (button, field, alert, logo), public home, status, privacy, terms, 404, favicon; sign-in, register, verify email, forgot/reset; in-memory session store with silent refresh, cross-tab lock and logout sync; protected staff/patient shells; account page (profile, phone verification, sign out everywhere). E2E written, not yet run; Phase 2 org screens; **Phase 3**: staff day agenda with status actions, reception booking (incl. emergency), availability management, patient portal booking and list. All appointment times in hospital time |
-| Tests | API unit 764 (613-case matrix) + web 33 (VM); integration 14/14 and Playwright 20/20 desktop + mobile (macOS, 17:17). CI never run. Details: [TEST_PLAN.md](TEST_PLAN.md) |
+| Tests | API unit 919 (757-case matrix) + web 38 (VM, Phase 4). Earlier on macOS: integration 14/14, Playwright 20/20. Pending on macOS for Phase 4: `pnpm test:int` (adds T-EMR-INT-001), Playwright (adds emr.spec.ts). Details: [TEST_PLAN.md](TEST_PLAN.md) |
 | Working mode | Single session, permanently (owner, 15:28). `.claude/agents/*` and `team-kickoff.md` are unused and untracked |
 
 ## Git
@@ -50,9 +50,10 @@ Abandoned by the owner on 2026-11-16 13:46 (DEC-022 superseded in practice). Sin
 
 ## Next actions
 
-1. Phase 4 (EMR) started 17:24 after approval.
-2. DEC-036/037/038 approved 17:24 (2-hour patient cancellation notice added). Owner decides whether to push and run CI.
-3. Carried forward: signed-in E2E journeys need seed data (P14); legal review of Privacy/Terms text; browser check of Swagger UI.
+1. Owner on macOS: add `EMR_ENCRYPTION_KEY` to `.env` (generate locally; never share it), restart `pnpm dev`, run `pnpm --filter @medcore/api icd10:load`, then `pnpm test:int` and `pnpm --dir e2e exec playwright test`.
+2. Owner: acknowledge DEC-039 (Proposed), including the change that consultations start from the encounter screen.
+3. Carried forward: signed-in E2E journeys need seed data (P14); legal review of Privacy/Terms; Swagger UI browser check; pgcrypto key rotation (R-04).
+4. Phase 5 (prescriptions) waits for Phase 4 verification.
 
 ## Document map
 

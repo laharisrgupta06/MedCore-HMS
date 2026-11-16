@@ -70,6 +70,7 @@ const appt = (over: Partial<Appointment> = {}): Appointment => ({
   doctor: { id: 'd1', firstName: 'Dee', lastName: 'Rao', specialisation: 'Cardiology' },
   patient: { id: 'p1', firstName: 'Pat', lastName: 'One', mrn: 'MRN-2026-000001' },
   department: { id: 'dep1', name: 'Heart' },
+  medicalRecordId: null,
   createdAt: '',
   ...over,
 });

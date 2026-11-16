@@ -13,6 +13,7 @@ import { apiList, apiRequest, qs } from '@/lib/api-client';
 export const appointmentsApi = {
   list: (q: Record<string, string | number | undefined>) =>
     apiList<Appointment>(`/appointments${qs(q)}`),
+  get: (id: string) => apiRequest<Appointment>(`/appointments/${id}`),
   book: (b: BookAppointmentRequest) =>
     apiRequest<Appointment>('/appointments', { method: 'POST', json: b }),
   setStatus: (id: string, status: AppointmentStatus, reason?: string) =>

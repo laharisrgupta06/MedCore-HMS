@@ -1,0 +1,79 @@
+code,title
+A01.00,"Typhoid fever, unspecified"
+A09,"Infectious gastroenteritis and colitis, unspecified"
+A15.0,Tuberculosis of lung
+A90,Dengue fever [classical dengue]
+B01.9,Varicella without complication
+B34.9,"Viral infection, unspecified"
+B54,Unspecified malaria
+D50.9,"Iron deficiency anemia, unspecified"
+D64.9,"Anemia, unspecified"
+E03.9,"Hypothyroidism, unspecified"
+E05.90,"Thyrotoxicosis, unspecified without thyrotoxic crisis or storm"
+E10.9,Type 1 diabetes mellitus without complications
+E11.65,Type 2 diabetes mellitus with hyperglycemia
+E11.9,Type 2 diabetes mellitus without complications
+E55.9,"Vitamin D deficiency, unspecified"
+E66.9,"Obesity, unspecified"
+E78.5,"Hyperlipidemia, unspecified"
+F32.9,"Major depressive disorder, single episode, unspecified"
+F41.1,Generalized anxiety disorder
+F41.9,"Anxiety disorder, unspecified"
+G40.909,"Epilepsy, unspecified, not intractable, without status epilepticus"
+G43.909,"Migraine, unspecified, not intractable, without status migrainosus"
+G44.209,"Tension-type headache, unspecified, not intractable"
+G47.00,"Insomnia, unspecified"
+H10.9,Unspecified conjunctivitis
+H66.90,"Otitis media, unspecified, unspecified ear"
+I10,Essential (primary) hypertension
+I20.9,"Angina pectoris, unspecified"
+I21.9,"Acute myocardial infarction, unspecified"
+I25.10,Atherosclerotic heart disease of native coronary artery without angina pectoris
+I48.91,Unspecified atrial fibrillation
+I50.9,"Heart failure, unspecified"
+I63.9,"Cerebral infarction, unspecified"
+J00,Acute nasopharyngitis [common cold]
+J01.90,"Acute sinusitis, unspecified"
+J02.9,"Acute pharyngitis, unspecified"
+J03.90,"Acute tonsillitis, unspecified"
+J06.9,"Acute upper respiratory infection, unspecified"
+J11.1,Influenza due to unidentified influenza virus with other respiratory manifestations
+J18.9,"Pneumonia, unspecified organism"
+J20.9,"Acute bronchitis, unspecified"
+J30.9,"Allergic rhinitis, unspecified"
+J44.9,"Chronic obstructive pulmonary disease, unspecified"
+J45.909,"Unspecified asthma, uncomplicated"
+K21.9,Gastro-esophageal reflux disease without esophagitis
+K29.70,"Gastritis, unspecified, without bleeding"
+K30,Functional dyspepsia
+K35.80,Unspecified acute appendicitis
+K52.9,"Noninfective gastroenteritis and colitis, unspecified"
+K59.00,"Constipation, unspecified"
+K80.20,Calculus of gallbladder without cholecystitis without obstruction
+L20.9,"Atopic dermatitis, unspecified"
+L30.9,"Dermatitis, unspecified"
+L50.9,"Urticaria, unspecified"
+L70.0,Acne vulgaris
+M06.9,"Rheumatoid arthritis, unspecified"
+M17.9,"Osteoarthritis of knee, unspecified"
+M54.2,Cervicalgia
+M54.50,"Low back pain, unspecified"
+M81.0,Age-related osteoporosis without current pathological fracture
+N18.9,"Chronic kidney disease, unspecified"
+N20.0,Calculus of kidney
+N39.0,"Urinary tract infection, site not specified"
+N94.6,"Dysmenorrhea, unspecified"
+R05.9,"Cough, unspecified"
+R06.02,Shortness of breath
+R07.9,"Chest pain, unspecified"
+R10.9,Unspecified abdominal pain
+R11.2,"Nausea with vomiting, unspecified"
+R42,Dizziness and giddiness
+R50.9,"Fever, unspecified"
+R51.9,"Headache, unspecified"
+R53.83,Other fatigue
+T78.40XA,"Allergy, unspecified, initial encounter"
+U07.1,COVID-19
+Z00.00,Encounter for general adult medical examination without abnormal findings
+Z23,Encounter for immunization
+Z34.90,"Encounter for supervision of normal pregnancy, unspecified, unspecified trimester"

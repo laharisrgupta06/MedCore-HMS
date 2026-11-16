@@ -5,3 +5,4 @@ export * from './health';
 export * from './auth';
 export * from './org';
 export * from './appointments';
+export * from './emr';

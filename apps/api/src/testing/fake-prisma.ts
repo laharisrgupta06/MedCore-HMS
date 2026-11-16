@@ -111,6 +111,15 @@ const MODEL_OF: Record<string, string> = {
   doctorSchedule: 'DoctorSchedule',
   scheduleException: 'ScheduleException',
   appointment: 'Appointment',
+  medicalRecord: 'MedicalRecord',
+  recordEntry: 'RecordEntry',
+  vitals: 'Vitals',
+  diagnosis: 'Diagnosis',
+  icd10Code: 'Icd10Code',
+  allergy: 'Allergy',
+  medicationHistory: 'MedicationHistory',
+  vaccination: 'Vaccination',
+  familyHistory: 'FamilyHistory',
 };
 
 interface Relation {
@@ -147,8 +156,27 @@ const RELATIONS: Record<string, Record<string, Relation>> = {
     doctor: { model: 'Doctor', local: 'doctorId', foreign: 'id' },
     patient: { model: 'Patient', local: 'patientId', foreign: 'id' },
     department: { model: 'Department', local: 'departmentId', foreign: 'id' },
+    medicalRecord: { model: 'MedicalRecord', local: 'id', foreign: 'appointmentId' },
   },
   DoctorSchedule: { doctor: { model: 'Doctor', local: 'doctorId', foreign: 'id' } },
+  MedicalRecord: {
+    appointment: { model: 'Appointment', local: 'appointmentId', foreign: 'id' },
+    entries: { model: 'RecordEntry', local: 'id', foreign: 'medicalRecordId', many: true },
+    vitals: { model: 'Vitals', local: 'id', foreign: 'medicalRecordId', many: true },
+    diagnoses: { model: 'Diagnosis', local: 'id', foreign: 'medicalRecordId', many: true },
+    files: { model: 'FileAttachment', local: 'id', foreign: 'medicalRecordId', many: true },
+  },
+  RecordEntry: { author: { model: 'User', local: 'authorId', foreign: 'id' } },
+  Vitals: { recordedBy: { model: 'User', local: 'recordedById', foreign: 'id' } },
+  Diagnosis: {
+    recordedBy: { model: 'User', local: 'recordedById', foreign: 'id' },
+    icd10: { model: 'Icd10Code', local: 'icd10Code', foreign: 'code' },
+  },
+  Allergy: { recordedBy: { model: 'User', local: 'recordedById', foreign: 'id' } },
+  MedicationHistory: { recordedBy: { model: 'User', local: 'recordedById', foreign: 'id' } },
+  Vaccination: { recordedBy: { model: 'User', local: 'recordedById', foreign: 'id' } },
+  FamilyHistory: { recordedBy: { model: 'User', local: 'recordedById', foreign: 'id' } },
+  FileAttachment: { uploadedBy: { model: 'User', local: 'uploadedById', foreign: 'id' } },
 };
 
 /** Unique constraints mirrored from schema.prisma for the modelled tables. */
@@ -159,6 +187,14 @@ const UNIQUES: Record<string, string[][]> = {
   DoctorDepartment: [['doctorId', 'departmentId']],
   Room: [['hospitalId', 'number']],
   Bed: [['roomId', 'label']],
+  MedicalRecord: [['appointmentId']],
+  RecordEntry: [['amendsEntryId']],
+  Vitals: [['supersedesId']],
+  Diagnosis: [['supersedesId']],
+  Allergy: [['supersedesId']],
+  MedicationHistory: [['supersedesId']],
+  Vaccination: [['supersedesId']],
+  FamilyHistory: [['supersedesId']],
 };
 
 /** Rows that block deletion of a parent (ON DELETE RESTRICT in the database). */
@@ -204,7 +240,63 @@ const DEFAULTS: Record<string, Row> = {
     cancellationReason: null,
   },
   Doctor: { deletedAt: null, signatureFileId: null, qualification: null, bio: null },
+  MedicalRecord: {
+    status: 'OPEN',
+    closedAt: null,
+    presentingSymptoms: null,
+    treatmentPlanEnc: null,
+  },
+  RecordEntry: { amendsEntryId: null, correctionReason: null },
+  Vitals: { supersedesId: null, correctionReason: null },
+  Diagnosis: { icd10Code: null, supersedesId: null, correctionReason: null },
+  Allergy: { reaction: null, severity: null },
+  MedicationHistory: { dosage: null, frequency: null, startedOn: null, endedOn: null, notes: null },
+  Vaccination: { nextDueOn: null },
+  FamilyHistory: { relation: null, notes: null },
+  FileAttachment: { patientId: null, medicalRecordId: null },
 };
+
+/** Mirrors the clinical triggers in constraints.sql (DEC-016): append-only and status-only tables. */
+const APPEND_ONLY = new Set([
+  'RecordEntry',
+  'Vitals',
+  'Diagnosis',
+  'AdministrationNote',
+  'AuditLog',
+]);
+const STATUS_ONLY = new Set(['Allergy', 'MedicationHistory', 'Vaccination', 'FamilyHistory']);
+const STATUS_COLUMNS = new Set(['status', 'statusReason', 'statusChangedById', 'statusChangedAt']);
+const HISTORY_DEFAULTS = {
+  status: 'ACTIVE',
+  statusReason: null,
+  statusChangedById: null,
+  statusChangedAt: null,
+  supersedesId: null,
+  correctionReason: null,
+  recordedAt: new Date(),
+};
+
+function triggerError(message: string): Error {
+  return new Error(`${message} (integrity_constraint_violation)`);
+}
+
+/** Throws as the database triggers would for a change to `rows` with `data` (undefined = delete). */
+function guardClinicalChange(model: string, rows: Row[], data?: Row): void {
+  if (rows.length === 0) return;
+  if (APPEND_ONLY.has(model)) throw triggerError(`${model} is append-only`);
+  if (STATUS_ONLY.has(model)) {
+    if (!data) throw triggerError(`${model} is append-only`);
+    if (Object.keys(data).some((k) => !STATUS_COLUMNS.has(k) && k !== 'updatedAt'))
+      throw triggerError(`Only the status of a ${model} entry can change`);
+    if (rows.some((r) => r.status === 'ENTERED_IN_ERROR'))
+      throw triggerError(`An entry marked ENTERED_IN_ERROR in ${model} cannot change`);
+  }
+  if (model === 'MedicalRecord') {
+    if (!data) throw triggerError('MedicalRecord is append-only');
+    if (rows.some((r) => r.status === 'CLOSED'))
+      throw triggerError('Medical record is closed; add an addendum instead');
+  }
+}
 
 function fkViolation(): Prisma.PrismaClientKnownRequestError {
   return new Prisma.PrismaClientKnownRequestError('Foreign key constraint failed', {
@@ -392,6 +484,15 @@ export class FakePrisma {
         emergencyContactPhone: null,
         addressId: null,
       };
+    if (STATUS_ONLY.has(model))
+      return {
+        ...base,
+        updatedAt: new Date(),
+        ...HISTORY_DEFAULTS,
+        recordedAt: new Date(),
+        ...(DEFAULTS[model] ?? {}),
+      };
+    if (model === 'Vitals') return { ...base, recordedAt: new Date(), ...(DEFAULTS[model] ?? {}) };
     return { ...base, updatedAt: new Date(), ...(DEFAULTS[model] ?? {}) };
   }
 
@@ -479,6 +580,7 @@ export class FakePrisma {
         case 'update': {
           const r = found();
           if (!r) throw notFound();
+          guardClinicalChange(model, [r], a.data as Row);
           const next = { ...r, ...(a.data as Row) };
           this.checkUnique(model, next, r);
           Object.assign(r, a.data as Row, model === 'User' ? { updatedAt: new Date() } : {});
@@ -487,17 +589,20 @@ export class FakePrisma {
         case 'delete': {
           const r = found();
           if (!r) throw notFound();
+          guardClinicalChange(model, [r]);
           if (this.referenced(model, r)) throw fkViolation();
           rows.splice(rows.indexOf(r), 1);
           return Promise.resolve(shape(r));
         }
         case 'deleteMany': {
           const hit = rows.filter((r) => this.match(model, r, where));
+          guardClinicalChange(model, hit);
           for (const r of hit) rows.splice(rows.indexOf(r), 1);
           return Promise.resolve({ count: hit.length });
         }
         case 'updateMany': {
           const hit = rows.filter((r) => this.match(model, r, where));
+          guardClinicalChange(model, hit, a.data as Row);
           for (const r of hit) Object.assign(r, a.data as Row);
           return Promise.resolve({ count: hit.length });
         }

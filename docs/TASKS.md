@@ -128,13 +128,28 @@ run in CI with the rest of the suite once pushed (P1C-07).
 
 Carried forward (not phase gates): signed-in booking E2E journey once seed data exists (P14, T-E2E-001..004 journeys); existing bookings are not cancelled automatically when leave is added (shown in the UI; revisit if the owner wants automatic handling).
 
+## Phase 4 — Electronic medical records
+
+| Task ID | Req. | Task | Status | Tests |
+| --- | --- | --- | --- | --- |
+| P4-01 | EMR-001, API-018 | Start consultation creates the record (appointment CONFIRMED → IN_PROGRESS in one transaction); completing closes it | Review | T-EMR-HTTP, T-APPT-HTTP |
+| P4-02 | EMR-002, DEC-016 | Append-only notes and addenda; corrections as new rows with reason; closed records locked | Review | T-EMR-HTTP, T-EMR-INT-001 |
+| P4-03 | EMR-003 | Vitals (doctor or nurse) with range checks and BMI calculated on read | Review | T-EMR-HTTP, T-FE-022 |
+| P4-04 | EMR-004..006 | Chief complaint, symptoms, treatment plan; differential/confirmed diagnoses with ICD-10 search and a loader (`icd10:load`) | Review | T-EMR-HTTP, T-ICD-001 |
+| P4-05 | EMR-007..009, EMR-011 | Patient history: allergies and reactions, medications, vaccinations, family history; resolved / entered in error | Review | T-EMR-HTTP |
+| P4-06 | EMR-010, SEC-013 | Attachments ≤ 20 MB (PDF, PNG, JPEG, WebP by content), access-checked download | Review | T-EMR-HTTP |
+| P4-07 | SEC-014, EMR-012, DEC-024 | pgcrypto column encryption (two parameterised helpers), `EMR_ENCRYPTION_KEY` | Review | T-EMR-INT-001 |
+| P4-08 | API-019, TEST-011, FE | Access: doctors, nurses, own patient; read audit; screens: encounter start, record, chart, portal health record | Review | T-RBAC-001d, T-FE-022..025, T-E2E-004 |
+
+Open in Phase 4: macOS `pnpm test:int` (T-EMR-INT-001), Playwright, owner adds `EMR_ENCRYPTION_KEY` to `.env` and runs `icd10:load`. Signed-in encounter E2E awaits seed data (P14).
+
 ## Phases 2–14 (from the roadmap; detailed breakdown added when each phase starts)
 
 | Task ID | Req. | Task | Owner | Priority | Status |
 | --- | --- | --- | --- | --- | --- |
 | P2-01..06 | SCOPE-005/006, ROLE-001/002, API-013/014/015 | Hospital onboarding and verification; departments; staff; doctors (signature upload); patients (MRN); rooms and beds | BE, FE | Critical | Done (2026-11-16: VM unit, Mac integration 14/14, E2E 20/20) |
 | P3-01..08 | SCOPE-007..009, APPT-001..006, CACHE-002 | Weekly availability, exceptions, slots (60 s cache), booking with locks, status lifecycle, emergency, reminders 24 h/1 h, booking UI | BE, FE, QA | Critical | Done (see Phase 3 below) |
-| P4-01..08 | SCOPE-010/011, EMR-001..012, SEC-013/014 | Encounter record, vitals + BMI, diagnoses + ICD-10, histories, corrections UI, attachments, pgcrypto helpers, patient isolation test | BE, FE, QA | Critical | Not Started |
+| P4-01..08 | SCOPE-010/011, EMR-001..012, SEC-013/014 | Encounter record, vitals + BMI, diagnoses + ICD-10, histories, corrections UI, attachments, pgcrypto helpers, patient isolation test | BE, FE, QA | Critical | Review (see Phase 4 below; macOS checks pending) |
 | P5-01..05 | SCOPE-012, RX-001..008 | Prescriptions, medicine search, PDF with letterhead and signature, verification, ready-for-pickup | BE, FE | High | Not Started |
 | P6-01..06 | SCOPE-013, LAB-001..007 | Test catalogue and ranges, orders, sample collection, results, senior approval, amended orders, report PDF | BE, FE, QA | High | Not Started |
 | P7-01..06 | SCOPE-014, PHARM-001..006 | Medicines and batches, FIFO dispensing, quarantine, low-stock alerts, nightly expiry job, expired-dispense test | BE, FE, QA | High | Not Started |

@@ -45,11 +45,13 @@ docs            Requirements, roadmap, design system, checklists
 
 ```bash
 pnpm install
-cp .env.example .env        # then replace every placeholder (openssl rand -hex 32 for secrets)
+cp .env.example .env        # then replace every placeholder (openssl rand -hex 32 for secrets;
+                            # back up EMR_ENCRYPTION_KEY: encrypted clinical notes need it)
 pnpm infra:up               # PostgreSQL 16, Redis 7, Mailpit
 pnpm --filter @medcore/api prisma:generate
 pnpm --filter @medcore/api prisma:deploy        # apply committed migrations (never edits them)
 pnpm --filter @medcore/api create-super-admin   # optional: first platform administrator (prompts)
+pnpm --filter @medcore/api icd10:load           # ICD-10 codes for diagnoses (starter subset; safe to re-run)
 pnpm dev                    # API on :3001, web on :3000
 ```
 

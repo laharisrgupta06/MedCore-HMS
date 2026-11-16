@@ -23,6 +23,8 @@ import { HospitalsModule } from './modules/hospitals/hospitals.module';
 import { PatientsModule } from './modules/patients/patients.module';
 import { StaffModule } from './modules/staff/staff.module';
 import { SchedulingModule } from './modules/appointments/appointments.module';
+import { EmrModule } from './modules/emr/emr.module';
+import { StorageService } from './infra/storage/storage.service';
 import { createAuthTestApp, type AuthTestApp } from './testing/auth-test-app';
 
 type Cell = 'PUBLIC' | 'ALLOW' | 'OWN' | 'DENY';
@@ -66,6 +68,7 @@ describe('Permissions matrix (ROLE-011)', () => {
           PatientsModule,
           FacilitiesModule,
           SchedulingModule,
+          EmrModule,
         ],
         controllers: [HealthController, DevSmsInboxController],
         providers: [
@@ -195,7 +198,60 @@ describe('Permissions matrix (ROLE-011)', () => {
       });
     appts.set('own', appt(users.DOCTOR, users.PATIENT, 1));
     appts.set('peer', appt(peers.DOCTOR, peers.PATIENT, 2));
+    // Phase 4: one record per appointment above (own = users.DOCTOR treating users.PATIENT).
+    const storage = t.app.get(StorageService);
+    for (const key of ['own', 'peer'] as const) {
+      const a = t.prisma.rows('Appointment').find((r) => r.id === appts.get(key))!;
+      a.status = 'IN_PROGRESS';
+      const rec = push('MedicalRecord', {
+        appointmentId: a.id,
+        chiefComplaint: 'Matrix',
+        presentingSymptoms: null,
+        treatmentPlanEnc: null,
+        status: 'OPEN',
+        closedAt: null,
+      });
+      records.set(key, rec);
+      const storageKey = `${h.id}/records/${rec}/matrix-${key}.pdf`;
+      await storage.put(storageKey, Buffer.from('%PDF-1.4 matrix'));
+      files.set(
+        key,
+        push('FileAttachment', {
+          patientId: a.patientId,
+          medicalRecordId: rec,
+          purpose: 'MEDICAL_ATTACHMENT',
+          storageKey,
+          originalName: 'scan.pdf',
+          mimeType: 'application/pdf',
+          sizeBytes: 15,
+          sha256: '0'.repeat(64),
+          uploadedById: users.DOCTOR.id,
+        }),
+      );
+    }
+    for (const u of [users.PATIENT, peers.PATIENT])
+      allergyOf.set(
+        profile.get(u.id)!,
+        push('Allergy', {
+          patientId: profile.get(u.id)!,
+          kind: 'ALLERGY',
+          substance: 'Peanut',
+          reaction: null,
+          severity: null,
+          recordedById: users.DOCTOR.id,
+          recordedAt: new Date(),
+          supersedesId: null,
+          correctionReason: null,
+          status: 'ACTIVE',
+          statusReason: null,
+          statusChangedById: null,
+          statusChangedAt: null,
+        }),
+      );
   });
+  const records = new Map<string, string>();
+  const files = new Map<string, string>();
+  const allergyOf = new Map<string, string>();
   const sched = new Map<string, string>();
   const exc = new Map<string, string>();
   const appts = new Map<string, string>();
@@ -215,6 +271,12 @@ describe('Permissions matrix (ROLE-011)', () => {
     if (path.startsWith('/api/schedules/')) return pair(sched, true);
     if (path.startsWith('/api/exceptions/')) return pair(exc, true);
     if (path.startsWith('/api/appointments/')) return pair(appts, true);
+    if (path.startsWith('/api/medical-records/record/')) return pair(records, true);
+    if (path.startsWith('/api/files/')) return pair(files, true);
+    if (path.startsWith('/api/medical-records/:patientId')) {
+      const own = role === 'PATIENT' ? users.PATIENT.id : peers.PATIENT.id;
+      return [profile.get(own)!, profile.get(peers.PATIENT.id)!];
+    }
     if (path.startsWith('/api/doctors/')) {
       const own = role === 'DOCTOR' ? users.DOCTOR.id : peers.DOCTOR.id;
       return [
@@ -228,7 +290,11 @@ describe('Permissions matrix (ROLE-011)', () => {
     }
     return [admin ? peers.NURSE.id : users[role].id, peers[role].id];
   }
-  const fill = (path: string, id: string) => path.replace(/:(id|userId)\b/, id);
+  const fill = (path: string, id: string) =>
+    path
+      .replace(/:(id|userId|patientId)\b/, id)
+      .replace(':kind', 'allergies')
+      .replace(':entryId', allergyOf.get(id) ?? id);
   afterAll(() => t.app.close());
 
   it('is a complete, well-formed specification of every registered route', () => {
@@ -271,6 +337,23 @@ describe('Permissions matrix (ROLE-011)', () => {
       'POST /api/doctors/:id/exceptions': { date: '2030-01-02', type: 'LEAVE' },
       'PATCH /api/appointments/:id/status': { status: 'CANCELLED', reason: 'Matrix check' },
       'POST /api/appointments/:id/reschedule': { scheduledAt: '2030-01-07T03:30:00.000Z' },
+      'POST /api/medical-records': { appointmentId: appts.get('own'), chiefComplaint: 'Matrix' },
+      'PATCH /api/medical-records/record/:id': { chiefComplaint: 'Matrix check' },
+      'POST /api/medical-records/record/:id/entries': { body: 'Matrix note' },
+      'POST /api/medical-records/record/:id/vitals': { pulse: 80 },
+      'POST /api/medical-records/record/:id/diagnoses': {
+        description: 'Matrix',
+        type: 'DIFFERENTIAL',
+      },
+      'POST /api/patients/:patientId/allergies': { kind: 'ALLERGY', substance: 'Dust' },
+      'POST /api/patients/:patientId/medications': { medicineName: 'Matrix' },
+      'POST /api/patients/:patientId/vaccinations': {
+        vaccineName: 'Matrix',
+        administeredOn: '2020-01-01',
+        batchNumber: 'B1',
+      },
+      'POST /api/patients/:patientId/family-history': { condition: 'CARDIAC', present: true },
+      'PATCH /api/patients/:patientId/:kind/:entryId/status': { status: 'RESOLVED' },
     };
     return row.method === 'GET' ? r : r.send(BODIES[`${row.method} ${row.path}`] ?? {});
   };

@@ -11,7 +11,8 @@ import { AUDIT, SKIP_AUDIT, type AuditMeta } from './audit.decorators';
 const WRITES = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
 
 function entityIdOf(req: Request, result: unknown): string | null {
-  const param = (req.params as Record<string, string | undefined>)?.id;
+  const params = req.params as Record<string, string | undefined> | undefined;
+  const param = params?.id ?? params?.patientId;
   if (param) return param;
   const id = (result as { id?: unknown } | null)?.id;
   return typeof id === 'string' ? id : null;
@@ -41,13 +42,15 @@ export class AuditInterceptor implements NestInterceptor {
       mergeMap(async (result) => {
         const store = TenantContext.store();
         const crossTenant = store?.crossTenantAccess === true;
-        if (skip || (!isWrite && !crossTenant)) return result;
+        const readAudit = !isWrite && meta?.read === true;
+        if (skip || (!isWrite && !crossTenant && !readAudit)) return result;
         const route = (req.route as { path?: string } | undefined)?.path ?? req.path;
         const user = req.user;
         // Awaited so the entry exists before the client sees success.
         await this.audit.record({
           action:
-            meta?.action ?? (isWrite ? `http.${req.method.toLowerCase()}` : 'super_admin.read'),
+            (readAudit || isWrite ? meta?.action : undefined) ??
+            (isWrite ? `http.${req.method.toLowerCase()}` : 'super_admin.read'),
           entityType: meta?.entityType ?? ctx.getClass().name.replace(/Controller$/, ''),
           entityId: entityIdOf(req, result),
           actorId: user?.userId ?? null,

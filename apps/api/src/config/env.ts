@@ -17,6 +17,8 @@ export const envSchema = z
     REDIS_URL: z.string().regex(/^rediss?:\/\//, 'must be a redis:// or rediss:// URL'),
     JWT_ACCESS_SECRET: secret,
     JWT_REFRESH_SECRET: secret,
+    /** pgcrypto key for clinical text at rest (SEC-014, EMR-012). Losing it makes those values unreadable. */
+    EMR_ENCRYPTION_KEY: secret,
     CORS_ORIGINS: z
       .string()
       .min(1, 'must list at least one allowed origin')

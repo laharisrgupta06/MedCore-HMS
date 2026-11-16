@@ -1,3 +1,4 @@
+import { FIELD_CRYPTO } from '../infra/crypto/field-crypto';
 /** Builds the auth HTTP stack for unit tests with in-memory Prisma and Redis (no external services). */
 import { randomUUID } from 'node:crypto';
 import { INestApplication, Module } from '@nestjs/common';
@@ -9,7 +10,7 @@ import { ConfigModule, ConfigService } from '@nestjs/config';
 import { Test } from '@nestjs/testing';
 import RedisMock from 'ioredis-mock';
 import type { Redis } from 'ioredis';
-import { buildThrottlerOptions } from '../app.module';
+import { buildThrottlerOptions } from '../infra/throttler/throttler-options';
 import { configureApp } from '../app.setup';
 import { ThrottlerModule } from '@nestjs/throttler';
 import { AuthCoreModule } from '../common/auth/auth-core.module';
@@ -35,6 +36,7 @@ export const TEST_ENV = {
   REDIS_URL: 'redis://localhost:6379',
   JWT_ACCESS_SECRET: 'a'.repeat(64),
   JWT_REFRESH_SECRET: 'b'.repeat(64),
+  EMR_ENCRYPTION_KEY: 'e'.repeat(64),
   CORS_ORIGINS: 'http://localhost:3000',
   FILE_STORAGE_DIR: join(tmpdir(), 'medcore-test-storage'),
 };
@@ -73,6 +75,20 @@ export async function createAuthTestApp(
       provide: SMS_ADAPTER,
       useValue: { send: (m: SmsMessage) => (sms.push(m), Promise.resolve()) },
     },
+    // Reversible stand-in for pgcrypto: ciphertext never equals the plain text (real cipher: T-EMR-INT).
+    {
+      provide: FIELD_CRYPTO,
+      useValue: {
+        encrypt: (v: readonly string[]) =>
+          Promise.resolve(
+            v.map((t) => new Uint8Array(Buffer.from(`enc:${Buffer.from(t).toString('base64')}`))),
+          ),
+        decrypt: (v: readonly Uint8Array[]) =>
+          Promise.resolve(
+            v.map((b) => Buffer.from(Buffer.from(b).toString().slice(4), 'base64').toString()),
+          ),
+      },
+    },
     {
       provide: REMINDER_SCHEDULER,
       useValue: {
@@ -90,7 +106,7 @@ export async function createAuthTestApp(
         module: TestInfraModule,
         global: true,
         providers: infra,
-        exports: [REDIS_CLIENT, MAIL_ADAPTER, SMS_ADAPTER, REMINDER_SCHEDULER],
+        exports: [REDIS_CLIENT, MAIL_ADAPTER, SMS_ADAPTER, REMINDER_SCHEDULER, FIELD_CRYPTO],
       },
       ConfigModule.forRoot({
         isGlobal: true,

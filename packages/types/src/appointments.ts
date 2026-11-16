@@ -80,6 +80,8 @@ export interface Appointment {
   doctor: { id: string; firstName: string; lastName: string; specialisation: string };
   patient: { id: string; firstName: string; lastName: string; mrn: string };
   department: { id: string; name: string };
+  /** Set once the doctor has started the consultation (EMR-001). */
+  medicalRecordId: string | null;
   createdAt: string;
 }
 

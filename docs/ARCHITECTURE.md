@@ -135,6 +135,10 @@ guard and map to 409. Reminders: `@Global RemindersModule` with queue `appointme
 `@medcore/types` `appointments.ts`. Web: `components/appointments/*` (slot picker, booking form,
 staff agenda, availability, patient portal), all times shown in the hospital time zone (DEC-038).
 
+## 6c. Medical records (Phase 4)
+
+`modules/emr`: `EmrService` behind `MedicalRecordsController` (`/medical-records`, `/medical-records/record/:id[/entries|vitals|diagnoses|files]`, `/medical-records/:patientId`), `ClinicalFilesController` (`/files/:id`), `PatientHistoryController` (`/patients/:patientId/history|allergies|medications|vaccinations|family-history`, status changes) and `Icd10Controller`. Encryption: `infra/crypto/field-crypto.ts` (`FIELD_CRYPTO`), two parameterised pgcrypto queries that batch a request's values into one round trip. Reads of clinical routes are audited with `@AuditRead`. Web: `components/emr/*` (encounter start, record view, history panel, chart) on `/dashboard/encounters/:appointmentId`, `/dashboard/records/:id`, `/dashboard/patients/:id`, `/portal/health`, `/portal/records/:id` (DEC-039).
+
 ## 7. Tenant isolation
 
 Row-per-tenant (shared schema) with three layers (TEN-001..005, DEC-018):

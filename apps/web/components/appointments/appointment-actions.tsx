@@ -8,6 +8,7 @@ import {
   type Slot,
 } from '@medcore/types';
 import { useQueryClient } from '@tanstack/react-query';
+import Link from 'next/link';
 import { useState } from 'react';
 import { Alert } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
@@ -19,6 +20,9 @@ import { fmtDate, fmtTime, localDate } from '@/lib/time';
 import { appointmentsApi } from '@/services/appointments';
 import { useAuth } from '@/store/auth';
 import { SlotPicker } from './slot-picker';
+
+const linkButton =
+  'inline-flex h-8 items-center rounded-md bg-sage-600 px-3 text-body-sm font-medium text-white hover:bg-sage-700 max-sm:h-11';
 
 const LABEL: Partial<Record<AppointmentStatus, string>> = {
   CONFIRMED: 'Confirm',
@@ -91,8 +95,26 @@ export function AppointmentActions({ appt, tz }: { appt: Appointment; tz: string
   };
   return (
     <div className="flex flex-wrap justify-end gap-2">
+      {actions.includes('IN_PROGRESS') && (
+        // EMR-001: the consultation starts on the encounter screen, which creates the record.
+        <Link href={`/dashboard/encounters/${appt.id}`} className={linkButton}>
+          Start consultation
+        </Link>
+      )}
+      {appt.medicalRecordId && (role === 'DOCTOR' || role === 'NURSE' || role === 'PATIENT') && (
+        <Link
+          href={
+            role === 'PATIENT'
+              ? `/portal/records/${appt.medicalRecordId}`
+              : `/dashboard/records/${appt.medicalRecordId}`
+          }
+          className={linkButton}
+        >
+          {role === 'PATIENT' ? 'View record' : 'Open record'}
+        </Link>
+      )}
       {actions
-        .filter((s) => s !== 'CANCELLED')
+        .filter((s) => s !== 'CANCELLED' && s !== 'IN_PROGRESS')
         .map((s) => (
           <Button
             key={s}

@@ -17,7 +17,8 @@
     "prisma:deploy": "node --env-file-if-exists=../../.env ./node_modules/prisma/build/index.js migrate deploy",
     "create-super-admin": "nest build && node --env-file-if-exists=../../.env dist/cli/create-super-admin.js",
     "prisma:preview-sql": "node --env-file-if-exists=../../.env ./node_modules/prisma/build/index.js migrate diff --from-empty --to-schema-datamodel prisma/schema.prisma --script",
-    "prisma:drift": "node --env-file-if-exists=../../.env scripts/prisma-drift.mjs"
+    "prisma:drift": "node --env-file-if-exists=../../.env scripts/prisma-drift.mjs",
+    "icd10:load": "nest build && node --env-file-if-exists=../../.env dist/cli/load-icd10.js"
   },
   "dependencies": {
     "@medcore/types": "workspace:*",

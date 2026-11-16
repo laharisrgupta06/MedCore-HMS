@@ -4,6 +4,7 @@ import type { Hospital, User } from '@prisma/client';
 import request from 'supertest';
 import { zonedToUtc } from '../../common/time/zoned';
 import { createAuthTestApp, type AuthTestApp } from '../../testing/auth-test-app';
+import { EmrModule } from '../emr/emr.module';
 import { SchedulingModule } from './appointments.module';
 
 const CSRF = 'a'.repeat(43);
@@ -38,7 +39,7 @@ describe('Phase 3: availability and appointments (in-memory Prisma)', () => {
   const monday = nextMonday();
 
   beforeEach(async () => {
-    t = await createAuthTestApp({}, { modules: [SchedulingModule] });
+    t = await createAuthTestApp({}, { modules: [SchedulingModule, EmrModule] });
     app = t.app;
     h = t.prisma.addHospital({ timezone: TZ, defaultSlotMinutes: 20 });
     const push = (model: string, row: Record<string, unknown>) => {
@@ -352,11 +353,26 @@ describe('Phase 3: availability and appointments (in-memory Prisma)', () => {
       )
         .patch(`/api/appointments/${apptId}/status`, { status: 'IN_PROGRESS' })
         .expect(404);
-      await doc.patch(`/api/appointments/${apptId}/status`, { status: 'IN_PROGRESS' }).expect(200);
+      // Phase 4 (EMR-001): the consultation starts through the encounter, which creates the record.
       expect(
-        (await doc.patch(`/api/appointments/${apptId}/status`, { status: 'COMPLETED' }).expect(200))
-          .body.data.status,
-      ).toBe('COMPLETED');
+        (
+          await doc
+            .patch(`/api/appointments/${apptId}/status`, { status: 'IN_PROGRESS' })
+            .expect(400)
+        ).body.error.code,
+      ).toBe('START_FROM_ENCOUNTER');
+      const rec0 = await doc
+        .post('/api/medical-records', { appointmentId: apptId, chiefComplaint: 'Cough' })
+        .expect(201);
+      expect(rec0.body.data.appointment.status).toBe('IN_PROGRESS');
+      const done = await doc
+        .patch(`/api/appointments/${apptId}/status`, { status: 'COMPLETED' })
+        .expect(200);
+      expect(done.body.data).toMatchObject({
+        status: 'COMPLETED',
+        medicalRecordId: rec0.body.data.id,
+      });
+      expect(t.prisma.rows('MedicalRecord')[0]).toMatchObject({ status: 'CLOSED' });
       await rec
         .patch(`/api/appointments/${apptId}/status`, { status: 'CANCELLED', reason: 'x' })
         .expect(400);

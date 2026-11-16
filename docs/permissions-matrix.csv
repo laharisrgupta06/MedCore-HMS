@@ -67,3 +67,19 @@ GET,/api/appointments,DENY,ALLOW,ALLOW,ALLOW,ALLOW,DENY,DENY,ALLOW,ALLOW,Patient
 GET,/api/appointments/:id,DENY,ALLOW,OWN,ALLOW,ALLOW,DENY,DENY,ALLOW,OWN,
 PATCH,/api/appointments/:id/status,DENY,ALLOW,OWN,DENY,ALLOW,DENY,DENY,DENY,OWN,API-017; patient: cancel only
 POST,/api/appointments/:id/reschedule,DENY,DENY,DENY,DENY,ALLOW,DENY,DENY,DENY,OWN,
+POST,/api/medical-records,DENY,DENY,ALLOW,DENY,DENY,DENY,DENY,DENY,DENY,API-018; start consultation (EMR-001)
+GET,/api/medical-records/record/:id,DENY,DENY,ALLOW,ALLOW,DENY,DENY,DENY,DENY,OWN,View is audited
+PATCH,/api/medical-records/record/:id,DENY,DENY,OWN,DENY,DENY,DENY,DENY,DENY,DENY,Treating doctor; open records only
+POST,/api/medical-records/record/:id/entries,DENY,DENY,OWN,DENY,DENY,DENY,DENY,DENY,DENY,Notes, addenda, corrections (EMR-002)
+POST,/api/medical-records/record/:id/vitals,DENY,DENY,OWN,ALLOW,DENY,DENY,DENY,DENY,DENY,EMR-003
+POST,/api/medical-records/record/:id/diagnoses,DENY,DENY,OWN,DENY,DENY,DENY,DENY,DENY,DENY,EMR-005
+POST,/api/medical-records/record/:id/files,DENY,DENY,OWN,ALLOW,DENY,DENY,DENY,DENY,DENY,EMR-010; 20 MB
+GET,/api/medical-records/:patientId,DENY,DENY,ALLOW,ALLOW,DENY,DENY,DENY,DENY,OWN,API-019; view is audited
+GET,/api/files/:id,DENY,DENY,ALLOW,ALLOW,DENY,DENY,DENY,DENY,OWN,Record attachments
+GET,/api/patients/:patientId/history,DENY,DENY,ALLOW,ALLOW,DENY,DENY,DENY,DENY,OWN,EMR-007..009, EMR-011
+POST,/api/patients/:patientId/allergies,DENY,DENY,ALLOW,ALLOW,DENY,DENY,DENY,DENY,DENY,EMR-007
+POST,/api/patients/:patientId/medications,DENY,DENY,ALLOW,ALLOW,DENY,DENY,DENY,DENY,DENY,EMR-011
+POST,/api/patients/:patientId/vaccinations,DENY,DENY,ALLOW,ALLOW,DENY,DENY,DENY,DENY,DENY,EMR-008
+POST,/api/patients/:patientId/family-history,DENY,DENY,ALLOW,ALLOW,DENY,DENY,DENY,DENY,DENY,EMR-009
+PATCH,/api/patients/:patientId/:kind/:entryId/status,DENY,DENY,ALLOW,ALLOW,DENY,DENY,DENY,DENY,DENY,Resolved or entered in error
+GET,/api/icd10,DENY,DENY,ALLOW,ALLOW,DENY,DENY,DENY,DENY,DENY,EMR-005 code search

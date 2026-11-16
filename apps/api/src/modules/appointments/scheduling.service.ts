@@ -73,6 +73,7 @@ const include = {
   doctor: { include: { user: true } },
   patient: { include: { user: true } },
   department: true,
+  medicalRecord: { select: { id: true } },
 } as const;
 type Row = Prisma.AppointmentGetPayload<{ include: typeof include }>;
 
@@ -97,6 +98,7 @@ export const toAppointment = (a: Row): AppointmentView => ({
     mrn: a.patient.mrn,
   },
   department: { id: a.department.id, name: a.department.name },
+  medicalRecordId: a.medicalRecord?.id ?? null,
   createdAt: a.createdAt.toISOString(),
 });
 
@@ -642,12 +644,26 @@ export class SchedulingService {
       );
     if (dto.status === 'CANCELLED' && !dto.reason)
       throw bad('VALIDATION_ERROR', 'Give a reason for the cancellation.');
-    await this.db.client.appointment.update({
-      where: { id },
-      data: {
-        status: dto.status,
-        ...(dto.status === 'CANCELLED' ? { cancellationReason: dto.reason } : {}),
-      },
+    // EMR-001: the consultation starts through POST /medical-records, which creates the record.
+    if (dto.status === 'IN_PROGRESS')
+      throw bad(
+        'START_FROM_ENCOUNTER',
+        'Start the consultation from the encounter screen so its medical record is created.',
+      );
+    await this.db.client.$transaction(async (tx) => {
+      await tx.appointment.update({
+        where: { id },
+        data: {
+          status: dto.status,
+          ...(dto.status === 'CANCELLED' ? { cancellationReason: dto.reason } : {}),
+        },
+      });
+      // Completing the consultation closes its record; later changes are addenda (EMR-002).
+      if (dto.status === 'COMPLETED' && current.medicalRecordId)
+        await tx.medicalRecord.update({
+          where: { id: current.medicalRecordId },
+          data: { status: 'CLOSED', closedAt: new Date() },
+        });
     });
     if (dto.status === 'CANCELLED' || dto.status === 'NO_SHOW') {
       await this.reminders.cancel(id);
