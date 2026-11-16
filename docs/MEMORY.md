@@ -25,7 +25,7 @@ Claude (main session acting as Team Lead).
 
 - Repo: `github.com/laharisrgupta06/MedCore-HMS`. **Nothing pushed**; `origin/main` = `2e1ed21`.
 - Current branch `feat/phase-0-scaffold` (also contains Phase 1A work). Other local branches: `main`, `chore/housekeeping` (`88234ee`).
-- Commits: `4a780d2` source docs · `88234ee` checklist · `ab76eda` Phase 0 · `5571fe2` types build fix · `14abf1e` Mac verification · `8576b24` schema draft · `e487298` schema revision 2 · (next) documentation system.
+- Commits: `4a780d2` source docs · `88234ee` checklist · `ab76eda` Phase 0 · `5571fe2` types build fix · `14abf1e` Mac verification · `8576b24` schema draft · `e487298` schema revision 2 · `e6d567a` documentation system.
 - Untracked, owner's file: `Claude outputs/schema-revision-2.diff` (leave alone).
 - Commit identity used: "Lahari Gupta" with the repository's existing author email; the build VM needs delete permission so git can remove its lock files.
 
