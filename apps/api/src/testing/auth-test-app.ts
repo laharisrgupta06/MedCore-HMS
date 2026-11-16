@@ -1,0 +1,111 @@
+/** Builds the auth HTTP stack for unit tests with in-memory Prisma and Redis (no external services). */
+import { INestApplication, Module } from '@nestjs/common';
+import { ConfigModule, ConfigService } from '@nestjs/config';
+import { APP_GUARD } from '@nestjs/core';
+import { Test } from '@nestjs/testing';
+import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
+import RedisMock from 'ioredis-mock';
+import type { Redis } from 'ioredis';
+import { buildThrottlerOptions } from '../app.module';
+import { configureApp } from '../app.setup';
+import { AuthCoreModule } from '../common/auth/auth-core.module';
+import { CsrfGuard } from '../common/auth/csrf.guard';
+import { JwtAuthGuard } from '../common/auth/jwt-auth.guard';
+import { RolesGuard } from '../common/auth/roles.guard';
+import { validateEnv } from '../config/env';
+import type { EmailMessage, SmsMessage } from '../infra/messaging/messaging.types';
+import { MAIL_ADAPTER, SMS_ADAPTER } from '../infra/messaging/messaging.types';
+import { PrismaModule } from '../infra/prisma/prisma.module';
+import { PrismaService } from '../infra/prisma/prisma.service';
+import { REDIS_CLIENT } from '../infra/redis/redis.constants';
+import { AuditModule } from '../modules/audit/audit.module';
+import { AuthModule } from '../modules/auth/auth.module';
+import { FakePrisma } from './fake-prisma';
+
+export const TEST_ENV = {
+  NODE_ENV: 'test',
+  DATABASE_URL: 'postgresql://test@localhost:5432/test',
+  REDIS_URL: 'redis://localhost:6379',
+  JWT_ACCESS_SECRET: 'a'.repeat(64),
+  JWT_REFRESH_SECRET: 'b'.repeat(64),
+  CORS_ORIGINS: 'http://localhost:3000',
+};
+
+export interface AuthTestApp {
+  app: INestApplication;
+  prisma: FakePrisma;
+  redis: Redis;
+  emails: EmailMessage[];
+  sms: SmsMessage[];
+}
+
+@Module({})
+class TestInfraModule {}
+
+export async function createAuthTestApp(
+  env: Record<string, string> = {},
+  extra: { controllers?: unknown[] } = {},
+): Promise<AuthTestApp> {
+  const prisma = new FakePrisma();
+  const redis = new RedisMock() as unknown as Redis;
+  await redis.flushall();
+  const emails: EmailMessage[] = [];
+  const sms: SmsMessage[] = [];
+  const infra = [
+    { provide: REDIS_CLIENT, useValue: redis },
+    {
+      provide: MAIL_ADAPTER,
+      useValue: { send: (m: EmailMessage) => (emails.push(m), Promise.resolve()) },
+    },
+    {
+      provide: SMS_ADAPTER,
+      useValue: { send: (m: SmsMessage) => (sms.push(m), Promise.resolve()) },
+    },
+  ];
+  const mod = await Test.createTestingModule({
+    imports: [
+      {
+        module: TestInfraModule,
+        global: true,
+        providers: infra,
+        exports: [REDIS_CLIENT, MAIL_ADAPTER, SMS_ADAPTER],
+      },
+      ConfigModule.forRoot({
+        isGlobal: true,
+        ignoreEnvFile: true,
+        ignoreEnvVars: true,
+        validate: () => validateEnv({ ...TEST_ENV, ...env }),
+      }),
+      PrismaModule,
+      ThrottlerModule.forRootAsync({
+        inject: [ConfigService, REDIS_CLIENT],
+        useFactory: buildThrottlerOptions,
+      }),
+      AuditModule,
+      AuthCoreModule,
+      AuthModule,
+    ],
+    controllers: (extra.controllers ?? []) as never[],
+    providers: [
+      { provide: APP_GUARD, useClass: ThrottlerGuard },
+      { provide: APP_GUARD, useExisting: CsrfGuard },
+      { provide: APP_GUARD, useExisting: JwtAuthGuard },
+      { provide: APP_GUARD, useExisting: RolesGuard },
+    ],
+  })
+    .overrideProvider(PrismaService)
+    .useValue(prisma)
+    .compile();
+  const app = mod.createNestApplication();
+  configureApp(app, { corsOrigins: ['http://localhost:3000'], enableSwagger: false });
+  await app.init();
+  return { app, prisma, redis, emails, sms };
+}
+
+/** Extracts the 6-digit code from the most recent message, as a person reading Mailpit would. */
+export function lastCode(messages: { text?: string; body?: string }[]): string {
+  const m = messages.at(-1);
+  const code = /\b(\d{6})\b/.exec(m?.text ?? m?.body ?? '')?.[1];
+  if (!code) throw new Error('No code found in the last message');
+  return code;
+}

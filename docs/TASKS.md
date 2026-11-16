@@ -12,8 +12,8 @@ passed** (environment recorded in [TEST_PLAN.md](TEST_PLAN.md)). Phases follow
 | --- | --- | --- | --- | --- |
 | 0 | Foundation | 16 | 13 | **Done** except CI run on GitHub (P0-14) and two browser checks (P0-15, P0-16) |
 | 1A | Database schema | 7 | 2 | **Review**: awaiting "approve schema", then migration on macOS |
-| 1B | Authentication | 12 | 0 | Not Started (blocked by 1A) |
-| 1C | RBAC and tenancy | 7 | 0 | Not Started |
+| 1B | Authentication | 12 | 0 | **Review**: P1B-01..11 implemented, 81 unit tests pass (VM); database integration test waits for the migration (P1A-04). P1B-12 not started |
+| 1C | RBAC and tenancy | 7 | 0 | In Progress: P1C-01 guards implemented (Review) |
 | 1D | Auth frontend | 6 | 0 | Blocked: design approval |
 | 2–14 | Remaining modules, hardening, deployment | 75 | 0 | Not Started |
 
@@ -54,24 +54,28 @@ passed** (environment recorded in [TEST_PLAN.md](TEST_PLAN.md)). Phases follow
 
 | Task ID | Req. | Task | Owner | Deps | Priority | Status | Tests |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| P1B-01 | AUTH-001, DEC-010, DEC-012 | Register with hospital code, password policy | BE | P1A-04 | Critical | Not Started | T-AUTH-002 |
-| P1B-02 | AUTH-006, DEC-011 | Email OTP (hashed in Redis, TTL, attempts) delivered to Mailpit | BE | P1B-01 | Critical | Not Started | T-AUTH-003 |
-| P1B-03 | AUTH-007, DEC-011 | Phone OTP via dev-only SMS inbox adapter (Twilio adapter for production) | BE | P1B-01 | High | Not Started | T-AUTH-004 |
-| P1B-04 | AUTH-002, AUTH-011 | Login: bcrypt 12, access JWT 15 min, refresh cookie 7 days | BE | P1B-01 | Critical | Not Started | T-AUTH-005 |
-| P1B-05 | AUTH-003, AUTH-010, SEC-004 | Refresh rotation with reuse detection | BE | P1B-04 | Critical | Not Started | T-AUTH-001 |
-| P1B-06 | AUTH-008 | Logout one device / all devices | BE | P1B-05 | High | Not Started | T-AUTH-006 |
-| P1B-07 | AUTH-004/005 | Forgot and reset password (single-use, revokes sessions) | BE | P1B-04 | High | Not Started | T-AUTH-007 |
-| P1B-08 | AUTH-009 | `GET /auth/me` with role permissions | BE | P1B-04 | High | Not Started | T-AUTH-008 |
-| P1B-09 | SEC-005 | Auth rate limit 100 / 15 min per IP | BE | P1B-04 | High | Not Started | T-AUTH-009 |
-| P1B-10 | SEC-010 | CSRF token for state-changing requests | BE | P1B-04 | High | Not Started | T-AUTH-010 |
-| P1B-11 | DEC-013 | `create-super-admin` CLI | BE | P1A-04 | High | Not Started | T-AUTH-011 |
+| P1B-01 | AUTH-001, DEC-010, DEC-012 | Register with hospital code, password policy | BE | P1A-04 | Critical | Review | T-AUTH-002 |
+| P1B-02 | AUTH-006, DEC-011 | Email OTP (hashed in Redis, TTL, attempts) delivered to Mailpit | BE | P1B-01 | Critical | Review | T-AUTH-003 |
+| P1B-03 | AUTH-007, DEC-011 | Phone OTP via dev-only SMS inbox adapter (Twilio adapter for production) | BE | P1B-01 | High | Review | T-AUTH-004 |
+| P1B-04 | AUTH-002, AUTH-011 | Login: bcrypt 12, access JWT 15 min, refresh cookie 7 days | BE | P1B-01 | Critical | Review | T-AUTH-005 |
+| P1B-05 | AUTH-003, AUTH-010, SEC-004 | Refresh rotation with reuse detection | BE | P1B-04 | Critical | Review | T-AUTH-001 |
+| P1B-06 | AUTH-008 | Logout one device / all devices | BE | P1B-05 | High | Review | T-AUTH-006 |
+| P1B-07 | AUTH-004/005 | Forgot and reset password (single-use, revokes sessions) | BE | P1B-04 | High | Review | T-AUTH-007 |
+| P1B-08 | AUTH-009 | `GET /auth/me` with role permissions | BE | P1B-04 | High | Review | T-AUTH-008 |
+| P1B-09 | SEC-005 | Auth rate limit 100 / 15 min per IP | BE | P1B-04 | High | Review | T-AUTH-009 |
+| P1B-10 | SEC-010 | CSRF token for state-changing requests | BE | P1B-04 | High | Review | T-AUTH-010 |
+| P1B-11 | DEC-013 | `create-super-admin` CLI | BE | P1A-04 | High | Review | T-AUTH-011 |
 | P1B-12 | API-012 | `GET/PATCH/DELETE /users/:id`, `GET /users` | BE | P1C-02 | Medium | Not Started | T-RBAC-001 |
+
+Phase 1B notes (branch `feat/phase-1-auth`): "Review" = implemented and unit/HTTP-tested in the VM with
+in-memory Prisma and Redis; not Done until `test/auth.int-spec.ts` (T-AUTH-INT-001) passes on macOS against
+PostgreSQL, Redis and Mailpit, which needs the initial migration. Endpoint additions: DEC-028.
 
 ## Phase 1C — RBAC, tenancy, audit
 
 | Task ID | Req. | Task | Owner | Deps | Priority | Status | Tests |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| P1C-01 | ROLE-010 | JWT guard, `@Public()`, `@Roles()` guard, `@CurrentUser()` | BE | P1B-04 | Critical | Not Started | T-RBAC-001 |
+| P1C-01 | ROLE-010 | JWT guard, `@Public()`, `@Roles()` guard, `@CurrentUser()` | BE | P1B-04 | Critical | Review | T-RBAC-001 |
 | P1C-02 | TEN-003/004 | Tenant context + Prisma extension; audited Super Admin client | BE | P1C-01 | Critical | Not Started | T-TEN-001 |
 | P1C-03 | ROLE-011 | `docs/permissions-matrix.csv` and generated matrix test | QA | P1C-01 | Critical | Not Started | T-RBAC-001 |
 | P1C-04 | TEST-010, TEST-016 | Route-level tenancy isolation suite as required CI check | QA | P1C-02 | Critical | Not Started | T-TEN-001 |

@@ -53,4 +53,35 @@ describe('validateEnv', () => {
   it('rejects an empty CORS allow-list', () => {
     expect(() => validateEnv({ ...valid, CORS_ORIGINS: '' })).toThrow(/CORS_ORIGINS/);
   });
+
+  it('refuses the local mail and SMS adapters in production (DEC-011)', () => {
+    expect(() => validateEnv({ ...valid, NODE_ENV: 'production' })).toThrow(
+      /SMS_PROVIDER: dev-inbox/,
+    );
+    expect(() => validateEnv({ ...valid, NODE_ENV: 'production' })).toThrow(/SMTP_HOST/);
+    expect(() =>
+      validateEnv({
+        ...valid,
+        NODE_ENV: 'production',
+        SMS_PROVIDER: 'twilio',
+        SMTP_HOST: 'smtp.example.com',
+      }),
+    ).toThrow(/TWILIO_ACCOUNT_SID: is required/);
+    const prod = validateEnv({
+      ...valid,
+      NODE_ENV: 'production',
+      SMTP_HOST: 'smtp.example.com',
+      SMS_PROVIDER: 'twilio',
+      TWILIO_ACCOUNT_SID: 'AC1',
+      TWILIO_AUTH_TOKEN: 't',
+      TWILIO_FROM_NUMBER: '+10000000000',
+    });
+    expect(prod.SMS_PROVIDER).toBe('twilio');
+  });
+
+  it('defaults the auth rate limit to 100 requests per 15 minutes (SEC-005)', () => {
+    const env = validateEnv(valid);
+    expect(env.AUTH_THROTTLE_LIMIT).toBe(100);
+    expect(env.AUTH_THROTTLE_TTL_MS).toBe(900_000);
+  });
 });

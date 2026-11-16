@@ -8,28 +8,28 @@ passes; environment stated) · **Planned**. No regulatory compliance or certific
 
 | Control | Requirement | Implemented | Tested | Notes |
 | --- | --- | --- | --- | --- |
-| Password hashing | SEC-001, AUTH-011: bcrypt cost ≥ 12 | Planned (1B) | — | |
-| Password policy | DEC-012 | Planned (1B) | — | 10–128 chars, letter + number, ≠ email |
+| Password hashing | SEC-001, AUTH-011: bcrypt cost ≥ 12 | **Yes**: bcrypt cost 12 (`bcryptjs`, DEC-026); dummy-hash comparison for unknown emails | **Yes** (VM T-AUTH-002) | |
+| Password policy | DEC-012 | **Yes**: DTO + shared `checkPassword` (register, reset, CLI) | **Yes** (VM T-AUTH-002/007/011) | 10–128 chars, letter + number, ≠ email |
 | JWT secrets | SEC-003: ≥ 256-bit, env only | **Yes**: startup rejects < 32 chars, placeholders, equal secrets | **Yes** (VM unit tests T-ENV-*) | Local `.env` has random 64-hex secrets |
-| Access/refresh tokens, rotation, reuse detection | AUTH-002/003/010, SEC-004 | Planned (1B) | — | Redis `rt:{userId}:{deviceId}` |
-| Email and phone verification | AUTH-006/007, DEC-011 | Planned (1B) | — | OTP hashed in Redis, TTL, attempt limit, never logged |
-| Logout one device / all | AUTH-008/010 | Planned (1B) | — | |
-| RBAC (9 roles) | ROLE-010/011, SCOPE-004 | Planned (1C) | — | `@Roles()`, permissions matrix |
+| Access/refresh tokens, rotation, reuse detection | AUTH-002/003/010, SEC-004 | **Yes**: HS256, separate secrets, `typ` claim; Redis `rt:{userId}:{sessionId}` with atomic Lua compare-and-set; reuse revokes all sessions | **Yes** (VM T-AUTH-001/006/012) | Access token also requires a live session, so revocation is immediate |
+| Email and phone verification | AUTH-006/007, DEC-011 | **Yes**: 6-digit OTP, HMAC stored in Redis, 10 min TTL, 5 attempts, 60 s resend cooldown; never logged or returned | **Yes** (VM T-AUTH-003/004) | Email via Mailpit locally; SMS via dev inbox locally |
+| Logout one device / all | AUTH-008/010 | **Yes** | **Yes** (VM T-AUTH-006) | |
+| RBAC (9 roles) | ROLE-010/011, SCOPE-004 | **Partly**: global `@Roles()` guard; permission list per role in `@medcore/types` | **Yes** guard (VM T-RBAC-000) | Permissions matrix test in 1C |
 | Role ↔ profile consistency | DEC-017 | In `constraints.sql` (not migrated) | — | Deferred trigger, all nine roles |
 | Tenant isolation (database) | TEN-002/003, DEC-018 | In schema (not migrated) | **Yes** structure guard (VM: T-DB-001..004) | 85 composite FKs + 3 SQL FKs |
 | Tenant isolation (requests) | TEN-003, TEST-010, TEST-016 | Planned (1C) | — | `hospitalId` from token only; Prisma extension; 404 for other tenants |
 | Super Admin cross-tenant access | TEN-004 | Planned (1C) | — | Separate audited client |
-| CSRF | SEC-010 | Planned (1B) | — | SameSite=Strict + CSRF token |
-| Secure cookies | AUTH-002, SEC-010 | `cookie-parser` installed; cookies planned (1B) | — | httpOnly, Secure in production, SameSite=Strict |
+| CSRF | SEC-010 | **Yes**: SameSite=Strict + double-submit token on every POST/PUT/PATCH/DELETE; rotated at login/refresh | **Yes** (VM T-AUTH-010) | |
+| Secure cookies | AUTH-002, SEC-010 | **Yes**: refresh cookie httpOnly, SameSite=Strict, Path=/api/auth, Secure in production | **Yes** (VM T-AUTH-005) | |
 | CORS | SEC-006 | **Yes** (allow-list from env, credentials) | **Yes** (VM T-API-008) | Same-origin proxy (DEC-004) |
 | Security headers | SEC-007 | **Yes** (Helmet; CSP relaxed only on `/api/docs`; `x-powered-by` off) | **Yes** (VM T-API-007) | |
-| Rate limiting | SEC-005, CACHE-003 | **Partly**: global 1000/min, Redis-backed, atomic | **Yes** (VM unit; macOS integration T-INT-002) | Auth limit 100/15 min planned (1B) |
+| Rate limiting | SEC-005, CACHE-003 | **Yes**: global 1000/min and auth 100/15 min per IP, Redis-backed | **Yes** (VM unit T-AUTH-009; macOS T-INT-002) | |
 | Input validation | SEC-011 | **Yes** backend (whitelist, forbid unknown, field errors); Zod web forms planned | **Yes** (VM T-API-004, T-VAL-*) | |
 | SQL injection | SEC-008 | **Yes**: Prisma only; one tagged-template health probe | Structural | pgcrypto helpers approved (DEC-024) |
 | XSS | SEC-009 | Planned (DOMPurify where user HTML renders) | — | React escapes by default |
 | Error handling | API-003 | **Yes**: 5xx never leak internals | **Yes** (VM T-API-006, T-ERR-*) | |
 | Log sanitisation | AUTH-012 | **Yes** (`AppLogger` + `sanitize`) | **Yes** (VM T-LOG-*) | |
-| Audit logging | SEC-012, DB-013 | Table + append-only trigger in schema; interceptor planned (1C) | — | |
+| Audit logging | SEC-012, DB-013 | **Partly**: auth events (register, verify, login, failed login, refresh reuse, logout, reset) written with IP and user agent; write interceptor in 1C | **Yes** (VM, in-memory) | |
 | Encryption at rest | SEC-014, EMR-012 | `*Enc` bytea columns + pgcrypto extension in schema; helpers planned (Phase 4) | — | Key from env, rotation script planned |
 | Encryption in transit | SEC-002 | Planned (Nginx TLS, Phase 14) | — | Local dev is HTTP on localhost |
 | File uploads | SEC-013, EMR-010 | 20 MB CHECK in schema; validation planned (Phase 4) | — | MIME + extension + magic bytes; reject executables |
@@ -50,4 +50,6 @@ passes; environment stated) · **Planned**. No regulatory compliance or certific
 | R-04 | Encryption key management for pgcrypto not yet designed in detail | Phase 4: env key, rotation script, documented |
 | R-05 | Twilio trial and Indian SMS (DLT) restrictions for real SMS | Local SMS inbox in development (DEC-011); document limits |
 | R-06 | ESLint 9 is marked deprecated upstream | Revisit after Phase 1; no security impact today |
+| R-08 | Account enumeration: register returns 409 EMAIL_IN_USE (standard sign-up behaviour); login, resend and forgot-password answer generically | Auth rate limit; accepted trade-off, revisit if required |
+| R-09 | Auth flows verified only against in-memory Prisma/Redis so far | T-AUTH-INT-001 on macOS after the migration |
 | R-07 | CI workflow has never run on GitHub (nothing pushed) | Push only with owner approval; then verify CI |

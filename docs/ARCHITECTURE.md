@@ -91,13 +91,24 @@ sequenceDiagram
 - Error codes: `VALIDATION_ERROR`, `UNAUTHENTICATED`, `FORBIDDEN`, `NOT_FOUND`, `CONFLICT`, `RATE_LIMITED`, `SERVICE_UNAVAILABLE`, `INTERNAL_ERROR` plus module codes. 5xx messages never leak internals.
 - Pagination: `PaginatedResult.of(items, total, page, limit)` produces `meta`.
 
-## 6. Authentication and authorisation [planned, Phase 1B/1C]
+## 6. Authentication and authorisation [Phase 1B implemented; 1C in progress]
 
-Approved design (roadmap §3, DEC-010..013): access JWT 15 min in memory; refresh token 7 days in an
-httpOnly SameSite=Strict cookie, stored in Redis as `rt:{userId}:{deviceId}`, rotated on every use with
-reuse detection revoking all sessions; email OTP (Mailpit locally) and SMS OTP (dev inbox locally); bcrypt 12;
-CSRF token; guards in order Throttler → JWT → Tenant → `@Roles()`; permissions derived from role, matrix in
-`docs/permissions-matrix.csv` [planned].
+- Global guards in order: Throttler (general 1000/min; auth 100/15 min on `@AuthRateLimit()` controllers) →
+  `CsrfGuard` (double-submit `mc_csrf` cookie + `x-csrf-token` header on every state-changing request;
+  `@SkipCsrf()` only for signed webhooks) → `JwtAuthGuard` (Bearer access token; `@Public()` opts out) →
+  `RolesGuard` (`@Roles()`). The tenant-context guard/Prisma extension is added in 1C (P1C-02).
+- Access JWT (HS256, 15 min, claims `sub`, `sid`, `role`, `hid`, `typ: access`) is kept in memory by the web
+  app. The refresh JWT (7 days, `jti`, `typ: refresh`) lives only in the httpOnly SameSite=Strict cookie
+  `mc_rt` scoped to `/api/auth`. Redis `rt:{userId}:{sessionId}` holds the current `jti`; rotation is an
+  atomic Lua compare-and-set and a replayed token revokes all of the user's sessions. Every authenticated
+  request also checks that its session exists, so logout and password reset take effect immediately.
+- OTPs: 6 digits, HMAC in Redis (`otp:{email|phone}:{userId}`), 10 min, 5 attempts, 60 s cooldown. Email goes
+  through the SMTP adapter (Mailpit locally); SMS through `SMS_ADAPTER` (dev inbox locally, Twilio REST in
+  production). Reset tokens: random 256-bit, stored as SHA-256 `pwreset:{hash}` for 30 min, single use.
+- Code: `common/auth/*` (guards, decorators, token service, session store), `modules/auth/*` (controller,
+  service, OTP, passwords, DTOs), `infra/messaging/*` (adapters), `modules/audit/*` (audit writer),
+  `cli/create-super-admin.ts` (DEC-013). Contracts and the role→permission list are in `@medcore/types`
+  (`auth.ts`). Decisions: DEC-010..013, DEC-026..028.
 
 ## 7. Tenant isolation
 

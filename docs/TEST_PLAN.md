@@ -39,6 +39,20 @@ security, performance (`EXPLAIN ANALYZE`, DB-019), responsive and accessibility 
 | T-WEB-005..007 | FE-001 | `components/shared/system-status.test.tsx`: loading then all up; degraded shows down + retry works; network failure explained | UI states | 3/3 pass | Pass | VM | 2026-11-16 |
 | T-INT-001 | SCOPE-001, CACHE-* | `test/health.int-spec.ts`: full AppModule, `GET /api/health` with real PostgreSQL, Redis, queue | 200, all up | 1/1 pass | Pass | **Mac** | 2026-11-16 |
 | T-INT-002 | SEC-005, CACHE-003 | `test/health.int-spec.ts`: Redis throttler counts and blocks over limit | Hits counted, blocked | 1/1 pass | Pass | **Mac** | 2026-11-16 |
+| T-AUTH-001 | TEST-013, SEC-004 | `auth.http.spec.ts`: refresh rotates; replaying the old token → 401 REFRESH_TOKEN_REUSED, every session of the user revoked, audit entry | As specified | Pass | Pass | VM | 2026-11-16 |
+| T-AUTH-002 | AUTH-001, DEC-010/012 | register: PATIENT + patient profile + MRN, bcrypt cost 12, email OTP sent; unknown/unverified hospital code; duplicate email 409; password policy; future birth date; MRN collision retry | As specified | 6/6 pass | Pass | VM | 2026-11-16 |
+| T-AUTH-003 | AUTH-006, DEC-011 | email OTP: login blocked until verified; wrong then right code; 5-attempt lock (429); resend identical for unknown accounts and during cooldown | As specified | 4/4 pass | Pass | VM | 2026-11-16 |
+| T-AUTH-004 | AUTH-007, DEC-011 | phone OTP via SMS adapter for the signed-in user; requires authentication; dev SMS inbox order/clear; inbox route only outside production | As specified | 4/4 pass | Pass | VM | 2026-11-16 |
+| T-AUTH-005 | AUTH-002, AUTH-011 | login: generic INVALID_CREDENTIALS for wrong password and unknown email (audited); token + cookie flags (HttpOnly, SameSite=Strict, Path=/api/auth); disabled account; suspended hospital | As specified | 3/3 pass | Pass | VM | 2026-11-16 |
+| T-AUTH-006 | AUTH-008, AUTH-010 | logout one device vs all devices; access tokens of revoked sessions stop working at once; session store rotate/reuse/missing and revokeAll per user | As specified | 3/3 pass | Pass | VM | 2026-11-16 |
+| T-AUTH-007 | AUTH-004/005 | forgot-password identical for unknown email (no mail); single-use reset link; weak password keeps token; reset revokes all sessions; old password rejected | As specified | 2/2 pass | Pass | VM | 2026-11-16 |
+| T-AUTH-008 | AUTH-009 | `/auth/me` returns profile and role permissions; 401 without or with a malformed token | As specified | 2/2 pass | Pass | VM | 2026-11-16 |
+| T-AUTH-009 | SEC-005 | auth limit per IP returns 429 RATE_LIMITED; non-auth routes unaffected; env defaults 100 / 15 min | As specified | 2/2 pass | Pass | VM | 2026-11-16 |
+| T-AUTH-010 | SEC-010 | CSRF: missing or mismatched header 403; safe methods allowed; `@SkipCsrf()` honoured | As specified | 5/5 pass | Pass | VM | 2026-11-16 |
+| T-AUTH-011 | DEC-013 | create-super-admin input validation | As specified | 2/2 pass | Pass | VM | 2026-11-16 |
+| T-AUTH-012 | AUTH-002 | tokens: access/refresh round trip; type confusion rejected; tampered, foreign-secret and `alg: none` tokens rejected | As specified | 3/3 pass | Pass | VM | 2026-11-16 |
+| T-RBAC-000 | ROLE-010 | `@Roles()` guard: 403 FORBIDDEN for unlisted role, open routes, public routes, anonymous | As specified | 2/2 pass | Pass | VM | 2026-11-16 |
+| T-ENV-007 | DEC-011 | production refuses dev SMS inbox and Mailpit host; Twilio variables required | As specified | 1/1 pass | Pass | VM | 2026-11-16 |
 | T-STA-001 | DEP-003 | Prettier, ESLint, TypeScript (all packages) | Clean | Clean | Pass | VM | 2026-11-16 |
 | T-STA-002 | SCOPE-021 | `pnpm build` (types, API, web) | Builds | Builds | Pass | VM | 2026-11-16 |
 | T-STA-003 | DB-001 | `prisma validate` schema revision 2 | Valid | Valid | Pass | VM (offline validator) | 2026-11-16 |
@@ -46,7 +60,10 @@ security, performance (`EXPLAIN ANALYZE`, DB-019), responsive and accessibility 
 | T-STA-005 | SCOPE-001 | Docker services PostgreSQL, Redis, Mailpit healthy | Healthy | Healthy (owner report) | Pass | **Mac** | 2026-11-16 |
 | T-STA-006 | DB-020 | `prisma generate` | Succeeds | Succeeds (owner report) | Pass | **Mac** | 2026-11-16 |
 
-Totals: API unit 41/41 (VM), web 7/7 (VM), integration 2/2 (Mac). CI: not run.
+Totals: API unit 81/81 (VM; statements 88.8%, lines 90.9%), web 7/7 (VM), integration 2/2 (Mac). CI: not run.
+Not run yet: **T-AUTH-INT-001** (`test/auth.int-spec.ts`: register → Mailpit OTP → login → refresh → logout
+→ audit rows, with the real role/profile trigger). It fails with an explicit message until the initial
+migration exists (P1A-04).
 Not yet confirmed in a browser: web status page through the proxy, Swagger UI (Phase 0 checklist).
 
 ## 3. Planned tests (not run)

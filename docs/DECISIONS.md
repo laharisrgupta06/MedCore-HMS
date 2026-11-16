@@ -119,7 +119,7 @@ Every significant product, architecture, database, design and process decision. 
 - History: 11:54 approved option (a), run the team in local Claude Code. 12:25: "Stop all Agent Teams and OpenRouter troubleshooting… Use the current Claude Code session. Do not spawn teammates."
 
 ### DEC-022: Working mode until Agent Teams are verified
-- Status: **Approved, temporary** (12:25 instruction); **re-evaluation pending**
+- Status: **Approved, final** (13:46: "We are abandoning Agent Teams and sub-agents… work as a SINGLE Claude Code session.")
 - Current state: work proceeds solo in the current session. The latest brief asks for a five-role team once enabled and approved. Blockers: Agent Teams run only in interactive local Claude Code; local Claude Code returned `401 User not found` through OpenRouter (unresolved); this chat session cannot spawn agent teams.
 - Pending: owner decision on resolving local authentication and approving the team plan in [MEMORY.md](MEMORY.md).
 
@@ -139,3 +139,20 @@ Every significant product, architecture, database, design and process decision. 
 - Context: Prisma's migration engine download is blocked in the build VM.
 - Decision: The schema is written and validated in the VM; the owner runs `prisma:migrate:create`, the constraints SQL is appended and reviewed, then `prisma:migrate` applies it.
 - Related: DB-020.
+
+### DEC-026: bcryptjs for bcrypt hashing
+- Status: **Proposed** (Phase 1B implementation)
+- Decision: `bcryptjs` (pure JavaScript bcrypt, cost 12) instead of the native `bcrypt` package: same algorithm and hash format (`$2b$12$`), no native build step on macOS, the build VM or CI.
+- Related: AUTH-011, SEC-001.
+
+### DEC-027: @nestjs/jwt 11
+- Status: **Proposed**
+- Decision: `@nestjs/jwt` 11 (CommonJS). Version 12 is ESM-only and cannot be loaded by the CommonJS API under Jest.
+- Related: DEC-014.
+
+### DEC-028: Auth endpoint details not spelled out in the PRD
+- Status: **Proposed** (Phase 1B implementation)
+- Additions: `GET /auth/csrf` (issues the CSRF cookie); `POST /auth/verify-email/resend`; `POST /auth/verify-phone/send` (signed-in user); development-only `GET/DELETE /api/dev/sms-inbox` (not routed in production, DEC-011).
+- Behaviour: login requires a verified email (403 EMAIL_NOT_VERIFIED); suspended hospitals cannot sign in; resend and forgot-password give the same answer whether or not the account exists; the CSRF token rotates at login and refresh and is also returned in the response body; reset tokens are single use, 30 minutes, and revoke every session; refresh-token reuse revokes every session of the user; patient MRN format `MRN-{year}-{6-digit sequence}` per hospital.
+- Related: AUTH-001..010, SEC-010.
+

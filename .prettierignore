@@ -6,3 +6,4 @@ pnpm-lock.yaml
 docs/prd
 docs/*.md
 apps/api/prisma/migrations
+.claude
