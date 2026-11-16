@@ -87,7 +87,7 @@ security, performance (`EXPLAIN ANALYZE`, DB-019), responsive and accessibility 
 | T-ICD-001..002 | EMR-005 | `cli/load-icd10.spec.ts`: CSV parsing with quotes, malformed rows refused, bundled subset valid and unique | As specified | 2/2 pass | Pass | VM | 2026-11-16 |
 | T-RBAC-001d | ROLE-011, API-018/019 | Matrix extended with 16 Phase 4 routes (757 cases), own-vs-other record, patient and file checks | As specified | 757/757 pass | Pass | VM | 2026-11-16 |
 | T-FE-022..025 | FE, EMR | `components/emr/emr-ui.test.tsx`: permission rules; record view with BMI, allergy warning and adding a note (exact body); correction requires a reason; patient read-only; encounter start posts the exact body and opens the record | As specified | 5/5 pass | Pass | VM | 2026-11-16 |
-| T-EMR-INT-001 | SEC-014, EMR-002, TEST-011 | `test/emr.int-spec.ts`: real pgcrypto ciphertext in raw SELECT, wrong key fails, database refuses update/delete of entries, closed record locked, addendum after close, patient isolation, chart view audited | As specified | Run 1 (Mac, 21:01): 401 at `POST /api/medical-records`. Cause: test defect, the access token was not awaited (`Bearer [object Promise]`); fixed, application unchanged. Rerun pending | Pending | **Mac** | 2026-11-16 |
+| T-EMR-INT-001 | SEC-014, EMR-002, TEST-011 | `test/emr.int-spec.ts`: real pgcrypto ciphertext in raw SELECT, wrong key fails, database refuses update/delete of entries, closed record locked, addendum after close, patient isolation, chart view audited | As specified | Run 1 (21:01): 401, test defect (token not awaited), fixed in `425ee6f`. Run 2 (Mac, owner report 22:10): **pass**, `pnpm test:int` 7 suites, 15/15 | Pass | **Mac** | 2026-11-16 |
 | T-E2E-004 | FE-002 | `e2e/tests/emr.spec.ts`: Phase 4 routes redirect to sign-in | As specified | Pass (in Playwright 30/30, desktop and mobile) | Pass | **Mac** | 2026-11-16 |
 | T-STA-001 | DEP-003 | Prettier, ESLint, TypeScript (all packages) | Clean | Clean | Pass | VM | 2026-11-16 |
 | T-STA-002 | SCOPE-021 | `pnpm build` (types, API, web) | Builds | Builds | Pass | VM | 2026-11-16 |
@@ -96,7 +96,7 @@ security, performance (`EXPLAIN ANALYZE`, DB-019), responsive and accessibility 
 | T-STA-005 | SCOPE-001 | Docker services PostgreSQL, Redis, Mailpit healthy | Healthy | Healthy (owner report) | Pass | **Mac** | 2026-11-16 |
 | T-STA-006 | DB-020 | `prisma generate` | Succeeds | Succeeds (owner report) | Pass | **Mac** | 2026-11-16 |
 
-Totals (Phase 4): API unit 919/919 and web 38/38 (VM); Playwright 30/30 (Mac, 21:01); integration 14/15 (Mac, 21:01; the failing suite had a test defect, fixed, rerun pending). CI: not run (nothing pushed).
+Totals (Phase 4, 2026-11-16 22:10): API unit 919/919 and web 38/38 (VM); integration 15/15 in 7 suites and Playwright 30/30, desktop and mobile (Mac, owner report); ICD-10 starter list loaded (78 codes). CI: not run (nothing pushed).
 All integration suites listed above as "Not run" in earlier revisions ran in the 14/14 macOS run (owner report, 17:17). Still open: browser checks of the status page and Swagger UI (Phase 0), CI on GitHub.
 
 ## 3. Planned tests (not run)
