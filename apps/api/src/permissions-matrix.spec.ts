@@ -26,6 +26,7 @@ import { SchedulingModule } from './modules/appointments/appointments.module';
 import { EmrModule } from './modules/emr/emr.module';
 import { MedicinesModule } from './modules/medicines/medicines.module';
 import { PrescriptionsModule } from './modules/prescriptions/prescriptions.module';
+import { LabModule } from './modules/lab/lab.module';
 import { StorageService } from './infra/storage/storage.service';
 import { createAuthTestApp, type AuthTestApp } from './testing/auth-test-app';
 
@@ -73,6 +74,7 @@ describe('Permissions matrix (ROLE-011)', () => {
           EmrModule,
           MedicinesModule,
           PrescriptionsModule,
+          LabModule,
         ],
         controllers: [HealthController, DevSmsInboxController],
         providers: [
@@ -150,7 +152,8 @@ describe('Permissions matrix (ROLE-011)', () => {
             departmentId: null,
             employeeCode: null,
             designation: null,
-            isSeniorLabTechnician: false,
+            // The primary lab technician is senior, so approval routes test the role, not seniority.
+            isSeniorLabTechnician: u === users.LAB_TECHNICIAN,
           });
       }
     }
@@ -216,6 +219,17 @@ describe('Permissions matrix (ROLE-011)', () => {
         closedAt: null,
       });
       records.set(key, rec);
+      labOrders.set(
+        key,
+        push('LabOrder', {
+          medicalRecordId: rec,
+          orderedById: key === 'own' ? users.DOCTOR.id : peers.DOCTOR.id,
+          status: 'APPROVED',
+          priority: 'ROUTINE',
+          reportFileId: null,
+          amendsLabOrderId: null,
+        }),
+      );
       rxs.set(
         key,
         push('Prescription', {
@@ -243,6 +257,15 @@ describe('Permissions matrix (ROLE-011)', () => {
         }),
       );
     }
+    labTestId = push('LabTest', {
+      code: 'MX',
+      name: 'Matrix test',
+      category: 'LABORATORY',
+      unit: null,
+      sampleType: null,
+      price: 1,
+      isActive: true,
+    });
     medicineId = push('Medicine', {
       name: 'Matrixol',
       genericName: null,
@@ -273,6 +296,8 @@ describe('Permissions matrix (ROLE-011)', () => {
   });
   const records = new Map<string, string>();
   const rxs = new Map<string, string>();
+  const labOrders = new Map<string, string>();
+  let labTestId = '';
   let medicineId = '';
   const files = new Map<string, string>();
   const allergyOf = new Map<string, string>();
@@ -298,6 +323,8 @@ describe('Permissions matrix (ROLE-011)', () => {
     if (path.startsWith('/api/medical-records/record/')) return pair(records, true);
     if (path.startsWith('/api/files/')) return pair(files, true);
     if (path.startsWith('/api/prescriptions/')) return pair(rxs, true);
+    if (path.startsWith('/api/lab-orders/')) return pair(labOrders, true);
+    if (path.startsWith('/api/lab-tests/')) return [labTestId, labTestId];
     if (path.startsWith('/api/medicines/')) return [medicineId, medicineId];
     if (path.startsWith('/api/medical-records/:patientId')) {
       const own = role === 'PATIENT' ? users.PATIENT.id : peers.PATIENT.id;
@@ -387,6 +414,13 @@ describe('Permissions matrix (ROLE-011)', () => {
         items: [{ medicineId, dosage: '10 mg', frequency: 'OD', durationDays: 1, quantity: 1 }],
       },
       'PATCH /api/prescriptions/:id/cancel': { reason: 'Matrix check' },
+      'POST /api/lab-tests': { code: 'MX2', name: 'Matrix two', category: 'LABORATORY', price: 1 },
+      'PATCH /api/lab-tests/:id': { price: 2 },
+      'POST /api/lab-orders': { medicalRecordId: records.get('own'), testIds: [labTestId] },
+      'PATCH /api/lab-orders/:id/cancel': { reason: 'Matrix check' },
+      'PATCH /api/lab-orders/:id/result': { results: [] },
+      'PATCH /api/lab-orders/:id/reject': { reason: 'Matrix check' },
+      'POST /api/lab-orders/:id/amend': { reason: 'Matrix check' },
     };
     return row.method === 'GET' ? r : r.send(BODIES[`${row.method} ${row.path}`] ?? {});
   };

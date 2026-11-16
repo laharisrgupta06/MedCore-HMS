@@ -4,6 +4,7 @@ import { ArrowRight, MailWarning, Smartphone } from 'lucide-react';
 import Link from 'next/link';
 import { PageHeader } from '@/components/app/app-shell';
 import { Alert } from '@/components/ui/alert';
+import { ResultsToReview } from '@/components/lab/results-to-review';
 import { ROLE_LABEL, type NavItem } from '@/constants/navigation';
 import { useAuth } from '@/store/auth';
 
@@ -39,6 +40,7 @@ export function HomeView({ nav, home }: { nav: NavItem[]; home: string }) {
           you until it is verified.
         </Alert>
       )}
+      {me.user.role === 'DOCTOR' && <ResultsToReview />}
       <section
         aria-labelledby="sections"
         className="rounded-lg border border-border bg-surface shadow-1"

@@ -16,6 +16,7 @@ import { patientsApi } from '@/services/org';
 import { useAuth } from '@/store/auth';
 import { HistoryPanel } from './history-panel';
 import { PrescriptionHistory } from '@/components/prescriptions/prescriptions-panel';
+import { LabHistory } from '@/components/lab/lab-orders-panel';
 import { age, when } from './shared';
 
 /** A patient's chart (API-019): history plus every consultation, newest first. */
@@ -105,6 +106,11 @@ export function ChartView({ patientId, portal }: { patientId?: string; portal?: 
       <Panel title="Prescriptions" className="mt-6">
         <div className="p-4">
           <PrescriptionHistory patientId={portal ? undefined : id} tz={tz} />
+        </div>
+      </Panel>
+      <Panel title="Lab and radiology" className="mt-6">
+        <div className="p-4">
+          <LabHistory patientId={portal ? undefined : id} tz={tz} />
         </div>
       </Panel>
     </>

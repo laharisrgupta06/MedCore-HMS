@@ -7,3 +7,4 @@ export * from './org';
 export * from './appointments';
 export * from './emr';
 export * from './pharmacy';
+export * from './lab';

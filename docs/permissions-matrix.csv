@@ -92,3 +92,19 @@ GET,/api/prescriptions/:id,DENY,DENY,ALLOW,ALLOW,DENY,DENY,ALLOW,DENY,OWN,View i
 PATCH,/api/prescriptions/:id/cancel,DENY,DENY,OWN,DENY,DENY,DENY,DENY,DENY,DENY,Prescribing doctor, before dispensing (D3)
 GET,/api/prescriptions/:id/pdf,DENY,DENY,ALLOW,DENY,DENY,DENY,ALLOW,DENY,OWN,API-021; RX-002
 POST,/api/prescriptions/:id/pdf,DENY,DENY,OWN,DENY,DENY,DENY,DENY,DENY,DENY,Re-queue a failed PDF
+GET,/api/lab-tests,DENY,ALLOW,ALLOW,DENY,ALLOW,ALLOW,DENY,DENY,DENY,Catalogue with ranges
+POST,/api/lab-tests,DENY,ALLOW,DENY,DENY,DENY,DENY,DENY,DENY,DENY,LAB-006
+PATCH,/api/lab-tests/:id,DENY,ALLOW,DENY,DENY,DENY,DENY,DENY,DENY,DENY,Ranges replaced; past results keep theirs (D8)
+POST,/api/lab-orders,DENY,DENY,ALLOW,DENY,DENY,DENY,DENY,DENY,DENY,API-022; treating doctor, open record
+GET,/api/lab-orders,DENY,DENY,ALLOW,ALLOW,ALLOW,ALLOW,DENY,DENY,ALLOW,Patients: own approved only
+GET,/api/lab-orders/:id,DENY,DENY,ALLOW,ALLOW,ALLOW,ALLOW,DENY,DENY,OWN,Values hidden until approved; view audited
+PATCH,/api/lab-orders/:id/cancel,DENY,DENY,OWN,DENY,DENY,DENY,DENY,DENY,DENY,Ordering doctor, before sample
+PATCH,/api/lab-orders/:id/sample,DENY,DENY,DENY,DENY,ALLOW,ALLOW,DENY,DENY,DENY,LAB-002
+PATCH,/api/lab-orders/:id/processing,DENY,DENY,DENY,DENY,DENY,ALLOW,DENY,DENY,DENY,
+PATCH,/api/lab-orders/:id/result,DENY,DENY,DENY,DENY,DENY,ALLOW,DENY,DENY,DENY,API-023; LAB-003
+POST,/api/lab-orders/:id/report-file,DENY,DENY,DENY,DENY,DENY,ALLOW,DENY,DENY,DENY,PDF only
+PATCH,/api/lab-orders/:id/approve,DENY,DENY,DENY,DENY,DENY,ALLOW,DENY,DENY,DENY,Senior; not own results (LAB-004)
+PATCH,/api/lab-orders/:id/reject,DENY,DENY,DENY,DENY,DENY,ALLOW,DENY,DENY,DENY,Senior; back to technician (D7)
+POST,/api/lab-orders/:id/amend,DENY,DENY,DENY,DENY,DENY,ALLOW,DENY,DENY,DENY,Senior; approved orders
+GET,/api/lab-orders/:id/report,DENY,DENY,ALLOW,ALLOW,DENY,ALLOW,DENY,DENY,OWN,Approved only; flags in red
+GET,/api/lab-orders/:id/report-file,DENY,DENY,ALLOW,ALLOW,DENY,ALLOW,DENY,DENY,OWN,Attached PDF

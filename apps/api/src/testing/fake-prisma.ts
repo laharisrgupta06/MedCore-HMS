@@ -127,6 +127,11 @@ const MODEL_OF: Record<string, string> = {
   dispense: 'Dispense',
   stockMovement: 'StockMovement',
   address: 'Address',
+  labTest: 'LabTest',
+  labTestRange: 'LabTestRange',
+  labOrder: 'LabOrder',
+  labOrderItem: 'LabOrderItem',
+  labResult: 'LabResult',
 };
 
 interface Relation {
@@ -200,6 +205,21 @@ const RELATIONS: Record<string, Record<string, Relation>> = {
     batch: { model: 'MedicineBatch', local: 'batchId', foreign: 'id' },
   },
   MedicineBatch: { medicine: { model: 'Medicine', local: 'medicineId', foreign: 'id' } },
+  LabTest: { ranges: { model: 'LabTestRange', local: 'id', foreign: 'labTestId', many: true } },
+  LabOrder: {
+    medicalRecord: { model: 'MedicalRecord', local: 'medicalRecordId', foreign: 'id' },
+    orderedBy: { model: 'User', local: 'orderedById', foreign: 'id' },
+    sampleCollectedBy: { model: 'User', local: 'sampleCollectedById', foreign: 'id' },
+    approvedBy: { model: 'User', local: 'approvedById', foreign: 'id' },
+    rejectedBy: { model: 'User', local: 'rejectedById', foreign: 'id' },
+    items: { model: 'LabOrderItem', local: 'id', foreign: 'labOrderId', many: true },
+  },
+  LabOrderItem: {
+    labTest: { model: 'LabTest', local: 'labTestId', foreign: 'id' },
+    result: { model: 'LabResult', local: 'id', foreign: 'labOrderItemId' },
+    labOrder: { model: 'LabOrder', local: 'labOrderId', foreign: 'id' },
+  },
+  LabResult: { enteredBy: { model: 'User', local: 'enteredById', foreign: 'id' } },
 };
 
 /** Unique constraints mirrored from schema.prisma for the modelled tables. */
@@ -221,6 +241,10 @@ const UNIQUES: Record<string, string[][]> = {
   Medicine: [['hospitalId', 'name', 'strength', 'form']],
   MedicineBatch: [['medicineId', 'batchNumber']],
   PrescriptionItem: [['prescriptionId', 'medicineId']],
+  LabTest: [['hospitalId', 'code']],
+  LabOrderItem: [['labOrderId', 'labTestId']],
+  LabResult: [['labOrderItemId']],
+  LabOrder: [['amendsLabOrderId']],
 };
 
 /** Rows that block deletion of a parent (ON DELETE RESTRICT in the database). */
@@ -294,6 +318,34 @@ const DEFAULTS: Record<string, Row> = {
     allergyOverrideReason: null,
   },
   PrescriptionItem: { instructions: null },
+  LabTest: { unit: null, sampleType: null, isActive: true, category: 'LABORATORY' },
+  LabTestRange: { gender: null, ageMinYears: null, ageMaxYears: null },
+  LabOrder: {
+    status: 'ORDERED',
+    priority: 'ROUTINE',
+    sampleCollectedAt: null,
+    sampleCollectedById: null,
+    approvedAt: null,
+    approvedById: null,
+    rejectionReason: null,
+    reportFileId: null,
+    amendsLabOrderId: null,
+    amendmentReason: null,
+    clinicalNotes: null,
+    cancelledAt: null,
+    cancelledById: null,
+    cancellationReason: null,
+    rejectedAt: null,
+    rejectedById: null,
+  },
+  LabResult: {
+    valueNumeric: null,
+    valueText: null,
+    flag: null,
+    unit: null,
+    referenceLow: null,
+    referenceHigh: null,
+  },
 };
 
 /** Mirrors the clinical triggers in constraints.sql (DEC-016): append-only and status-only tables. */
@@ -500,6 +552,25 @@ export class FakePrisma {
     }
   }
 
+  /** Mirrors the approved-lab triggers in constraints.sql: approved orders and their results are locked. */
+  private guardLab(model: string, rows: Row[], data: Row): void {
+    if (model === 'LabResult') {
+      for (const r of rows) {
+        const item = this.table('LabOrderItem').find((i) => i.id === r.labOrderItemId);
+        const order = item && this.table('LabOrder').find((o) => o.id === item.labOrderId);
+        if (order?.status === 'APPROVED')
+          throw triggerError('Results of an approved lab order are locked');
+      }
+    }
+    if (
+      model === 'LabOrder' &&
+      Object.keys(data).some((k) => k !== 'reportFileId' && k !== 'updatedAt')
+    ) {
+      if (rows.some((r) => r.status === 'APPROVED' && this.table('LabOrder').includes(r)))
+        throw triggerError('Lab order is approved and locked');
+    }
+  }
+
   private defaults(model: string): Row {
     const base = { id: randomUUID(), createdAt: new Date() };
     if (model === 'User')
@@ -619,6 +690,7 @@ export class FakePrisma {
           return Promise.resolve(rows.filter((r) => this.match(model, r, where)).length);
         case 'create': {
           const row = { ...this.defaults(model), ...(a.data as Row) };
+          this.guardLab(model, [row], a.data as Row);
           this.checkUnique(model, row);
           rows.push(row);
           return Promise.resolve(shape(row));
@@ -627,6 +699,7 @@ export class FakePrisma {
           const r = found();
           if (!r) throw notFound();
           guardClinicalChange(model, [r], a.data as Row);
+          this.guardLab(model, [r], a.data as Row);
           const next = { ...r, ...(a.data as Row) };
           this.checkUnique(model, next, r);
           Object.assign(r, a.data as Row, model === 'User' ? { updatedAt: new Date() } : {});
@@ -649,6 +722,7 @@ export class FakePrisma {
         case 'updateMany': {
           const hit = rows.filter((r) => this.match(model, r, where));
           guardClinicalChange(model, hit, a.data as Row);
+          this.guardLab(model, hit, a.data as Row);
           for (const r of hit) Object.assign(r, a.data as Row);
           return Promise.resolve({ count: hit.length });
         }
@@ -715,6 +789,7 @@ export class FakePrisma {
   prescriptionItem = this.delegate('PrescriptionItem');
   dispense = this.delegate('Dispense');
   stockMovement = this.delegate('StockMovement');
+  labOrder = this.delegate('LabOrder');
 
   /** Query extensions, as used by TenantPrismaService. */
   $extends(ext: { query?: { $allModels?: { $allOperations?: Hook } } }): unknown {

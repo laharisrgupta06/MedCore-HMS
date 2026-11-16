@@ -27,6 +27,7 @@ import { DomainEventsModule } from './common/events/domain-events';
 import { PdfCoreModule, PdfQueueModule } from './infra/pdf/pdf-jobs';
 import { MedicinesModule } from './modules/medicines/medicines.module';
 import { PrescriptionsModule } from './modules/prescriptions/prescriptions.module';
+import { LabModule } from './modules/lab/lab.module';
 import { RemindersModule, SchedulingModule } from './modules/appointments/appointments.module';
 
 import { buildThrottlerOptions } from './infra/throttler/throttler-options';
@@ -70,6 +71,7 @@ export { buildThrottlerOptions, isAuthRateLimited } from './infra/throttler/thro
     PdfQueueModule,
     MedicinesModule,
     PrescriptionsModule,
+    LabModule,
   ],
   providers: GLOBAL_PIPELINE,
 })

@@ -218,4 +218,6 @@ Every significant product, architecture, database, design and process decision. 
 - Plan: https://claude.ai/artifact/2MDDoYb1Ps8Cw1QSZvqf8Y
 - Migration M-05 (prescription cancel fields, allergy override reason, two CHECKs) approved by the owner 2026-11-16.
 - Implementation notes (Phase 5): PDFs use PDFKit's standard Helvetica fonts (no font files shipped); allergy matching is by medicine and generic name, case-insensitive, on active uncorrected allergies, and is advisory; issuing requires the doctor's stored signature (RX-007); prescriptions are read by doctors, nurses, pharmacists and the patient (own); the PDF by doctors, pharmacists and the patient (own).
+- Migration M-06 (lab order CANCELLED status with reason fields, rejection fields, result unit and reference snapshot, three CHECKs) approved by the owner 2026-11-16.
+- Implementation notes (Phase 6): the most specific range wins (gender and age band each count) and a value equal to a limit is normal; radiology tests have no ranges and take text findings; a submitted order needs every result or an attached PDF report; the reviewer must be a senior technician (`StaffProfile.isSeniorLabTechnician`) who entered none of the current results; the report PDF is generated on request, not queued.
 - Related: SCOPE-012..014, RX-*, LAB-*, PHARM-*, DEC-024, DEC-039.

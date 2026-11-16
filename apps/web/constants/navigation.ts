@@ -15,6 +15,9 @@ import {
   UserRound,
   Users,
   Contact,
+  FlaskConical,
+  TestTube,
+  FileText,
 } from 'lucide-react';
 
 export interface NavItem {
@@ -94,6 +97,19 @@ export const STAFF_NAV: NavItem[] = [
     icon: Pill,
     roles: ['PHARMACIST', 'HOSPITAL_ADMIN'],
   },
+  { href: '/dashboard/lab', label: 'Lab worklist', icon: FlaskConical, roles: ['LAB_TECHNICIAN'] },
+  {
+    href: '/dashboard/lab/samples',
+    label: 'Lab samples',
+    icon: TestTube,
+    roles: ['RECEPTIONIST', 'LAB_TECHNICIAN'],
+  },
+  {
+    href: '/dashboard/lab/tests',
+    label: 'Lab tests',
+    icon: FlaskConical,
+    roles: ['HOSPITAL_ADMIN'],
+  },
   { href: '/dashboard/staff', label: 'Staff', icon: Users, roles: ['HOSPITAL_ADMIN'] },
   { href: '/dashboard/departments', label: 'Departments', icon: Layers, roles: ['HOSPITAL_ADMIN'] },
   {
@@ -116,6 +132,7 @@ export const PATIENT_NAV: NavItem[] = [
   { href: '/portal/book', label: 'Book appointment', icon: CalendarPlus, roles: ['PATIENT'] },
   { href: '/portal/health', label: 'My health record', icon: HeartPulse, roles: ['PATIENT'] },
   { href: '/portal/prescriptions', label: 'Prescriptions', icon: Pill, roles: ['PATIENT'] },
+  { href: '/portal/lab-reports', label: 'Lab reports', icon: FileText, roles: ['PATIENT'] },
   { href: '/portal/account', label: 'My account', icon: UserRound, roles: ['PATIENT'] },
 ];
 

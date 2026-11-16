@@ -143,6 +143,10 @@ staff agenda, availability, patient portal), all times shown in the hospital tim
 
 `modules/medicines` (catalogue, `StockLevels` cache `stock:{medicineId}` 60 s), `modules/prescriptions` (issue, cancel, list, PDF download and retry), `infra/pdf` (`PdfService` on PDFKit; `PdfRenderers` registry; `pdf` BullMQ queue with `BullPdfJobs` and `PdfProcessor`, job id `{kind}:{id}`), `common/events` (`DomainEvents`, published after commit; subscribers never fail the publisher). Renderers run in the worker with the base Prisma client and name the hospital in every query. Web: `components/prescriptions/*`, Medicines page, record and chart panels, portal Prescriptions (DEC-040).
 
+## 6e. Laboratory (Phase 6)
+
+`modules/lab`: `LabTestsController` (`/lab-tests`, catalogue with reference ranges) and `LabOrdersController` (`/lab-orders`: order, cancel, sample, processing, result, report-file upload, approve, reject, amend, report PDF, report file). Status moves are conditional `updateMany` calls on the expected status. The range is chosen by `selectRange` in `@medcore/types` (shared with the web's live flag preview) and its bounds and unit are copied onto each result (DEC-040 D8). Values are withheld from everyone but lab technicians until APPROVED. A database trigger locks approved results and orders (only `reportFileId` may change). Corrections are amended orders linked by `amendsLabOrderId`. Approval publishes `lab.report.approved` (delivered in Phase 9). The report PDF is generated on request from the approved data with `PdfService`.
+
 ## 7. Tenant isolation
 
 Row-per-tenant (shared schema) with three layers (TEN-001..005, DEC-018):

@@ -28,8 +28,13 @@ export function AppShell({
   const [signingOut, setSigningOut] = useState(false);
   if (!me) return null;
   const items = nav.filter((n) => n.roles.includes(me.user.role));
-  const isActive = (href: string) =>
-    href === home ? pathname === home : pathname.startsWith(href);
+  // The most specific matching item is current, so /dashboard/lab/samples does not also mark /dashboard/lab.
+  const matches = (href: string) =>
+    href === home ? pathname === home : pathname === href || pathname.startsWith(`${href}/`);
+  const current = items
+    .filter((n) => matches(n.href))
+    .sort((a, b) => b.href.length - a.href.length)[0]?.href;
+  const isActive = (href: string) => href === current;
 
   const sidebar = (
     <nav aria-label="Main" className="flex flex-1 flex-col gap-1 px-3">
