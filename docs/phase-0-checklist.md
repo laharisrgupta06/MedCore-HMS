@@ -6,11 +6,11 @@
 
 ## Prerequisites (manual, on the Mac)
 
-- [ ] Node.js version for the project confirmed and installed (via nvm), pinned in `.nvmrc`
-- [ ] pnpm installed (via Corepack) and version pinned in root `package.json` `packageManager`
-- [ ] Docker Desktop for Apple Silicon installed, running, `docker run hello-world` succeeds
-- [ ] `docker compose version` works
-- [ ] Ports 3000, 3001, 5432, 6379, 9000, 8025 free (verified free on 2026-11-16)
+- [x] Node.js 24 LTS installed (v24.15.0), pinned in `.nvmrc`
+- [x] pnpm 11.28.12 installed (user-owned npm prefix), pinned in root `package.json` `packageManager`
+- [x] Docker Desktop for Apple Silicon installed (29.9.3), `docker run hello-world` succeeds
+- [x] `docker compose version` works (5.7.0)
+- [x] Ports 3000, 3001, 5432, 6379, 9000, 8025 free (verified 2026-11-16)
 
 ## Foundation items
 
@@ -37,6 +37,8 @@ Prisma models, authentication, any hospital module, styled UI screens, provider 
 
 ## Verification record
 
+**Status: Phase 0 verified, 2026-11-16** (macOS results reported by the project owner). Two browser checks, the web proxy page and Swagger UI, are still to be confirmed.
+
 Verified 2026-11-16 in the Linux build VM (Node 22, pnpm 11.28.12). Items marked "Mac" could not run
 there (no Docker; `binaries.prisma.sh` is blocked by that VM's network) and must be confirmed on the
 project owner's Mac or in CI before Phase 0 is closed.
@@ -49,13 +51,13 @@ project owner's Mac or in CI before Phase 0 is closed.
 | Typecheck | `pnpm typecheck` | Pass (types, api, web) |
 | Unit and component tests | `pnpm test` | Pass: API 37/37 (9 suites), web 7/7 (2 files) |
 | Build | `pnpm build` | Pass: types, API (`nest build`), web (`next build`) |
-| Prisma | `pnpm --filter @medcore/api prisma:generate` and `prisma:validate` | **Mac** (engine download blocked in VM) |
-| Docker services | `pnpm infra:up` then `pnpm infra:ps` | **Mac** |
-| Integration tests (real PostgreSQL + Redis) | `pnpm test:int` | **Mac** |
-| API startup | `pnpm --filter @medcore/api dev` | **Mac** |
-| Web startup and proxy | `pnpm --filter @medcore/web dev`, open http://localhost:3000 | **Mac** |
-| Health check | `curl http://localhost:3000/api/health` | **Mac** |
-| Swagger | open http://localhost:3001/api/docs | **Mac** (OpenAPI document verified by unit test) |
+| Prisma | `pnpm --filter @medcore/api prisma:generate` | Pass (Mac) |
+| Docker services | `pnpm infra:up` then `pnpm infra:ps` | Pass (Mac): PostgreSQL, Redis, Mailpit healthy |
+| Integration tests (real PostgreSQL + Redis) | `pnpm test:int` | Pass (Mac): 2/2, after fix `5571fe2` |
+| API startup | full `AppModule` boot in `pnpm test:int` | Pass (Mac) |
+| Web startup and proxy | `pnpm dev`, open http://localhost:3000 | Not yet reported (browser check) |
+| Health check | `GET /api/health` in `pnpm test:int` (db, redis, queue all up) | Pass (Mac) |
+| Swagger | open http://localhost:3001/api/docs | Not yet reported in a browser; OpenAPI document verified by unit test |
 | CI | GitHub Actions on first push | Pending owner-approved push |
 
 ## Decisions and deviations recorded during implementation
