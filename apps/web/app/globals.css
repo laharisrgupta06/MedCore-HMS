@@ -1,0 +1,18 @@
+@import 'tailwindcss';
+
+/*
+ * Design tokens are intentionally not defined yet. Per docs/frontend-design-system.md
+ * (Part 11.18, steps 4 to 6), the colour palette, typography and component tokens are
+ * proposed and approved before any styled application screen is built.
+ */
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}

@@ -37,20 +37,41 @@ Prisma models, authentication, any hospital module, styled UI screens, provider 
 
 ## Verification record
 
-Fill in with actual command output after implementation. Do not mark an item verified without running it.
+Verified 2026-11-16 in the Linux build VM (Node 22, pnpm 11.28.12). Items marked "Mac" could not run
+there (no Docker; `binaries.prisma.sh` is blocked by that VM's network) and must be confirmed on the
+project owner's Mac or in CI before Phase 0 is closed.
 
-| Check | Command | Result | Date |
-| --- | --- | --- | --- |
-| Install | `pnpm install` | | |
-| Build | `pnpm build` | | |
-| Typecheck | `pnpm typecheck` | | |
-| Lint | `pnpm lint` | | |
-| Format | `pnpm format:check` | | |
-| Docker services | `docker compose -f docker/compose.dev.yml ps` | | |
-| Database | health check `db` field | | |
-| Redis | health check `redis` field | | |
-| API startup | `pnpm --filter api dev` | | |
-| Web startup | `pnpm --filter web dev` | | |
-| Health check | `curl localhost:3000/api/health` (through proxy) | | |
-| Swagger | open `localhost:3001/api/docs` | | |
-| Tests | `pnpm test` | | |
+| Check | Command | Result |
+| --- | --- | --- |
+| Install | `pnpm install` | Pass (lockfile committed) |
+| Format | `pnpm format:check` | Pass |
+| Lint | `pnpm lint` | Pass, 0 problems |
+| Typecheck | `pnpm typecheck` | Pass (types, api, web) |
+| Unit and component tests | `pnpm test` | Pass: API 37/37 (9 suites), web 7/7 (2 files) |
+| Build | `pnpm build` | Pass: types, API (`nest build`), web (`next build`) |
+| Prisma | `pnpm --filter @medcore/api prisma:generate` and `prisma:validate` | **Mac** (engine download blocked in VM) |
+| Docker services | `pnpm infra:up` then `pnpm infra:ps` | **Mac** |
+| Integration tests (real PostgreSQL + Redis) | `pnpm test:int` | **Mac** |
+| API startup | `pnpm --filter @medcore/api dev` | **Mac** |
+| Web startup and proxy | `pnpm --filter @medcore/web dev`, open http://localhost:3000 | **Mac** |
+| Health check | `curl http://localhost:3000/api/health` | **Mac** |
+| Swagger | open http://localhost:3001/api/docs | **Mac** (OpenAPI document verified by unit test) |
+| CI | GitHub Actions on first push | Pending owner-approved push |
+
+## Decisions and deviations recorded during implementation
+
+| Topic | Decision | Reason |
+| --- | --- | --- |
+| Node / pnpm | Node 24 LTS, pnpm 11 | Approved by owner (Node 20 is end-of-life since 2026-04-30) |
+| NestJS | 11.x (not 12) | NestJS 12 is ESM-only; 11 keeps Jest/Supertest/ts-jest simple and is still maintained |
+| TypeScript | 5.9 (not 7) | `ts-jest` supports TypeScript below 7 only |
+| Prisma | 6.19 (not 7/8) | 8 is a release candidate; 6 is stable and matches the roadmap's design |
+| ESLint | 9 (flat config) | Plugin compatibility; ESLint 9 is marked deprecated upstream, revisit later |
+| pnpm build scripts | `allowBuilds` in `pnpm-workspace.yaml`; `@scarf/scarf` (telemetry) denied | pnpm 11 blocks dependency build scripts by default |
+| Prisma generate | Explicit script instead of `postinstall` | Keeps `pnpm install` working where engine downloads are blocked |
+| Rate limiting | Redis-backed custom `ThrottlerStorage` (atomic Lua script); global 1000/min | PRD section 10; the 100/15 min auth limit is applied on auth routes in Phase 1 |
+| Health endpoint | `GET /api/health`, 200 when PostgreSQL, Redis and the BullMQ queue respond, else 503 with details | Uses the PRD error envelope |
+| Route groups `(auth)`, `(dashboard)`, `(portal)` | Created with their first real pages in Phase 1 | Avoids empty placeholder routes (Part 11 rule) |
+| MinIO (local S3) | Not included in Phase 0 | No Phase 0 feature stores files; storage choice made in the phase that needs uploads |
+| API Dockerfile, Nginx config | Moved to Phase 14 | Cannot be built or tested in this environment; untested deployment files are not committed |
+| Web libraries not yet used (Recharts, Framer Motion, DOMPurify, socket.io-client) | Installed in the phase that uses them | Avoids unused dependencies |

@@ -1,0 +1,65 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    name: Lint, typecheck, test, build
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: medcore
+          POSTGRES_PASSWORD: medcore_ci_only
+          POSTGRES_DB: medcore_ci
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U medcore -d medcore_ci"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+      redis:
+        image: redis:7-alpine
+        ports: ['6379:6379']
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s --health-timeout 3s --health-retries 10
+
+    # Throwaway values for the ephemeral CI services only. Real secrets never live in this file.
+    env:
+      NODE_ENV: test
+      DATABASE_URL: postgresql://medcore:medcore_ci_only@localhost:5432/medcore_ci?schema=public
+      REDIS_URL: redis://localhost:6379
+      JWT_ACCESS_SECRET: ci-only-access-0000000000000000000000000000000000000000
+      JWT_REFRESH_SECRET: ci-only-refresh-111111111111111111111111111111111111111
+      CORS_ORIGINS: http://localhost:3000
+      NEXT_TELEMETRY_DISABLED: '1'
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter @medcore/api prisma:generate
+      - run: pnpm --filter @medcore/api prisma:validate
+      - run: pnpm format:check
+      - run: pnpm lint
+      - run: pnpm typecheck
+      - run: pnpm test
+      - name: Integration tests (real PostgreSQL and Redis)
+        run: pnpm test:int
+      - run: pnpm build
