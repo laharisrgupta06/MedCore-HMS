@@ -95,6 +95,8 @@ ALTER TABLE insurance_claims ADD CONSTRAINT insurance_claims_amount_chk
 
 -- Same-hospital guarantees for relations Prisma models with a single column --------------
 -- (all other tenant relations are composite foreign keys in schema.prisma).
+-- These four objects are ALSO declared in schema.prisma with the same names (map: "...") so
+-- Prisma Migrate does not drop them (DEC-031). Keep both in sync; sql-drift.spec.ts checks it.
 -- A hospital's address must belong to that hospital.
 ALTER TABLE hospitals ADD CONSTRAINT hospitals_address_same_tenant_fkey
   FOREIGN KEY ("addressId", id) REFERENCES addresses (id, "hospitalId") ON DELETE RESTRICT;

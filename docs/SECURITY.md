@@ -44,7 +44,7 @@ passes; environment stated) · **Planned**. No regulatory compliance or certific
 
 | ID | Risk | Mitigation / status |
 | --- | --- | --- |
-| R-01 | Schema constraints and triggers have only been syntax-checked, not executed by PostgreSQL | Run migration on macOS (DEC-019/025) and add database integration tests |
+| R-01 | Constraints and triggers applied on PostgreSQL (owner, 2026-11-16) but not yet exercised by tests | `pnpm test:int` (T-MIG-001..006) |
 | R-02 | Request-level tenant isolation verified only in memory; CI has never run | T-TEN-INT-001 on macOS after the migration; CI after an approved push |
 | R-03 | Agent Teams through OpenRouter: provider and model behaviour unverified; credentials live in the owner's shell profile | Resolve the local `401 User not found`; never place keys in the repository |
 | R-04 | Encryption key management for pgcrypto not yet designed in detail | Phase 4: env key, rotation script, documented |
@@ -52,5 +52,5 @@ passes; environment stated) · **Planned**. No regulatory compliance or certific
 | R-06 | ESLint 9 is marked deprecated upstream | Revisit after Phase 1; no security impact today |
 | R-08 | Account enumeration: register returns 409 EMAIL_IN_USE (standard sign-up behaviour); login, resend and forgot-password answer generically | Auth rate limit; accepted trade-off, revisit if required |
 | R-09 | Auth flows verified only against in-memory Prisma/Redis so far | T-AUTH-INT-001 on macOS after the migration |
-| R-10 | Prisma does not model the SQL-only keys/indexes, CHECKs, exclusions and triggers; a future migration may try to drop them | Every migration `--create-only` + review; `prisma:drift` check (migration-review.md M-02) |
+| R-10 | Prisma drops undeclared keys: drift check found the 4 SQL-only same-tenant keys (now declared, DEC-031); CHECKs, exclusions and triggers remain outside Prisma | `sql-drift.spec.ts`; every migration `--create-only` + review; `prisma:drift` after each migration |
 | R-07 | CI workflow has never run on GitHub (nothing pushed) | Push only with owner approval; then verify CI |

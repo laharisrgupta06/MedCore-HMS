@@ -1,6 +1,6 @@
 # MedCore HMS Database Schema
 
-Status: **draft for review, revision 2** (Phase 1A, 2026-11-16). Not yet migrated.
+Status: **revision 2, migrated** (`20261116085814_init`, applied on macOS 2026-11-16). Four hand-written same-tenant keys are also declared in the schema (DEC-031).
 Revision 2 adds clinical corrections, composite tenant foreign keys, role/profile checks and seven PRD gap fixes.
 Source of truth: [`apps/api/prisma/schema.prisma`](../apps/api/prisma/schema.prisma) (44 models, 36 enums)
 and [`apps/api/prisma/sql/constraints.sql`](../apps/api/prisma/sql/constraints.sql).

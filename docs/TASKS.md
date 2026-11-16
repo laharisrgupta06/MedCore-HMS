@@ -45,7 +45,7 @@ passed** (environment recorded in [TEST_PLAN.md](TEST_PLAN.md)). Phases follow
 | P1A-01 | SCOPE-002, DB-001..019 | Complete schema, 44 models, 36 enums | DB | — | Critical | Review | T-STA-003, T-DB-001..004 | `8576b24`, `e487298` |
 | P1A-02 | DEC-016..018 | Corrections, gap fixes, composite tenant keys | DB | P1A-01 | Critical | Review | T-DB-*, T-STA-004 | Approved designs; schema approval pending |
 | P1A-03 | DB-014, EMR-002, APPT-006 | `constraints.sql`: CHECKs, exclusions, triggers | DB | P1A-01 | Critical | Review | T-STA-004 (syntax only) | Not executed by PostgreSQL yet |
-| P1A-04 | DB-020 | Create initial migration on macOS, append constraints, review SQL ([migration-review.md](migration-review.md)) | DB | owner "approve schema" | Critical | Blocked | T-MIG-001 | DEC-019, DEC-025 |
+| P1A-04 | DB-020 | Create initial migration on macOS, append constraints, review SQL ([migration-review.md](migration-review.md)) | DB | owner "approve schema" | Critical | Review: applied by owner (`20261116085814_init`); drift fixed in schema (DEC-031), drift re-check pending | T-MIG-001 | DEC-019, DEC-025 |
 | P1A-05 | DB-001..019 | Database constraint tests against real PostgreSQL | QA | P1A-04 | Critical | Review (written: `test/constraints.int-spec.ts`; not run) | T-MIG-002..006 | |
 | P1A-06 | DEL-004 | ER diagrams | DB | P1A-01 | Medium | Done | Review | Mermaid in `database-schema.md`; Prisma-generated ER at deliverable stage |
 | P1A-07 | TEN-002 | Schema tenancy guard test | QA | P1A-01 | High | Done | T-DB-001..004 (VM) | Negative check performed |
@@ -94,7 +94,7 @@ run in CI with the rest of the suite once pushed (P1C-07).
 
 | # | Blocker | Needs | Unblocks |
 | --- | --- | --- | --- |
-| B-1 | Initial migration | Owner "approve schema", then steps 0–6 of [migration-review.md](migration-review.md) on macOS | P1A-04/05, Done for 1B/1C (T-AUTH-INT-001, T-TEN-INT-001, T-MIG-*), Phase 2 |
+| B-1 | Migration verification | Owner runs `prisma:drift` (expect empty), `prisma:generate`, `pnpm test:int` ([migration-review.md](migration-review.md) §8) | P1A-04/05, Done for 1B/1C (T-AUTH-INT-001, T-TEN-INT-001, T-MIG-*), Phase 2 |
 | B-2 | Design tokens | Owner approval of [DESIGN.md](DESIGN.md) | Phase 1D and every styled screen |
 | B-3 | CI on GitHub | Owner approval to push | P0-14, P1C-07 |
 | B-4 | Browser checks | Owner opens the status page and Swagger UI | P0-15, P0-16 |

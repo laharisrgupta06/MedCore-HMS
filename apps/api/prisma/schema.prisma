@@ -309,9 +309,11 @@ model Address {
 
   tenant Hospital @relation("AddressTenant", fields: [hospitalId], references: [id], onDelete: Restrict)
 
-  hospital  Hospital?  @relation("HospitalAddress")
-  patients  Patient[]
-  suppliers Supplier[]
+  hospital            Hospital?  @relation("HospitalAddress")
+  /// Back-relation of the same-tenant key (DEC-031); not used by application code.
+  hospitalsSameTenant Hospital[] @relation("HospitalAddressSameTenant")
+  patients            Patient[]
+  suppliers           Supplier[]
 
   @@unique([id, hospitalId])
   @@index([hospitalId])
@@ -341,6 +343,9 @@ model Hospital {
   invoicePrefix      String             @default("INV")
 
   address             Address?             @relation("HospitalAddress", fields: [addressId], references: [id], onDelete: Restrict)
+  /// Same-tenant guarantee: the address must belong to this hospital (constraints.sql, DEC-031).
+  /// Declared so Prisma Migrate keeps the database key; use `address` in application code.
+  addressSameTenant   Address?             @relation("HospitalAddressSameTenant", fields: [addressId, id], references: [id, hospitalId], onDelete: Restrict, onUpdate: NoAction, map: "hospitals_address_same_tenant_fkey")
   users               User[]
   staffProfiles       StaffProfile[]
   departments         Department[]
@@ -436,7 +441,8 @@ model User {
   paymentsReceived           Payment[]            @relation("PaymentReceivedBy")
   paymentsReconciled         Payment[]            @relation("PaymentReconciledBy")
   prescriptionsVerified      Prescription[]       @relation("PrescriptionVerifiedBy")
-  notifications              Notification[]
+  notifications              Notification[]       @relation("NotificationRecipient")
+  notificationsSameTenant    Notification[]       @relation("NotificationRecipientSameTenant")
   auditLogs                  AuditLog[]
 
   @@unique([id, hospitalId])
@@ -1457,10 +1463,16 @@ model Notification {
   readAt      DateTime? @db.Timestamptz(3)
   createdAt   DateTime  @default(now()) @db.Timestamptz(3)
 
-  hospital   Hospital?              @relation(fields: [hospitalId], references: [id], onDelete: Restrict)
-  recipient  User                   @relation(fields: [recipientId], references: [id], onDelete: Restrict)
-  deliveries NotificationDelivery[]
+  hospital             Hospital?              @relation(fields: [hospitalId], references: [id], onDelete: Restrict)
+  recipient            User                   @relation("NotificationRecipient", fields: [recipientId], references: [id], onDelete: Restrict)
+  /// Same-tenant guarantee for hospital notifications (constraints.sql, DEC-031). Not enforced when
+  /// hospitalId is null (platform notifications). Use `recipient` in application code.
+  recipientSameTenant  User?                  @relation("NotificationRecipientSameTenant", fields: [recipientId, hospitalId], references: [id, hospitalId], onDelete: Restrict, onUpdate: NoAction, map: "notifications_recipient_same_tenant_fkey")
+  deliveries           NotificationDelivery[] @relation("DeliveryNotification")
+  /// Back-relation of the deliveries same-tenant key (DEC-031); not used by application code.
+  deliveriesSameTenant NotificationDelivery[] @relation("DeliveryNotificationSameTenant")
 
+  @@unique([id, hospitalId], map: "notifications_id_hospital_key")
   @@index([recipientId, readAt])
   @@index([recipientId, createdAt])
   @@map("notifications")
@@ -1478,7 +1490,9 @@ model NotificationDelivery {
   updatedAt      DateTime            @updatedAt @db.Timestamptz(3)
   hospitalId     String?             @db.Uuid
 
-  notification Notification @relation(fields: [notificationId], references: [id], onDelete: Cascade)
+  notification           Notification  @relation("DeliveryNotification", fields: [notificationId], references: [id], onDelete: Cascade)
+  /// Same-tenant guarantee (constraints.sql, DEC-031). Use `notification` in application code.
+  notificationSameTenant Notification? @relation("DeliveryNotificationSameTenant", fields: [notificationId, hospitalId], references: [id, hospitalId], onDelete: Cascade, onUpdate: NoAction, map: "notification_deliveries_same_tenant_fkey")
 
   hospital Hospital? @relation(fields: [hospitalId], references: [id], onDelete: Restrict)
 

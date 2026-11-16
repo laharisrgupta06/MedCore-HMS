@@ -1,6 +1,6 @@
 # MedCore HMS — Initial Migration Review Package (P1A-04)
 
-**Status: awaiting owner approval. Nothing has been generated against or applied to any database.**
+**Status: initial migration `20261116085814_init` applied by the owner on macOS (2026-11-16, 14:33 report).** Drift check found 4 objects; resolved in the schema file by DEC-031, re-check pending (section 8).
 Prepared 2026-11-16 on branch `feat/phase-1-auth`. Schema: revision 2 (`e487298`), unchanged since.
 Approval phrase: "approve schema" (DEC-019). Until then no migration file exists in the repository.
 
@@ -116,7 +116,7 @@ in the local database; audit rows are append-only by design and stay.
 | ID | Risk | Likelihood / impact | Mitigation |
 | --- | --- | --- | --- |
 | M-01 | `constraints.sql` has never run on PostgreSQL (R-01): a runtime error (e.g. a type mismatch in a trigger) is still possible | Medium / blocks step 5 | The migration is one transaction: failure leaves the DB unchanged. Fix in `constraints.sql`, regenerate the migration file (not yet applied, so editing it is allowed) |
-| M-02 | **Drift:** Prisma does not model the SQL-only foreign keys, the `notifications (id, hospitalId)` unique, the expression index and the partial unique index. A later `prisma migrate dev` may generate `DROP` statements for them; CHECK constraints, exclusion constraints and triggers are not represented in the schema either | High / silent loss of a guarantee | Step 6 shows exactly what Prisma considers drift. Rule (RULES.md): every future migration is created with `--create-only` and reviewed; any `DROP` of a `constraints.sql` object is removed before applying. Where possible, move objects into `schema.prisma` in a later approved revision |
+| M-02 | **Drift (confirmed):** Prisma wanted to drop the 3 SQL-only foreign keys and the `notifications (id, hospitalId)` unique. CHECK, exclusion constraints, triggers and the expression/partial indexes were not reported | Occurred / would have silently removed tenant guarantees | **Resolved by DEC-031**: the four objects are declared in `schema.prisma` with identical names; `sql-drift.spec.ts` guards it. Still every migration `--create-only` + review (RULES.md) |
 | M-03 | Deferred role/profile trigger errors surface at COMMIT, not at the failing insert | Low / confusing error | Code creates user + profile in one transaction (registration, CLI, staff onboarding in Phase 2); tests cover it (T-AUTH-INT-001, T-TEN-INT-001) |
 | M-04 | Append-only `audit_logs` with `ON DELETE RESTRICT` to users and hospitals: those rows can never be hard-deleted | By design / test data accumulates | Users are soft-deleted; local cleanup is `prisma migrate reset` (destroys all local data, needs explicit approval) |
 | M-05 | `migrate dev` needs a shadow database (CREATE DATABASE privilege) | Low locally (container user is superuser) | Production uses `prisma migrate deploy`, which needs no shadow database |
@@ -131,3 +131,23 @@ in the local database; audit rows are append-only by design and stay.
 2. You run step 5 and step 6 and share the output of step 6 and of `pnpm test:int`.
 3. I record the results (TEST_PLAN T-MIG-001..006, T-AUTH-INT-001, T-TEN-INT-001), fix anything that fails,
    commit the migration file, and mark Phases 1A–1C Done.
+
+## 8. Drift finding and next verification (2026-11-16)
+
+`prisma:drift` after applying the migration listed DROPs for exactly the four Prisma-managed objects that
+only `constraints.sql` created. They are intentional (DEC-018) and stay. Fix (DEC-031): `schema.prisma`
+now declares them with the same names, columns, `onDelete` and `onUpdate: NoAction`, so Prisma's model
+matches the database. No database change and no new migration.
+
+Next safe commands (all read-only except `prisma:generate`, which only rewrites the generated client in
+`node_modules`):
+
+```bash
+pnpm --filter @medcore/api prisma:drift     # expected: "-- This is an empty migration."
+pnpm --filter @medcore/api prisma:generate  # client now knows the declared relations
+pnpm test && pnpm test:int                  # unit + PostgreSQL/Redis/Mailpit integration suites
+```
+
+If `prisma:drift` still prints statements, copy them back; do not run `prisma:migrate` (it would create
+and apply a migration from them).
+
