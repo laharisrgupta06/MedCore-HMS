@@ -35,6 +35,10 @@ jobs:
         options: >-
           --health-cmd "redis-cli ping"
           --health-interval 5s --health-timeout 3s --health-retries 10
+      # Local SMTP + API for the auth integration suite (email OTP read from Mailpit).
+      mailpit:
+        image: axllent/mailpit:latest
+        ports: ['1025:1025', '8025:8025']
 
     # Throwaway values for the ephemeral CI services only. Real secrets never live in this file.
     env:
@@ -60,6 +64,8 @@ jobs:
       - run: pnpm lint
       - run: pnpm typecheck
       - run: pnpm test
-      - name: Integration tests (real PostgreSQL and Redis)
+      - name: Apply migrations to the CI database
+        run: pnpm --filter @medcore/api prisma:deploy
+      - name: Integration tests (real PostgreSQL, Redis and Mailpit)
         run: pnpm test:int
       - run: pnpm build

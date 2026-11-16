@@ -48,23 +48,26 @@ pnpm install
 cp .env.example .env        # then replace every placeholder (openssl rand -hex 32 for secrets)
 pnpm infra:up               # PostgreSQL 16, Redis 7, Mailpit
 pnpm --filter @medcore/api prisma:generate
+pnpm --filter @medcore/api prisma:deploy        # apply committed migrations (never edits them)
+pnpm --filter @medcore/api create-super-admin   # optional: first platform administrator (prompts)
 pnpm dev                    # API on :3001, web on :3000
 ```
 
 Open http://localhost:3000 to see the service status page (browser → Next.js proxy → API →
-PostgreSQL/Redis). API docs: http://localhost:3001/api/docs. Mail inbox: http://localhost:8025.
+PostgreSQL/Redis). API docs: http://localhost:3001/api/docs. Mail inbox (email OTPs, reset links):
+http://localhost:8025. Development SMS inbox: http://localhost:3001/api/dev/sms-inbox (never in production).
 
 ## Scripts (repository root)
 
-| Command                                     | What it does                                                |
-| ------------------------------------------- | ----------------------------------------------------------- |
-| `pnpm dev`                                  | Builds shared types, then runs API and web in watch mode    |
-| `pnpm build`                                | Production build of every package                           |
-| `pnpm lint` / `pnpm format:check`           | ESLint and Prettier for the whole monorepo                  |
-| `pnpm typecheck`                            | TypeScript checks for every package                         |
-| `pnpm test`                                 | Unit and component tests (no external services needed)      |
-| `pnpm test:int`                             | API integration tests (requires `pnpm infra:up` and `.env`) |
-| `pnpm infra:up` / `infra:down` / `infra:ps` | Manage local Docker services                                |
+| Command                                     | What it does                                                                    |
+| ------------------------------------------- | ------------------------------------------------------------------------------- |
+| `pnpm dev`                                  | Builds shared types, then runs API and web in watch mode                        |
+| `pnpm build`                                | Production build of every package                                               |
+| `pnpm lint` / `pnpm format:check`           | ESLint and Prettier for the whole monorepo                                      |
+| `pnpm typecheck`                            | TypeScript checks for every package                                             |
+| `pnpm test`                                 | Unit and component tests (no external services needed)                          |
+| `pnpm test:int`                             | API integration tests (requires `pnpm infra:up`, `.env` and applied migrations) |
+| `pnpm infra:up` / `infra:down` / `infra:ps` | Manage local Docker services                                                    |
 
 ## API conventions
 

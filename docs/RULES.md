@@ -27,7 +27,7 @@ specifications, (4) existing implementation and verified tests, (5) proposals, w
 - The Database Engineer owns `apps/api/prisma/**` (DEC-008). Others request changes by message.
 - Every hospital-specific table has `hospitalId`; tenant relations are composite `(id, hospitalId)` keys (DEC-018). `schema-tenancy.spec.ts` must pass.
 - Never edit an applied migration; add a new one. Production uses `prisma migrate deploy` only.
-- Until DEC-032's migration is approved, every `hospital.create()` passes `id: randomUUID()` (Prisma does not default ids that are foreign-key columns).
+- A primary key that is also a foreign-key column gets a database default (`@default(dbgenerated("gen_random_uuid()"))`), because Prisma does not apply `@default(uuid())` to it (DEC-032).
 - Any foreign key or unique constraint written in SQL must also be declared in `schema.prisma` with the same name (`map:`); Prisma drops undeclared ones (DEC-031, `sql-drift.spec.ts`).
 - Every migration is created with `--create-only` and reviewed before it is applied; remove any `DROP` of an object from `prisma/sql/constraints.sql` (Prisma does not model them), and run `pnpm --filter @medcore/api prisma:drift` afterwards ([migration-review.md](migration-review.md)).
 - Clinical data is never deleted or overwritten; corrections follow DEC-016.

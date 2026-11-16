@@ -66,6 +66,9 @@ security, performance (`EXPLAIN ANALYZE`, DB-019), responsive and accessibility 
 | T-INT-003..005 | AUTH, TEN, DB | First macOS run of `test:int` (owner, 14:41): health pass; auth, tenancy and constraints **fail** with `Null constraint violation on the fields: (id)` at `prisma.hospital.create()` (root cause DEC-032) | Pass | Fail → fixed in tests (explicit hospital ids), re-run pending | Fail | **Mac** | 2026-11-16 |
 | T-SIM-001 | DB-001..019 | Disposable PostgreSQL 16 in the cloud workspace, loaded with the applied `20261116085814_init` SQL: 44 tables, 31 triggers, 2 exclusions, extensions; SQL equivalents of every T-MIG-001..006 / tenancy / registration step gave the expected accept or reject (43 checks). Found one weak assertion (tenancy test's cross-tenant staff profile failed on the unique userId, not the foreign key), now rewritten to assert P2003 | As specified | 43/43 | Pass (SQL level; Prisma not involved) | Cloud workspace | 2026-11-16 |
 | T-INT-006 | DEP-002 | Second macOS run (owner, 14:50): health, auth, tenancy pass; constraints fails `Environment variable not found: DATABASE_URL`. Root cause: `test/load-env.ts` used `process.loadEnvFile()`, which writes to Node's real environment while Jest gives each test file its own `process.env` copy; suites that boot AppModule (ConfigModule loads .env) or run after another suite passed by luck. Fixed: parse .env and assign to the test file's `process.env`; fail fast if DATABASE_URL/REDIS_URL are missing. Reproduced and verified in the VM with a probe suite (MISSING → set; missing .env → explicit error) | All suites see the env | Fixed, macOS re-run pending | Fail → fixed | **Mac** / VM | 2026-11-16 |
+| T-INT-007 | all | Third macOS run (owner, 14:53): unit and all four integration suites (health, auth, tenancy, constraints T-MIG-001..006) | Pass | Pass | Pass | **Mac** | 2026-11-16 |
+| T-SIM-002 | DEC-032 | Disposable PostgreSQL 16: init + migration 2; existing rows unchanged (md5), insert without id returns uuid, constraints/triggers unchanged | As specified | Pass | Pass | Cloud workspace | 2026-11-16 |
+| T-MIG-008 | DEC-032 | `constraints.int-spec.ts`: hospital created without an id gets a v4 UUID; column default is `gen_random_uuid()`. The interim explicit ids were removed from the suites | Pass | Not run (migration 2 not applied yet) | Pending | **Mac** | — |
 | T-STA-001 | DEP-003 | Prettier, ESLint, TypeScript (all packages) | Clean | Clean | Pass | VM | 2026-11-16 |
 | T-STA-002 | SCOPE-021 | `pnpm build` (types, API, web) | Builds | Builds | Pass | VM | 2026-11-16 |
 | T-STA-003 | DB-001 | `prisma validate` schema revision 2 | Valid | Valid | Pass | VM (offline validator) | 2026-11-16 |
@@ -73,7 +76,7 @@ security, performance (`EXPLAIN ANALYZE`, DB-019), responsive and accessibility 
 | T-STA-005 | SCOPE-001 | Docker services PostgreSQL, Redis, Mailpit healthy | Healthy | Healthy (owner report) | Pass | **Mac** | 2026-11-16 |
 | T-STA-006 | DB-020 | `prisma generate` | Succeeds | Succeeds (owner report) | Pass | **Mac** | 2026-11-16 |
 
-Totals: API unit 291/291 (VM), web 7/7 (VM), integration 2/2 (Mac). CI: not run.
+Totals: API unit 292/292 (VM); integration 4 suites pass (Mac, 14:53), web 7/7 (VM), integration 2/2 (Mac). CI: not run.
 Not run yet: **T-AUTH-INT-001** (`test/auth.int-spec.ts`: register → Mailpit OTP → login → refresh → logout
 → audit rows, with the real role/profile trigger). It fails with an explicit message until the initial
 migration exists (P1A-04). Also not run: **T-MIG-001..006** (`test/constraints.int-spec.ts`; T-MIG-005 covers audit, medical-record locks only so far; clinical correction triggers are tested with the EMR in Phase 4) and **T-TEN-INT-001** (`test/tenancy.int-spec.ts`: scoped client with real

@@ -1,4 +1,4 @@
-import { randomBytes, randomUUID } from 'node:crypto';
+import { randomBytes } from 'node:crypto';
 import { Prisma, PrismaClient } from '@prisma/client';
 import { TenantContext } from '../src/common/tenancy/tenant-context';
 import { TenantPrismaService } from '../src/common/tenancy/tenant-prisma.service';
@@ -23,7 +23,6 @@ async function migrated(): Promise<void> {
 async function hospitalWithNurse(run: string, tag: string) {
   const hospital = await prisma.hospital.create({
     data: {
-      id: randomUUID(), // see DEC-032
       name: `Tenancy ${tag} ${run}`,
       code: `TEN${tag}-${run}`.toUpperCase(),
       email: `int-ten-${tag}-${run}@example.com`,

@@ -163,3 +163,31 @@ applied migration (TEST_PLAN T-SIM-001). Next run:
 pnpm test && pnpm test:int
 ```
 
+## 10. Migration 2: `20261116092500_hospital_id_db_default` (DEC-032, approved 14:53)
+
+```sql
+ALTER TABLE "hospitals" ALTER COLUMN "id" SET DEFAULT gen_random_uuid();
+```
+
+Review:
+- Changes only the column default: no `DROP`, no data rewrite, no row touched, no constraint changed
+  (a brief lock on `hospitals` while the catalog is updated). `gen_random_uuid()` is built into PostgreSQL 13+.
+- `schema.prisma`: `Hospital.id` uses `@default(dbgenerated("gen_random_uuid()"))`; `prisma validate` passes.
+- Checked on a disposable PostgreSQL 16 loaded with the applied init migration: migration applies; the
+  existing hospital row is byte-identical before and after (md5 of all rows); an insert without an id
+  returns a UUID; 4 hospital constraints and 31 triggers unchanged.
+- Written by hand because Prisma's engine cannot run here; it is the statement Prisma emits for this
+  schema change. Step 1 below proves it before anything is applied.
+
+Commands (macOS, repository root):
+
+```bash
+pnpm --filter @medcore/api prisma:generate
+pnpm --filter @medcore/api prisma:drift      # BEFORE applying: expect exactly the ALTER ... SET DEFAULT gen_random_uuid() line
+pnpm --filter @medcore/api prisma:deploy     # applies only the pending migration; creates nothing, no shadow DB
+pnpm --filter @medcore/api prisma:drift      # AFTER: expect "-- This is an empty migration."
+pnpm test && pnpm test:int                   # includes T-MIG-008: hospital created without an id
+```
+
+If the first drift output differs from that single statement, stop and send it; do not deploy.
+

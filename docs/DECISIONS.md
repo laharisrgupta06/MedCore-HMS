@@ -174,7 +174,7 @@ Every significant product, architecture, database, design and process decision. 
 - Related: DEC-018, DEC-025, migration-review.md M-02.
 
 ### DEC-032: Hospital ids after DEC-031
-- Status: **Interim in place; permanent fix Proposed, needs owner approval (it is a migration)**
+- Status: **Approved** (owner, 14:53: "I approve DEC-032"). Implemented as migration `20261116092500_hospital_id_db_default` (created, not yet applied)
 - Root cause of the 14:41 integration failures: DEC-031 made `hospitals.id` part of the declared foreign key `hospitals_address_same_tenant_fkey` (`[addressId, id]`). Prisma does not apply `@default(uuid())` to a field that is also a relation scalar: `HospitalCreateInput` loses `id` and an insert without an explicit id sends NULL (`Null constraint violation on the fields: (id)`). The database column has no default (Prisma generates ids client-side), so every `hospital.create()` without an id fails. All three failing suites create hospitals first.
 - Interim (no database change): every hospital insert passes `id: randomUUID()` (the three integration suites). No application code creates hospitals yet; Phase 2 onboarding must do the same until the permanent fix.
 - Permanent fix (proposed): one migration `ALTER TABLE "hospitals" ALTER COLUMN "id" SET DEFAULT gen_random_uuid();` with `@default(dbgenerated("gen_random_uuid()"))` in `schema.prisma`. The database then generates ids whatever Prisma omits. Checked on a disposable PostgreSQL 16 copy of the applied migration: insert without id succeeds. Nothing is created in the repository until approved.

@@ -37,7 +37,11 @@ Prisma models, authentication, any hospital module, styled UI screens, provider 
 
 ## Verification record
 
-**Status: Phase 0 verified, 2026-11-16** (macOS results reported by the project owner). Two browser checks, the web proxy page and Swagger UI, are still to be confirmed.
+**Status (re-verified 2026-11-16 14:53): all automated checks pass; Phase 0 is not closed.** Open: the
+two browser checks (web proxy page, Swagger UI), the first CI run (needs an approved push), the README
+walk-through by the owner, and owner acceptance of the recorded deviations (MinIO, Dockerfiles/Nginx,
+route groups). The CI workflow was updated for Phase 1 (migrations applied before integration tests;
+Mailpit service); it was syntax-checked only.
 
 Verified 2026-11-16 in the Linux build VM (Node 22, pnpm 11.28.12). Items marked "Mac" could not run
 there (no Docker; `binaries.prisma.sh` is blocked by that VM's network) and must be confirmed on the
@@ -49,11 +53,11 @@ project owner's Mac or in CI before Phase 0 is closed.
 | Format | `pnpm format:check` | Pass |
 | Lint | `pnpm lint` | Pass, 0 problems |
 | Typecheck | `pnpm typecheck` | Pass (types, api, web) |
-| Unit and component tests | `pnpm test` | Pass: API 37/37 (9 suites), web 7/7 (2 files) |
+| Unit and component tests | `pnpm test` | Pass: API 292/292 (22 suites, VM), web 7/7; macOS pass 14:53 |
 | Build | `pnpm build` | Pass: types, API (`nest build`), web (`next build`) |
 | Prisma | `pnpm --filter @medcore/api prisma:generate` | Pass (Mac) |
 | Docker services | `pnpm infra:up` then `pnpm infra:ps` | Pass (Mac): PostgreSQL, Redis, Mailpit healthy |
-| Integration tests (real PostgreSQL + Redis) | `pnpm test:int` | Pass (Mac): 2/2, after fix `5571fe2` |
+| Integration tests (real PostgreSQL + Redis + Mailpit) | `pnpm test:int` | Pass (Mac 14:53): health, auth, tenancy, constraints |
 | API startup | full `AppModule` boot in `pnpm test:int` | Pass (Mac) |
 | Web startup and proxy | `pnpm dev`, open http://localhost:3000 | Not yet reported (browser check) |
 | Health check | `GET /api/health` in `pnpm test:int` (db, redis, queue all up) | Pass (Mac) |
