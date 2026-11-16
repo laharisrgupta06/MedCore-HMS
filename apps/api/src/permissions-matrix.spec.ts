@@ -24,6 +24,8 @@ import { PatientsModule } from './modules/patients/patients.module';
 import { StaffModule } from './modules/staff/staff.module';
 import { SchedulingModule } from './modules/appointments/appointments.module';
 import { EmrModule } from './modules/emr/emr.module';
+import { MedicinesModule } from './modules/medicines/medicines.module';
+import { PrescriptionsModule } from './modules/prescriptions/prescriptions.module';
 import { StorageService } from './infra/storage/storage.service';
 import { createAuthTestApp, type AuthTestApp } from './testing/auth-test-app';
 
@@ -69,6 +71,8 @@ describe('Permissions matrix (ROLE-011)', () => {
           FacilitiesModule,
           SchedulingModule,
           EmrModule,
+          MedicinesModule,
+          PrescriptionsModule,
         ],
         controllers: [HealthController, DevSmsInboxController],
         providers: [
@@ -212,6 +216,16 @@ describe('Permissions matrix (ROLE-011)', () => {
         closedAt: null,
       });
       records.set(key, rec);
+      rxs.set(
+        key,
+        push('Prescription', {
+          medicalRecordId: rec,
+          status: 'ISSUED',
+          notes: null,
+          pdfFileId: null,
+          issuedAt: new Date(),
+        }),
+      );
       const storageKey = `${h.id}/records/${rec}/matrix-${key}.pdf`;
       await storage.put(storageKey, Buffer.from('%PDF-1.4 matrix'));
       files.set(
@@ -229,6 +243,14 @@ describe('Permissions matrix (ROLE-011)', () => {
         }),
       );
     }
+    medicineId = push('Medicine', {
+      name: 'Matrixol',
+      genericName: null,
+      form: 'TABLET',
+      strength: '10 mg',
+      reorderLevel: 5,
+      isActive: true,
+    });
     for (const u of [users.PATIENT, peers.PATIENT])
       allergyOf.set(
         profile.get(u.id)!,
@@ -250,6 +272,8 @@ describe('Permissions matrix (ROLE-011)', () => {
       );
   });
   const records = new Map<string, string>();
+  const rxs = new Map<string, string>();
+  let medicineId = '';
   const files = new Map<string, string>();
   const allergyOf = new Map<string, string>();
   const sched = new Map<string, string>();
@@ -273,6 +297,8 @@ describe('Permissions matrix (ROLE-011)', () => {
     if (path.startsWith('/api/appointments/')) return pair(appts, true);
     if (path.startsWith('/api/medical-records/record/')) return pair(records, true);
     if (path.startsWith('/api/files/')) return pair(files, true);
+    if (path.startsWith('/api/prescriptions/')) return pair(rxs, true);
+    if (path.startsWith('/api/medicines/')) return [medicineId, medicineId];
     if (path.startsWith('/api/medical-records/:patientId')) {
       const own = role === 'PATIENT' ? users.PATIENT.id : peers.PATIENT.id;
       return [profile.get(own)!, profile.get(peers.PATIENT.id)!];
@@ -354,6 +380,13 @@ describe('Permissions matrix (ROLE-011)', () => {
       },
       'POST /api/patients/:patientId/family-history': { condition: 'CARDIAC', present: true },
       'PATCH /api/patients/:patientId/:kind/:entryId/status': { status: 'RESOLVED' },
+      'POST /api/medicines': { name: 'Matrix', form: 'SYRUP', strength: '5 ml', reorderLevel: 1 },
+      'PATCH /api/medicines/:id': { reorderLevel: 7 },
+      'POST /api/prescriptions': {
+        medicalRecordId: records.get('own'),
+        items: [{ medicineId, dosage: '10 mg', frequency: 'OD', durationDays: 1, quantity: 1 }],
+      },
+      'PATCH /api/prescriptions/:id/cancel': { reason: 'Matrix check' },
     };
     return row.method === 'GET' ? r : r.send(BODIES[`${row.method} ${row.path}`] ?? {});
   };

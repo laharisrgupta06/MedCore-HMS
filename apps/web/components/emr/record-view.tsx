@@ -26,6 +26,7 @@ import { appointmentsApi } from '@/services/appointments';
 import { emrApi, type VitalsInput } from '@/services/emr';
 import { useAuth } from '@/store/auth';
 import { HistoryPanel } from './history-panel';
+import { PrescriptionsPanel } from '@/components/prescriptions/prescriptions-panel';
 import { age, CorrectedBadge, EntryDialog, Provenance, textareaClass, when } from './shared';
 
 const GENDER: Record<string, string> = {
@@ -123,6 +124,7 @@ export function RecordView({ recordId, backHref }: { recordId: string; backHref:
             tz={tz}
             onSaved={saved}
           />
+          <PrescriptionsPanel record={r} canIssue={can.editSummary} tz={tz} />
           <NotesSection record={r} can={can.addNote} tz={tz} onSaved={saved} />
           <FilesSection record={r} can={can.attach} tz={tz} onSaved={saved} />
         </div>

@@ -193,6 +193,18 @@ describe('RecordView', () => {
       if (url === '/api/medical-records/record/r1' && (!init?.method || init.method === 'GET'))
         return Promise.resolve(ok(r));
       if (url === '/api/patients/p1/history') return Promise.resolve(ok(history));
+      if (url.startsWith('/api/prescriptions?'))
+        return Promise.resolve(
+          new Response(
+            JSON.stringify({
+              success: true,
+              data: [],
+              meta: { page: 1, limit: 50, total: 0, totalPages: 0 },
+              message: 'OK',
+            }),
+            { status: 200 },
+          ),
+        );
       if (init?.method === 'POST') {
         posts.push({ url, body: JSON.parse(String(init.body)) });
         return Promise.resolve(

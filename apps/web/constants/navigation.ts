@@ -7,6 +7,7 @@ import {
   Building2,
   HeartPulse,
   Home,
+  Pill,
   Layers,
   type LucideIcon,
   Settings,
@@ -87,6 +88,12 @@ export const STAFF_NAV: NavItem[] = [
     icon: BedDouble,
     roles: ['HOSPITAL_ADMIN', 'NURSE', 'RECEPTIONIST', 'DOCTOR', 'ACCOUNTANT'],
   },
+  {
+    href: '/dashboard/medicines',
+    label: 'Medicines',
+    icon: Pill,
+    roles: ['PHARMACIST', 'HOSPITAL_ADMIN'],
+  },
   { href: '/dashboard/staff', label: 'Staff', icon: Users, roles: ['HOSPITAL_ADMIN'] },
   { href: '/dashboard/departments', label: 'Departments', icon: Layers, roles: ['HOSPITAL_ADMIN'] },
   {
@@ -108,6 +115,7 @@ export const PATIENT_NAV: NavItem[] = [
   },
   { href: '/portal/book', label: 'Book appointment', icon: CalendarPlus, roles: ['PATIENT'] },
   { href: '/portal/health', label: 'My health record', icon: HeartPulse, roles: ['PATIENT'] },
+  { href: '/portal/prescriptions', label: 'Prescriptions', icon: Pill, roles: ['PATIENT'] },
   { href: '/portal/account', label: 'My account', icon: UserRound, roles: ['PATIENT'] },
 ];
 

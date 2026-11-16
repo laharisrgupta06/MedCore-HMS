@@ -1,4 +1,7 @@
 import { FIELD_CRYPTO } from '../infra/crypto/field-crypto';
+import { DomainEvents } from '../common/events/domain-events';
+import { PDF_JOBS, PdfRenderers, type PdfJob } from '../infra/pdf/pdf-jobs';
+import { PdfService } from '../infra/pdf/pdf.service';
 /** Builds the auth HTTP stack for unit tests with in-memory Prisma and Redis (no external services). */
 import { randomUUID } from 'node:crypto';
 import { INestApplication, Module } from '@nestjs/common';
@@ -75,6 +78,15 @@ export async function createAuthTestApp(
       provide: SMS_ADAPTER,
       useValue: { send: (m: SmsMessage) => (sms.push(m), Promise.resolve()) },
     },
+    DomainEvents,
+    PdfService,
+    PdfRenderers,
+    // PDFs render inline in tests (the app uses the BullMQ pdf queue); failures surface in the test.
+    {
+      provide: PDF_JOBS,
+      inject: [PdfRenderers],
+      useFactory: (r: PdfRenderers) => ({ enqueue: (job: PdfJob) => r.run(job) }),
+    },
     // Reversible stand-in for pgcrypto: ciphertext never equals the plain text (real cipher: T-EMR-INT).
     {
       provide: FIELD_CRYPTO,
@@ -106,7 +118,17 @@ export async function createAuthTestApp(
         module: TestInfraModule,
         global: true,
         providers: infra,
-        exports: [REDIS_CLIENT, MAIL_ADAPTER, SMS_ADAPTER, REMINDER_SCHEDULER, FIELD_CRYPTO],
+        exports: [
+          REDIS_CLIENT,
+          MAIL_ADAPTER,
+          SMS_ADAPTER,
+          REMINDER_SCHEDULER,
+          FIELD_CRYPTO,
+          DomainEvents,
+          PdfService,
+          PdfRenderers,
+          PDF_JOBS,
+        ],
       },
       ConfigModule.forRoot({
         isGlobal: true,

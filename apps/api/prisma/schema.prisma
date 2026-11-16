@@ -443,6 +443,7 @@ model User {
   paymentsReceived           Payment[]            @relation("PaymentReceivedBy")
   paymentsReconciled         Payment[]            @relation("PaymentReconciledBy")
   prescriptionsVerified      Prescription[]       @relation("PrescriptionVerifiedBy")
+  prescriptionsCancelled     Prescription[]       @relation("PrescriptionCancelledBy")
   notifications              Notification[]       @relation("NotificationRecipient")
   notificationsSameTenant    Notification[]       @relation("NotificationRecipientSameTenant")
   auditLogs                  AuditLog[]
@@ -1128,23 +1129,30 @@ model StockMovement {
 
 /// Issued at the end of an encounter, linked to the medical record (PRD 7.4).
 model Prescription {
-  id              String             @id @default(uuid()) @db.Uuid
-  hospitalId      String             @db.Uuid
-  medicalRecordId String             @db.Uuid
-  status          PrescriptionStatus @default(ISSUED)
-  notes           String?
-  pdfFileId       String?            @unique @db.Uuid
-  issuedAt        DateTime           @default(now()) @db.Timestamptz(3)
-  updatedAt       DateTime           @updatedAt @db.Timestamptz(3)
-  verifiedById    String?            @db.Uuid
-  verifiedAt      DateTime?          @db.Timestamptz(3)
+  id                    String             @id @default(uuid()) @db.Uuid
+  hospitalId            String             @db.Uuid
+  medicalRecordId       String             @db.Uuid
+  status                PrescriptionStatus @default(ISSUED)
+  notes                 String?
+  pdfFileId             String?            @unique @db.Uuid
+  issuedAt              DateTime           @default(now()) @db.Timestamptz(3)
+  updatedAt             DateTime           @updatedAt @db.Timestamptz(3)
+  verifiedById          String?            @db.Uuid
+  verifiedAt            DateTime?          @db.Timestamptz(3)
+  /// Cancelled before any dispensing, with a reason (DEC-040 D3). The prescription is never edited.
+  cancelledAt           DateTime?          @db.Timestamptz(3)
+  cancelledById         String?            @db.Uuid
+  cancellationReason    String?
+  /// Why the doctor prescribed despite a recorded allergy (DEC-040 D4); shown to the pharmacist.
+  allergyOverrideReason String?
 
   hospital      Hospital           @relation(fields: [hospitalId], references: [id], onDelete: Restrict)
   medicalRecord MedicalRecord      @relation(fields: [medicalRecordId, hospitalId], references: [id, hospitalId], onDelete: Restrict)
   pdfFile       FileAttachment?    @relation("PrescriptionPdf", fields: [pdfFileId, hospitalId], references: [id, hospitalId], onDelete: Restrict)
   items         PrescriptionItem[]
 
-  verifiedBy User? @relation("PrescriptionVerifiedBy", fields: [verifiedById, hospitalId], references: [id, hospitalId], onDelete: Restrict)
+  verifiedBy  User? @relation("PrescriptionVerifiedBy", fields: [verifiedById, hospitalId], references: [id, hospitalId], onDelete: Restrict)
+  cancelledBy User? @relation("PrescriptionCancelledBy", fields: [cancelledById, hospitalId], references: [id, hospitalId], onDelete: Restrict)
 
   @@unique([pdfFileId, hospitalId])
   @@unique([id, hospitalId])

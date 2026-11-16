@@ -139,6 +139,10 @@ staff agenda, availability, patient portal), all times shown in the hospital tim
 
 `modules/emr`: `EmrService` behind `MedicalRecordsController` (`/medical-records`, `/medical-records/record/:id[/entries|vitals|diagnoses|files]`, `/medical-records/:patientId`), `ClinicalFilesController` (`/files/:id`), `PatientHistoryController` (`/patients/:patientId/history|allergies|medications|vaccinations|family-history`, status changes) and `Icd10Controller`. Encryption: `infra/crypto/field-crypto.ts` (`FIELD_CRYPTO`), two parameterised pgcrypto queries that batch a request's values into one round trip. Reads of clinical routes are audited with `@AuditRead`. Web: `components/emr/*` (encounter start, record view, history panel, chart) on `/dashboard/encounters/:appointmentId`, `/dashboard/records/:id`, `/dashboard/patients/:id`, `/portal/health`, `/portal/records/:id` (DEC-039).
 
+## 6d. Catalogue, PDFs, events and prescriptions (Phase 5)
+
+`modules/medicines` (catalogue, `StockLevels` cache `stock:{medicineId}` 60 s), `modules/prescriptions` (issue, cancel, list, PDF download and retry), `infra/pdf` (`PdfService` on PDFKit; `PdfRenderers` registry; `pdf` BullMQ queue with `BullPdfJobs` and `PdfProcessor`, job id `{kind}:{id}`), `common/events` (`DomainEvents`, published after commit; subscribers never fail the publisher). Renderers run in the worker with the base Prisma client and name the hospital in every query. Web: `components/prescriptions/*`, Medicines page, record and chart panels, portal Prescriptions (DEC-040).
+
 ## 7. Tenant isolation
 
 Row-per-tenant (shared schema) with three layers (TEN-001..005, DEC-018):

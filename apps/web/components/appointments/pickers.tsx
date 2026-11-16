@@ -11,7 +11,7 @@ import { errorMessage } from '@/lib/forms';
 import { cn } from '@/lib/utils';
 import { doctorsApi, patientsApi } from '@/services/org';
 
-function Picker<T extends { id: string }>({
+export function Picker<T extends { id: string }>({
   label,
   queryKey,
   fetcher,

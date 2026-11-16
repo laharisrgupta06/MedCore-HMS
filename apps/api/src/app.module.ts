@@ -23,6 +23,10 @@ import { FacilitiesModule } from './modules/facilities/facilities.module';
 import { FieldCryptoModule } from './infra/crypto/field-crypto';
 import { StorageModule } from './infra/storage/storage.service';
 import { EmrModule } from './modules/emr/emr.module';
+import { DomainEventsModule } from './common/events/domain-events';
+import { PdfCoreModule, PdfQueueModule } from './infra/pdf/pdf-jobs';
+import { MedicinesModule } from './modules/medicines/medicines.module';
+import { PrescriptionsModule } from './modules/prescriptions/prescriptions.module';
 import { RemindersModule, SchedulingModule } from './modules/appointments/appointments.module';
 
 import { buildThrottlerOptions } from './infra/throttler/throttler-options';
@@ -61,6 +65,11 @@ export { buildThrottlerOptions, isAuthRateLimited } from './infra/throttler/thro
     RemindersModule,
     SchedulingModule,
     EmrModule,
+    DomainEventsModule,
+    PdfCoreModule,
+    PdfQueueModule,
+    MedicinesModule,
+    PrescriptionsModule,
   ],
   providers: GLOBAL_PIPELINE,
 })

@@ -6,3 +6,4 @@ export * from './auth';
 export * from './org';
 export * from './appointments';
 export * from './emr';
+export * from './pharmacy';

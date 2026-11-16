@@ -15,6 +15,7 @@ import { emrApi } from '@/services/emr';
 import { patientsApi } from '@/services/org';
 import { useAuth } from '@/store/auth';
 import { HistoryPanel } from './history-panel';
+import { PrescriptionHistory } from '@/components/prescriptions/prescriptions-panel';
 import { age, when } from './shared';
 
 /** A patient's chart (API-019): history plus every consultation, newest first. */
@@ -101,6 +102,11 @@ export function ChartView({ patientId, portal }: { patientId?: string; portal?: 
         </Panel>
         <HistoryPanel patientId={id} canEdit={role === 'DOCTOR' || role === 'NURSE'} tz={tz} />
       </div>
+      <Panel title="Prescriptions" className="mt-6">
+        <div className="p-4">
+          <PrescriptionHistory patientId={portal ? undefined : id} tz={tz} />
+        </div>
+      </Panel>
     </>
   );
 }

@@ -83,3 +83,12 @@ POST,/api/patients/:patientId/vaccinations,DENY,DENY,ALLOW,ALLOW,DENY,DENY,DENY,
 POST,/api/patients/:patientId/family-history,DENY,DENY,ALLOW,ALLOW,DENY,DENY,DENY,DENY,DENY,EMR-009
 PATCH,/api/patients/:patientId/:kind/:entryId/status,DENY,DENY,ALLOW,ALLOW,DENY,DENY,DENY,DENY,DENY,Resolved or entered in error
 GET,/api/icd10,DENY,DENY,ALLOW,ALLOW,DENY,DENY,DENY,DENY,DENY,EMR-005 code search
+GET,/api/medicines,DENY,ALLOW,ALLOW,DENY,DENY,DENY,ALLOW,DENY,DENY,API-024; RX-003 search with stock
+POST,/api/medicines,DENY,ALLOW,DENY,DENY,DENY,DENY,ALLOW,DENY,DENY,Catalogue (DEC-040 D2)
+PATCH,/api/medicines/:id,DENY,ALLOW,DENY,DENY,DENY,DENY,ALLOW,DENY,DENY,Reorder level; deactivate
+POST,/api/prescriptions,DENY,DENY,ALLOW,DENY,DENY,DENY,DENY,DENY,DENY,API-020; treating doctor, open record
+GET,/api/prescriptions,DENY,DENY,ALLOW,ALLOW,DENY,DENY,ALLOW,DENY,ALLOW,Patients: own only
+GET,/api/prescriptions/:id,DENY,DENY,ALLOW,ALLOW,DENY,DENY,ALLOW,DENY,OWN,View is audited
+PATCH,/api/prescriptions/:id/cancel,DENY,DENY,OWN,DENY,DENY,DENY,DENY,DENY,DENY,Prescribing doctor, before dispensing (D3)
+GET,/api/prescriptions/:id/pdf,DENY,DENY,ALLOW,DENY,DENY,DENY,ALLOW,DENY,OWN,API-021; RX-002
+POST,/api/prescriptions/:id/pdf,DENY,DENY,OWN,DENY,DENY,DENY,DENY,DENY,DENY,Re-queue a failed PDF

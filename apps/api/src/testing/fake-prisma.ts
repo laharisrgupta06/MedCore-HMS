@@ -120,6 +120,13 @@ const MODEL_OF: Record<string, string> = {
   medicationHistory: 'MedicationHistory',
   vaccination: 'Vaccination',
   familyHistory: 'FamilyHistory',
+  medicine: 'Medicine',
+  medicineBatch: 'MedicineBatch',
+  prescription: 'Prescription',
+  prescriptionItem: 'PrescriptionItem',
+  dispense: 'Dispense',
+  stockMovement: 'StockMovement',
+  address: 'Address',
 };
 
 interface Relation {
@@ -177,6 +184,22 @@ const RELATIONS: Record<string, Record<string, Relation>> = {
   Vaccination: { recordedBy: { model: 'User', local: 'recordedById', foreign: 'id' } },
   FamilyHistory: { recordedBy: { model: 'User', local: 'recordedById', foreign: 'id' } },
   FileAttachment: { uploadedBy: { model: 'User', local: 'uploadedById', foreign: 'id' } },
+  Hospital: { address: { model: 'Address', local: 'addressId', foreign: 'id' } },
+  Prescription: {
+    hospital: { model: 'Hospital', local: 'hospitalId', foreign: 'id' },
+    medicalRecord: { model: 'MedicalRecord', local: 'medicalRecordId', foreign: 'id' },
+    items: { model: 'PrescriptionItem', local: 'id', foreign: 'prescriptionId', many: true },
+  },
+  PrescriptionItem: {
+    prescription: { model: 'Prescription', local: 'prescriptionId', foreign: 'id' },
+    medicine: { model: 'Medicine', local: 'medicineId', foreign: 'id' },
+    dispenses: { model: 'Dispense', local: 'id', foreign: 'prescriptionItemId', many: true },
+  },
+  Dispense: {
+    prescriptionItem: { model: 'PrescriptionItem', local: 'prescriptionItemId', foreign: 'id' },
+    batch: { model: 'MedicineBatch', local: 'batchId', foreign: 'id' },
+  },
+  MedicineBatch: { medicine: { model: 'Medicine', local: 'medicineId', foreign: 'id' } },
 };
 
 /** Unique constraints mirrored from schema.prisma for the modelled tables. */
@@ -195,6 +218,9 @@ const UNIQUES: Record<string, string[][]> = {
   MedicationHistory: [['supersedesId']],
   Vaccination: [['supersedesId']],
   FamilyHistory: [['supersedesId']],
+  Medicine: [['hospitalId', 'name', 'strength', 'form']],
+  MedicineBatch: [['medicineId', 'batchNumber']],
+  PrescriptionItem: [['prescriptionId', 'medicineId']],
 };
 
 /** Rows that block deletion of a parent (ON DELETE RESTRICT in the database). */
@@ -254,6 +280,20 @@ const DEFAULTS: Record<string, Row> = {
   Vaccination: { nextDueOn: null },
   FamilyHistory: { relation: null, notes: null },
   FileAttachment: { patientId: null, medicalRecordId: null },
+  Medicine: { genericName: null, isActive: true },
+  MedicineBatch: { status: 'ACTIVE', supplierId: null },
+  Prescription: {
+    status: 'ISSUED',
+    notes: null,
+    pdfFileId: null,
+    verifiedById: null,
+    verifiedAt: null,
+    cancelledAt: null,
+    cancelledById: null,
+    cancellationReason: null,
+    allergyOverrideReason: null,
+  },
+  PrescriptionItem: { instructions: null },
 };
 
 /** Mirrors the clinical triggers in constraints.sql (DEC-016): append-only and status-only tables. */
@@ -493,6 +533,12 @@ export class FakePrisma {
         ...(DEFAULTS[model] ?? {}),
       };
     if (model === 'Vitals') return { ...base, recordedAt: new Date(), ...(DEFAULTS[model] ?? {}) };
+    if (model === 'Prescription')
+      return { ...base, issuedAt: new Date(), updatedAt: new Date(), ...(DEFAULTS[model] ?? {}) };
+    if (model === 'MedicineBatch')
+      return { ...base, receivedAt: new Date(), updatedAt: new Date(), ...(DEFAULTS[model] ?? {}) };
+    if (model === 'Dispense')
+      return { ...base, dispensedAt: new Date(), ...(DEFAULTS[model] ?? {}) };
     return { ...base, updatedAt: new Date(), ...(DEFAULTS[model] ?? {}) };
   }
 
@@ -662,6 +708,13 @@ export class FakePrisma {
   doctorSchedule = this.delegate('DoctorSchedule');
   scheduleException = this.delegate('ScheduleException');
   appointment = this.delegate('Appointment');
+  medicalRecord = this.delegate('MedicalRecord');
+  medicine = this.delegate('Medicine');
+  medicineBatch = this.delegate('MedicineBatch');
+  prescription = this.delegate('Prescription');
+  prescriptionItem = this.delegate('PrescriptionItem');
+  dispense = this.delegate('Dispense');
+  stockMovement = this.delegate('StockMovement');
 
   /** Query extensions, as used by TenantPrismaService. */
   $extends(ext: { query?: { $allModels?: { $allOperations?: Hook } } }): unknown {

@@ -147,6 +147,22 @@ Phase 4 verified 2026-11-16 22:10: integration 15/15 and Playwright 30/30 on mac
 
 Approved by the owner 2026-11-16 22:10 with decisions D1–D10 (DEC-040): [implementation plan](https://claude.ai/artifact/2MDDoYb1Ps8Cw1QSZvqf8Y). Order: shared foundations (S-*), then Phase 5, Phase 6, Phase 7. Section 12 Recommended and Optional extras are not approved.
 
+## Shared foundations (Phases 5–7) and Phase 5 — Prescriptions
+
+| Task ID | Req. | Task | Status | Tests |
+| --- | --- | --- | --- | --- |
+| S-B1/S-C1 | RX-003, API-024, CACHE-002 | Medicine catalogue (`modules/medicines`): search with available stock cached 60 s, create, edit, deactivate; costs not exposed | Review | T-RX-HTTP-001, T-RBAC-001e |
+| S-E1 | RX-008, DEC-040 D1 | PDFKit service: letterhead, facts, paged tables, page numbers (`infra/pdf/pdf.service.ts`) | Review | T-PDF-001 |
+| S-F1 | RX-002 | `pdf` BullMQ queue, renderer registry, idempotent job ids, retry | Review | T-RX-HTTP, T-RX-INT-001 |
+| S-F2 | DEC-040 D5 | In-process domain events (`common/events`) | Review | T-RX-HTTP |
+| S-D1 | FE | Shared web: exported `Picker`, `StockBadge`, `PdfButton`, `saveBlob` | Review | T-FE-026..029 |
+| 5-A1 | DEC-040 D3/D4 | Migration M-05 `20261116170000_prescriptions_cancel_and_allergy_ack` (approved 22:10; to apply on macOS) | Review | T-RX-INT-001 |
+| 5-B1/5-C1 | RX-001..006, API-020/021 | Issue (treating doctor, open record, signature required, item rules), allergy check with acknowledged reason, cancel before dispensing, list and read with patient ownership, read audit | Review | T-RX-HTTP-002..005 |
+| 5-E1/5-F1 | RX-002, RX-007, RX-008 | Prescription PDF with letterhead, patient and doctor block, items, notes, allergy acknowledgement, signature image; queued after commit | Review | T-RX-HTTP-002, T-RX-INT-001 |
+| 5-D1 | FE | Record view Prescriptions panel and form (catalogue search, quantity suggestion, allergy dialog), cards with PDF and cancel, chart section, portal Prescriptions, Medicines catalogue page | Review | T-FE-026..029, T-E2E-005 |
+
+Open in Phase 5: macOS `pnpm install` (new dependency pdfkit), apply M-05, `pnpm test:int` (adds T-RX-INT-001), Playwright (adds prescriptions.spec.ts).
+
 ## Phases 2–14 (from the roadmap; detailed breakdown added when each phase starts)
 
 | Task ID | Req. | Task | Owner | Priority | Status |
@@ -154,7 +170,7 @@ Approved by the owner 2026-11-16 22:10 with decisions D1–D10 (DEC-040): [imple
 | P2-01..06 | SCOPE-005/006, ROLE-001/002, API-013/014/015 | Hospital onboarding and verification; departments; staff; doctors (signature upload); patients (MRN); rooms and beds | BE, FE | Critical | Done (2026-11-16: VM unit, Mac integration 14/14, E2E 20/20) |
 | P3-01..08 | SCOPE-007..009, APPT-001..006, CACHE-002 | Weekly availability, exceptions, slots (60 s cache), booking with locks, status lifecycle, emergency, reminders 24 h/1 h, booking UI | BE, FE, QA | Critical | Done (see Phase 3 below) |
 | P4-01..08 | SCOPE-010/011, EMR-001..012, SEC-013/014 | Encounter record, vitals + BMI, diagnoses + ICD-10, histories, corrections UI, attachments, pgcrypto helpers, patient isolation test | BE, FE, QA | Critical | Done (2026-11-16) |
-| P5-01..05 | SCOPE-012, RX-001..008 | Prescriptions, medicine search, PDF with letterhead and signature, verification, ready-for-pickup | BE, FE | High | Not Started |
+| P5-01..05 | SCOPE-012, RX-001..008 | Prescriptions, medicine search, PDF with letterhead and signature, verification, ready-for-pickup | BE, FE | High | Review (see Phase 5 above; verification and ready-for-pickup land with Phase 7 per D9) |
 | P6-01..06 | SCOPE-013, LAB-001..007 | Test catalogue and ranges, orders, sample collection, results, senior approval, amended orders, report PDF | BE, FE, QA | High | Not Started |
 | P7-01..06 | SCOPE-014, PHARM-001..006 | Medicines and batches, FIFO dispensing, quarantine, low-stock alerts, nightly expiry job, expired-dispense test | BE, FE, QA | High | Not Started |
 | P8-01..07 | SCOPE-015, BILL-001..008 | Invoices and items, totals integrity, Stripe/Razorpay/cash, verified webhooks, receipts, TPA claims, reconciliation | BE, FE, QA | Critical | Not Started |
