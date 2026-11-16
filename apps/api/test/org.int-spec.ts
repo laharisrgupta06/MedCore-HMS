@@ -67,11 +67,7 @@ describe('Phase 2 integration: onboarding a hospital end to end', () => {
     };
     const call = (s: { token: string }) => ({
       post: (url: string, body: object = {}) =>
-        agent
-          .post(url)
-          .set('Authorization', `Bearer ${s.token}`)
-          .set(CSRF_HEADER, csrf)
-          .send(body),
+        agent.post(url).set('Authorization', `Bearer ${s.token}`).set(CSRF_HEADER, csrf).send(body),
       get: (url: string) => agent.get(url).set('Authorization', `Bearer ${s.token}`),
     });
 
