@@ -34,7 +34,7 @@ passes; environment stated) · **Planned**. No regulatory compliance or certific
 | Encryption in transit | SEC-002 | Planned (Nginx TLS, Phase 14) | — | Local dev is HTTP on localhost |
 | File uploads | SEC-013, EMR-010 | **Partly**: doctor signatures validated by magic bytes + declared type + 512 KB, generated storage keys; clinical attachments in Phase 4; 20 MB CHECK in schema | **Yes** signatures (VM T-ORG) | Executables rejected by content check |
 | Clinical immutability | EMR-002, DEC-016 | Triggers in `constraints.sql` (not migrated) | — | Originals never changed; who/when/why recorded |
-| Booking integrity and privacy | APPT-002/006, TEST-011/012 | **Yes**: doctor row lock + exclusion constraints; patients and doctors list and read only their own appointments (other ids answer 404); reminder texts contain no clinical detail and SMS goes only to verified phones | **Yes** in memory (VM T-APPT-HTTP, T-RBAC-001c); real DB T-APPT-INT-001 pending | |
+| Booking integrity and privacy | APPT-002/006, TEST-011/012 | **Yes**: doctor row lock + exclusion constraints; patients and doctors list and read only their own appointments (other ids answer 404); reminder texts contain no clinical detail and SMS goes only to verified phones | **Yes** in memory (VM T-APPT-HTTP, T-RBAC-001c); real DB T-APPT-INT-001 pass (macOS) | |
 | Secrets | DEP-002 | **Yes**: `.env` git-ignored, `.env.example` placeholders, CI throwaway values only | Manual check | |
 | Local infrastructure exposure | — | **Yes**: Docker ports bound to 127.0.0.1 | Manual | |
 | Monitoring | SEC-015 | **Partly**: Sentry initialised when `SENTRY_DSN` set; 5xx captured | — | No DSN configured yet |
@@ -45,13 +45,13 @@ passes; environment stated) · **Planned**. No regulatory compliance or certific
 
 | ID | Risk | Mitigation / status |
 | --- | --- | --- |
-| R-01 | Constraints and triggers applied on PostgreSQL (owner, 2026-11-16) but not yet exercised by tests | `pnpm test:int` (T-MIG-001..006) |
-| R-02 | Request-level tenant isolation verified only in memory; CI has never run | T-TEN-INT-001 on macOS after the migration; CI after an approved push |
+| R-01 (closed 2026-11-16) | Constraints and triggers applied on PostgreSQL (owner, 2026-11-16) but not yet exercised by tests | `pnpm test:int` (T-MIG-001..006). Closed: T-MIG-001..006 / T-AUTH-INT-001 pass on macOS (14/14) |
+| R-02 | Request-level tenant isolation now verified on PostgreSQL (T-TEN-INT-001, macOS); CI has never run | CI after an approved push |
 | R-03 | Agent Teams through OpenRouter: provider and model behaviour unverified; credentials live in the owner's shell profile | Resolve the local `401 User not found`; never place keys in the repository |
 | R-04 | Encryption key management for pgcrypto not yet designed in detail | Phase 4: env key, rotation script, documented |
 | R-05 | Twilio trial and Indian SMS (DLT) restrictions for real SMS | Local SMS inbox in development (DEC-011); document limits |
 | R-06 | ESLint 9 is marked deprecated upstream | Revisit after Phase 1; no security impact today |
 | R-08 | Account enumeration: register returns 409 EMAIL_IN_USE (standard sign-up behaviour); login, resend and forgot-password answer generically | Auth rate limit; accepted trade-off, revisit if required |
-| R-09 | Auth flows verified only against in-memory Prisma/Redis so far | T-AUTH-INT-001 on macOS after the migration |
+| R-09 (closed 2026-11-16) | Auth flows verified only against in-memory Prisma/Redis so far | T-AUTH-INT-001 on macOS after the migration. Closed: T-MIG-001..006 / T-AUTH-INT-001 pass on macOS (14/14) |
 | R-10 | Prisma drops undeclared keys: drift check found the 4 SQL-only same-tenant keys (now declared, DEC-031); CHECKs, exclusions and triggers remain outside Prisma | `sql-drift.spec.ts`; every migration `--create-only` + review; `prisma:drift` after each migration |
 | R-07 | CI workflow has never run on GitHub (nothing pushed) | Push only with owner approval; then verify CI |
