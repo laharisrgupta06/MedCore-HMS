@@ -7,4 +7,6 @@ module.exports = {
   transform: { '^.+\\.ts$': ['ts-jest', { tsconfig: 'tsconfig.json' }] },
   setupFiles: ['<rootDir>/test/load-env.ts'],
   testTimeout: 20000,
+  // If bootstrap fails, Redis clients keep reconnecting; exit so CI reports the failure instead of hanging.
+  forceExit: true,
 };

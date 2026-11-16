@@ -14,7 +14,7 @@
     "lint": "eslint .",
     "typecheck": "pnpm build:types && pnpm -r typecheck",
     "test": "pnpm build:types && pnpm -r test",
-    "test:int": "pnpm --filter @medcore/api test:int",
+    "test:int": "pnpm build:types && pnpm --filter @medcore/api test:int",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "infra:up": "docker compose -f docker/compose.dev.yml --env-file .env up -d",

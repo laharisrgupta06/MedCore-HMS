@@ -16,7 +16,10 @@ describe('Phase 0 integration: real PostgreSQL and Redis', () => {
     configureApp(app, { corsOrigins: ['http://localhost:3000'] });
     await app.init();
   });
-  afterAll(() => app.close());
+  // app is undefined if bootstrap failed; avoid masking the real error with a TypeError.
+  afterAll(async () => {
+    await app?.close();
+  });
 
   it('GET /api/health reports PostgreSQL, Redis and the queue as up', async () => {
     const res = await request(app.getHttpServer()).get('/api/health').expect(200);
@@ -25,14 +28,17 @@ describe('Phase 0 integration: real PostgreSQL and Redis', () => {
   });
 
   it('Redis throttler storage counts hits and blocks over the limit', async () => {
-    const redis = new Redis(process.env.REDIS_URL as string);
-    const storage = new RedisThrottlerStorage(redis, `medcore:test:${Date.now()}`);
-    const first = await storage.increment('ip', 5_000, 2, 5_000, 't');
-    await storage.increment('ip', 5_000, 2, 5_000, 't');
-    const third = await storage.increment('ip', 5_000, 2, 5_000, 't');
-    expect(first).toMatchObject({ totalHits: 1, isBlocked: false });
-    expect(third).toMatchObject({ totalHits: 3, isBlocked: true });
-    expect(third.timeToBlockExpire).toBeGreaterThan(0);
-    await redis.quit();
+    const redis = new Redis(process.env.REDIS_URL as string, { maxRetriesPerRequest: 1 });
+    try {
+      const storage = new RedisThrottlerStorage(redis, `medcore:test:${Date.now()}`);
+      const first = await storage.increment('ip', 5_000, 2, 5_000, 't');
+      await storage.increment('ip', 5_000, 2, 5_000, 't');
+      const third = await storage.increment('ip', 5_000, 2, 5_000, 't');
+      expect(first).toMatchObject({ totalHits: 1, isBlocked: false });
+      expect(third).toMatchObject({ totalHits: 3, isBlocked: true });
+      expect(third.timeToBlockExpire).toBeGreaterThan(0);
+    } finally {
+      redis.disconnect();
+    }
   });
 });
