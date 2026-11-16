@@ -593,7 +593,8 @@ Any proposed deviation must be communicated to the Team Lead for approval.
 
 ## Approved design tokens
 
-Not yet approved. To be added after the Frontend Engineer's proposal (Part 11.18, Step 5) is approved.
+Approved by the project owner on 2026-11-16 (DEC-033). The approved tokens and component standards are
+the ones in [DESIGN.md](DESIGN.md); that file is the single source of truth for token values.
 
 ## Frontend implementation checklist
 

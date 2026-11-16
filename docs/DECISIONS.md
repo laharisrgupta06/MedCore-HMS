@@ -180,3 +180,12 @@ Every significant product, architecture, database, design and process decision. 
 - Permanent fix (proposed): one migration `ALTER TABLE "hospitals" ALTER COLUMN "id" SET DEFAULT gen_random_uuid();` with `@default(dbgenerated("gen_random_uuid()"))` in `schema.prisma`. The database then generates ids whatever Prisma omits. Checked on a disposable PostgreSQL 16 copy of the applied migration: insert without id succeeds. Nothing is created in the repository until approved.
 - Related: DEC-031, M-02.
 
+### DEC-033: Design tokens approved
+- Status: **Approved** (owner, 2026-11-16 15:19: "Approve tokens")
+- Decision: the tokens and component standards in [DESIGN.md](DESIGN.md) (sage `#52714D` primary, tomato `#C8432B` accent used sparingly, off-white `#FAF8F3` background, text `#1E2420`, error `#B42318`; IBM Plex Sans with Source Serif 4) are the design system. Unblocks Phase 1D and every styled screen.
+- Related: frontend-design-system.md §11.18, P1D-01.
+
+### DEC-034: Execution mode
+- Status: **Approved** (owner, 15:19: "Real team on my Mac")
+- Decision: development continues as a real Claude Code Agent Team launched from Claude Code in the owner's Mac terminal, once its sign-in works. Teammates use the lead's model (`model: inherit`) at `effort: medium` from `.claude/agents/*.md`; the model must be confirmed as Opus 5.5 with `/model` before launch. The cloud chat session cannot create a team (no team tools). Supersedes DEC-022.
+

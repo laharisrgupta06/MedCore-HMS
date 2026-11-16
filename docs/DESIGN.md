@@ -1,8 +1,7 @@
 # MedCore HMS — Design System
 
-> **Status: PROPOSED, awaiting the project owner's approval.** No styled application screen may be built
-> until the tokens below are approved (frontend-design-system.md §11.18, steps 5–6). Approval is recorded
-> as a decision in [DECISIONS.md](DECISIONS.md); changes after approval need a new decision.
+> **Status: APPROVED by the project owner on 2026-11-16, 15:19 (DEC-033).** Styled screens may now be
+> built with these tokens. Changes after approval need a new decision in [DECISIONS.md](DECISIONS.md).
 
 The full, mandatory frontend specification (Parts 11–12 of the master instruction, verbatim) is
 [frontend-design-system.md](frontend-design-system.md). This document is the single source of truth for

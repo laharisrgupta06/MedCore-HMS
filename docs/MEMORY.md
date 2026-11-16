@@ -17,9 +17,9 @@ Claude (main session acting as Team Lead).
 | Phase 0 | Done and verified (VM + macOS). Open: CI never run on GitHub; browser checks of status page and Swagger UI |
 | Database | Schema revision 2 + DEC-031 declarations. Initial migration `20261116085814_init` **applied on macOS** by the owner; drift (4 SQL-only keys) fixed in schema.prisma (DEC-031), drift now empty. All unit + 4 integration suites pass on macOS (14:53). Migration 2 `20261116092500_hospital_id_db_default` (DEC-032, approved) created, not yet applied. No other migrations |
 | Backend | Foundation + Phase 1B auth (register, email/phone OTP, login, refresh rotation, logout one/all, forgot/reset, me, CSRF, auth rate limit, RBAC guard, audit of auth events, create-super-admin CLI). Phase 1C: tenant context + scoped Prisma client, permissions matrix, audit interceptor, users endpoints. Verified only with in-memory Prisma/Redis |
-| Frontend | Foundation only: same-origin proxy, API client, service status page. **Design tokens proposed, not approved** ([DESIGN.md](DESIGN.md)) |
+| Frontend | Foundation only: same-origin proxy, API client, service status page. **Design tokens approved (DEC-033)**; no styled screens yet |
 | Tests | 288 API unit + 7 web pass (VM); 2 integration pass (Mac); auth, tenancy and constraint integration tests (T-AUTH-INT-001, T-TEN-INT-001, T-MIG-001..006) written, not run (need migration). Audit entries store field names only (DEC-030). Details: [TEST_PLAN.md](TEST_PLAN.md) |
-| Agent Teams | **Abandoned** by the owner (13:46): single session only. Untracked `.claude/agents/*` and `.claude/team-kickoff.md` from the abandoned setup are not used and not committed |
+| Agent Teams | **Chosen again (DEC-034, 15:19)**: real team from Claude Code on the owner's Mac, after its sign-in is fixed. Definitions `.claude/agents/*.md` (model inherit, effort medium) and `.claude/team-kickoff.md` are ready, untracked |
 
 ## Git
 
@@ -32,8 +32,8 @@ Claude (main session acting as Team Lead).
 ## Pending owner decisions and approvals
 
 1. **"Approve schema"** (DEC-019) → then run the migration commands on macOS (P1A-04).
-2. **Design tokens** in [DESIGN.md](DESIGN.md) (blocks P1D).
-3. ~~Agent Teams~~: abandoned; work continues in this single session.
+2. ~~Design tokens~~: approved (DEC-033).
+3. Agent Teams (DEC-034): owner fixes Mac sign-in, confirms Opus 5.5 in `/model`, launches with `.claude/team-kickoff.md`.
 4. Acknowledge implementation-level decisions DEC-014, DEC-015, DEC-020, DEC-023, DEC-025 (currently Proposed).
 5. Branch `feat/phase-1-auth` created from `feat/phase-0-scaffold` at `7cd5957`.
 6. Part 8 of the latest instruction was cut off; resend if it adds rules.

@@ -14,7 +14,7 @@ passed** (environment recorded in [TEST_PLAN.md](TEST_PLAN.md)). Phases follow
 | 1A | Database schema | 7 | 2 | **Review**: awaiting "approve schema", then migration on macOS |
 | 1B | Authentication | 12 | 0 | **Review**: P1B-01..12 implemented and unit/HTTP-tested (VM); database integration tests wait for the migration (P1A-04) |
 | 1C | RBAC and tenancy | 7 | 0 | **Review**: P1C-01..06 implemented, 285 API tests pass (VM); PostgreSQL tests wait for the migration; P1C-07 needs an approved push |
-| 1D | Auth frontend | 6 | 0 | Blocked: design approval |
+| 1D | Auth frontend | 6 | 1 | Ready: tokens approved (DEC-033) |
 | 2–14 | Remaining modules, hardening, deployment | 75 | 0 | Not Started |
 
 ## Phase 0 — Foundation
@@ -95,7 +95,7 @@ run in CI with the rest of the suite once pushed (P1C-07).
 | # | Blocker | Needs | Unblocks |
 | --- | --- | --- | --- |
 | B-1 | Migration 2 (DEC-032, approved) | Owner runs the 5 commands in [migration-review.md](migration-review.md) §10 | P1A-04/05, Done for 1B/1C (T-AUTH-INT-001, T-TEN-INT-001, T-MIG-*), Phase 2 |
-| B-2 | Design tokens | Owner approval of [DESIGN.md](DESIGN.md) | Phase 1D and every styled screen |
+| B-2 | ~~Design tokens~~ | Approved 15:19 (DEC-033) | — |
 | B-3 | CI on GitHub | Owner approval to push | P0-14, P1C-07 |
 | B-4 | Browser checks | Owner opens the status page and Swagger UI | P0-15, P0-16 |
 | B-5 | Proposed decisions | Owner acknowledgement of DEC-014/015/020/023/025..030 | Records only; not blocking code |
@@ -105,7 +105,7 @@ run in CI with the rest of the suite once pushed (P1C-07).
 
 | Task ID | Req. | Task | Owner | Deps | Priority | Status | Tests |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| P1D-01 | Part 11 | Design tokens approved ([DESIGN.md](DESIGN.md)) | LEAD | owner | Critical | Blocked (approval) | — |
+| P1D-01 | Part 11 | Design tokens approved ([DESIGN.md](DESIGN.md)) | LEAD | owner | Critical | Done (DEC-033) | — |
 | P1D-02 | Part 11 | Tokens in Tailwind/Shadcn, base components | FE | P1D-01 | Critical | Not Started | T-FE-* |
 | P1D-03 | FE-002, AUTH-001/006 | `(auth)`: login, register, verify email/phone | FE | P1D-02, P1B | Critical | Not Started | T-FE-*, T-E2E-001 |
 | P1D-04 | AUTH-004/005 | Forgot and reset password screens | FE | P1D-02, P1B-07 | High | Not Started | T-FE-* |
