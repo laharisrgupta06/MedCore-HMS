@@ -1,4 +1,4 @@
-import { randomBytes } from 'node:crypto';
+import { randomBytes, randomUUID } from 'node:crypto';
 import { Prisma, PrismaClient, type Role } from '@prisma/client';
 
 /**
@@ -23,6 +23,7 @@ async function hospital() {
   const id = uid();
   const h = await prisma.hospital.create({
     data: {
+      id: randomUUID(), // see DEC-032
       name: `int-${id}`,
       code: `INT${id}`.toUpperCase(),
       email: `int-h-${id}@example.com`,
@@ -204,7 +205,7 @@ describe('T-MIG-004: cross-hospital references are impossible', () => {
           createdById: patA.u.id,
         },
       }),
-    ).rejects.toThrow();
+    ).rejects.toMatchObject({ code: 'P2003' }); // composite (doctorId, hospitalId) foreign key
   });
 });
 

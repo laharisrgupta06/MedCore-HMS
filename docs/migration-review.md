@@ -151,3 +151,15 @@ pnpm test && pnpm test:int                  # unit + PostgreSQL/Redis/Mailpit in
 If `prisma:drift` still prints statements, copy them back; do not run `prisma:migrate` (it would create
 and apply a migration from them).
 
+## 9. First integration run (14:41) and fix
+
+`prisma:drift` was empty. `test:int`: health passed; auth, tenancy and constraints failed at
+`prisma.hospital.create()` with `Null constraint violation on the fields: (id)`. Root cause and fix: DEC-032
+(interim: explicit hospital ids in the tests; permanent: a one-line default migration awaiting approval).
+The SQL behaviour the suites test was checked beforehand on a disposable PostgreSQL 16 loaded with the
+applied migration (TEST_PLAN T-SIM-001). Next run:
+
+```bash
+pnpm test && pnpm test:int
+```
+

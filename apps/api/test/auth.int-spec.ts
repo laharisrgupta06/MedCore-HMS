@@ -1,4 +1,4 @@
-import { randomBytes } from 'node:crypto';
+import { randomBytes, randomUUID } from 'node:crypto';
 import type { INestApplication } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import { CSRF_HEADER } from '@medcore/types';
@@ -55,6 +55,9 @@ describe('Phase 1B integration: auth with PostgreSQL, Redis and Mailpit', () => 
     if (!migrated) return;
     await prisma.hospital.create({
       data: {
+        // Explicit id: hospitals.id is also a foreign-key column (DEC-031), so Prisma does not
+        // apply @default(uuid()) to it (DEC-032).
+        id: randomUUID(),
         name: `Integration Hospital ${run}`,
         code: `INT-${run.toUpperCase()}`,
         email: `int-hospital-${run}@example.com`,

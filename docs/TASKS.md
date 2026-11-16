@@ -94,7 +94,7 @@ run in CI with the rest of the suite once pushed (P1C-07).
 
 | # | Blocker | Needs | Unblocks |
 | --- | --- | --- | --- |
-| B-1 | Migration verification | Owner runs `prisma:drift` (expect empty), `prisma:generate`, `pnpm test:int` ([migration-review.md](migration-review.md) §8) | P1A-04/05, Done for 1B/1C (T-AUTH-INT-001, T-TEN-INT-001, T-MIG-*), Phase 2 |
+| B-1 | Migration verification | Drift empty (owner, 14:41). Owner re-runs `pnpm test && pnpm test:int` after the DEC-032 test fix; approve or decline the DEC-032 default migration | P1A-04/05, Done for 1B/1C (T-AUTH-INT-001, T-TEN-INT-001, T-MIG-*), Phase 2 |
 | B-2 | Design tokens | Owner approval of [DESIGN.md](DESIGN.md) | Phase 1D and every styled screen |
 | B-3 | CI on GitHub | Owner approval to push | P0-14, P1C-07 |
 | B-4 | Browser checks | Owner opens the status page and Swagger UI | P0-15, P0-16 |

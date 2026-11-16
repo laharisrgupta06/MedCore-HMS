@@ -1,4 +1,4 @@
-import { randomBytes } from 'node:crypto';
+import { randomBytes, randomUUID } from 'node:crypto';
 import { Prisma, PrismaClient } from '@prisma/client';
 import { TenantContext } from '../src/common/tenancy/tenant-context';
 import { TenantPrismaService } from '../src/common/tenancy/tenant-prisma.service';
@@ -23,6 +23,7 @@ async function migrated(): Promise<void> {
 async function hospitalWithNurse(run: string, tag: string) {
   const hospital = await prisma.hospital.create({
     data: {
+      id: randomUUID(), // see DEC-032
       name: `Tenancy ${tag} ${run}`,
       code: `TEN${tag}-${run}`.toUpperCase(),
       email: `int-ten-${tag}-${run}@example.com`,
@@ -46,7 +47,10 @@ async function hospitalWithNurse(run: string, tag: string) {
     await tx.staffProfile.create({ data: { hospitalId: hospital.id, userId: u.id } });
     return u;
   });
-  return { hospital, nurse };
+  const department = await prisma.department.create({
+    data: { hospitalId: hospital.id, name: `int-ten-dept-${tag}-${run}` },
+  });
+  return { hospital, nurse, department };
 }
 
 describe('Phase 1C integration: tenant isolation on PostgreSQL', () => {
@@ -81,9 +85,13 @@ describe('Phase 1C integration: tenant isolation on PostgreSQL', () => {
       'Int',
     );
 
-    // Bypassing the extension: a staff profile in hospital A cannot point at hospital B's user.
+    // Bypassing the extension: hospital A's staff profile cannot point at hospital B's department.
+    // P2003 = foreign key violation, i.e. rejected by the composite (departmentId, hospitalId) key.
     await expect(
-      prisma.staffProfile.create({ data: { hospitalId: a.hospital.id, userId: b.nurse.id } }),
-    ).rejects.toThrow();
+      prisma.staffProfile.update({
+        where: { userId: a.nurse.id },
+        data: { departmentId: b.department.id },
+      }),
+    ).rejects.toMatchObject({ code: 'P2003' });
   });
 });
