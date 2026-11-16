@@ -1,10 +1,107 @@
 @import 'tailwindcss';
 
-/*
- * Design tokens are intentionally not defined yet. Per docs/frontend-design-system.md
- * (Part 11.18, steps 4 to 6), the colour palette, typography and component tokens are
- * proposed and approved before any styled application screen is built.
- */
+/* Approved design tokens (docs/DESIGN.md, DEC-033). Do not add colours outside this set. */
+@theme {
+  --color-sage-50: #f3f6f2;
+  --color-sage-100: #e3ebe1;
+  --color-sage-200: #c8d7c4;
+  --color-sage-300: #a6bea1;
+  --color-sage-400: #84a47e;
+  --color-sage-500: #688a62;
+  --color-sage-600: #52714d;
+  --color-sage-700: #405a3d;
+  --color-sage-800: #2f432d;
+  --color-sage-900: #1f2d1e;
+  --color-tomato-50: #fdf0ec;
+  --color-tomato-100: #fadbd2;
+  --color-tomato-600: #c8432b;
+  --color-tomato-700: #a33622;
+
+  --color-bg: #faf8f3;
+  --color-surface: #ffffff;
+  --color-surface-muted: #f2efe7;
+  --color-border: #e2ddd1;
+  --color-border-strong: #8c8576;
+  --color-ink: #1e2420;
+  --color-ink-secondary: #4a534c;
+  --color-ink-muted: #6b736d;
+  --color-ink-disabled: #9aa09b;
+
+  --color-success: #2e6b3f;
+  --color-success-bg: #e8f2ea;
+  --color-warning: #8a5300;
+  --color-warning-bg: #fbf1e1;
+  --color-error: #b42318;
+  --color-error-bg: #fcebe9;
+  --color-info: #23578f;
+  --color-info-bg: #e8f0f8;
+
+  --font-sans: 'IBM Plex Sans', ui-sans-serif, system-ui, sans-serif;
+  --font-serif: 'Source Serif 4', ui-serif, Georgia, serif;
+  --font-mono: 'IBM Plex Mono', ui-monospace, monospace;
+
+  --text-display: 36px;
+  --text-display--line-height: 44px;
+  --text-h1: 28px;
+  --text-h1--line-height: 36px;
+  --text-h2: 22px;
+  --text-h2--line-height: 30px;
+  --text-h3: 18px;
+  --text-h3--line-height: 26px;
+  --text-body: 15px;
+  --text-body--line-height: 24px;
+  --text-body-sm: 13px;
+  --text-body-sm--line-height: 20px;
+  --text-label: 13px;
+  --text-label--line-height: 18px;
+  --text-caption: 12px;
+  --text-caption--line-height: 16px;
+
+  --radius-sm: 4px;
+  --radius-md: 6px;
+  --radius-lg: 10px;
+
+  --shadow-1: 0 1px 2px rgba(30, 36, 32, 0.06);
+  --shadow-2: 0 4px 12px rgba(30, 36, 32, 0.08);
+  --shadow-3: 0 12px 32px rgba(30, 36, 32, 0.12);
+
+  --ease-standard: cubic-bezier(0.2, 0, 0, 1);
+}
+
+@layer base {
+  html {
+    background: var(--color-bg);
+    color: var(--color-ink);
+    font-family: var(--font-sans);
+    font-size: 15px;
+    line-height: 24px;
+    -webkit-font-smoothing: antialiased;
+  }
+  body {
+    min-height: 100dvh;
+  }
+  :focus-visible {
+    outline: 2px solid var(--color-tomato-600);
+    outline-offset: 2px;
+  }
+  ::selection {
+    background: var(--color-sage-200);
+  }
+}
+
+@keyframes mc-fade-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+.mc-enter {
+  animation: mc-fade-in 250ms var(--ease-standard) both;
+}
 
 @media (prefers-reduced-motion: reduce) {
   *,

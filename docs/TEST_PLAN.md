@@ -69,6 +69,10 @@ security, performance (`EXPLAIN ANALYZE`, DB-019), responsive and accessibility 
 | T-INT-007 | all | Third macOS run (owner, 14:53): unit and all four integration suites (health, auth, tenancy, constraints T-MIG-001..006) | Pass | Pass | Pass | **Mac** | 2026-11-16 |
 | T-SIM-002 | DEC-032 | Disposable PostgreSQL 16: init + migration 2; existing rows unchanged (md5), insert without id returns uuid, constraints/triggers unchanged | As specified | Pass | Pass | Cloud workspace | 2026-11-16 |
 | T-MIG-008 | DEC-032 | `constraints.int-spec.ts`: hospital created without an id gets a v4 UUID; column default is `gen_random_uuid()`. The interim explicit ids were removed from the suites | Pass | Not run (migration 2 not applied yet) | Pending | **Mac** | — |
+| T-FE-001..003 | FE-001, SEC-010, AUTH-003 | `lib/api-client.auth.test.ts`: CSRF header on writes only, CSRF fetched when missing, token attached and refreshed once on 401, expired session reported without retry loop, no token when auth disabled, paginated meta | As specified | 6/6 pass | Pass | VM | 2026-11-16 |
+| T-FE-004 | AUTH-002 | `services/auth.test.ts`: role home; `?next=` only same-origin and same area (no open redirect) | As specified | 2/2 pass | Pass | VM | 2026-11-16 |
+| T-FE-005..013 | AUTH-001/002/005/006 | `components/auth/auth-forms.test.tsx`: login validation, silent-session redirect, sign-in + safe next, EMAIL_NOT_VERIFIED link, expired notice; register password rules, exact API body, hospital-code field error; reset token guard and success | As specified | 10/10 pass | Pass | VM | 2026-11-16 |
+| T-E2E-001 | TEST-004, FE-002 | `e2e/tests/auth.spec.ts` (desktop + mobile Chromium): public links, sign-in errors from the API, unknown hospital code, protected-route redirects, reset without token, 404, no horizontal overflow | As specified | Not run (needs live stack on macOS) | Pending | **Mac** | — |
 | T-STA-001 | DEP-003 | Prettier, ESLint, TypeScript (all packages) | Clean | Clean | Pass | VM | 2026-11-16 |
 | T-STA-002 | SCOPE-021 | `pnpm build` (types, API, web) | Builds | Builds | Pass | VM | 2026-11-16 |
 | T-STA-003 | DB-001 | `prisma validate` schema revision 2 | Valid | Valid | Pass | VM (offline validator) | 2026-11-16 |
@@ -76,7 +80,7 @@ security, performance (`EXPLAIN ANALYZE`, DB-019), responsive and accessibility 
 | T-STA-005 | SCOPE-001 | Docker services PostgreSQL, Redis, Mailpit healthy | Healthy | Healthy (owner report) | Pass | **Mac** | 2026-11-16 |
 | T-STA-006 | DB-020 | `prisma generate` | Succeeds | Succeeds (owner report) | Pass | **Mac** | 2026-11-16 |
 
-Totals: API unit 292/292 (VM); integration 4 suites pass (Mac, 14:53), web 7/7 (VM), integration 2/2 (Mac). CI: not run.
+Totals: API unit 292/292 (VM); integration 4 suites pass (Mac, 14:53), web 25/25 (VM), integration 2/2 (Mac). CI: not run.
 Not run yet: **T-AUTH-INT-001** (`test/auth.int-spec.ts`: register → Mailpit OTP → login → refresh → logout
 → audit rows, with the real role/profile trigger). It fails with an explicit message until the initial
 migration exists (P1A-04). Also not run: **T-MIG-001..006** (`test/constraints.int-spec.ts`; T-MIG-005 covers audit, medical-record locks only so far; clinical correction triggers are tested with the EMR in Phase 4) and **T-TEN-INT-001** (`test/tenancy.int-spec.ts`: scoped client with real

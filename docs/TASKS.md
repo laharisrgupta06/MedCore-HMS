@@ -14,7 +14,7 @@ passed** (environment recorded in [TEST_PLAN.md](TEST_PLAN.md)). Phases follow
 | 1A | Database schema | 7 | 2 | **Review**: awaiting "approve schema", then migration on macOS |
 | 1B | Authentication | 12 | 0 | **Review**: P1B-01..12 implemented and unit/HTTP-tested (VM); database integration tests wait for the migration (P1A-04) |
 | 1C | RBAC and tenancy | 7 | 0 | **Review**: P1C-01..06 implemented, 285 API tests pass (VM); PostgreSQL tests wait for the migration; P1C-07 needs an approved push |
-| 1D | Auth frontend | 6 | 1 | Ready: tokens approved (DEC-033) |
+| 1D | Auth frontend | 6 | 1 | **Review**: all screens built, 25 web tests pass (VM); Playwright `e2e/tests/auth.spec.ts` to run on macOS against the live stack |
 | 2–14 | Remaining modules, hardening, deployment | 75 | 0 | Not Started |
 
 ## Phase 0 — Foundation
@@ -106,11 +106,11 @@ run in CI with the rest of the suite once pushed (P1C-07).
 | Task ID | Req. | Task | Owner | Deps | Priority | Status | Tests |
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | P1D-01 | Part 11 | Design tokens approved ([DESIGN.md](DESIGN.md)) | LEAD | owner | Critical | Done (DEC-033) | — |
-| P1D-02 | Part 11 | Tokens in Tailwind/Shadcn, base components | FE | P1D-01 | Critical | Not Started | T-FE-* |
-| P1D-03 | FE-002, AUTH-001/006 | `(auth)`: login, register, verify email/phone | FE | P1D-02, P1B | Critical | Not Started | T-FE-*, T-E2E-001 |
-| P1D-04 | AUTH-004/005 | Forgot and reset password screens | FE | P1D-02, P1B-07 | High | Not Started | T-FE-* |
-| P1D-05 | AUTH-003, TECH-018 | Auth store, silent refresh, role redirect, logout | FE | P1D-03 | Critical | Not Started | T-FE-* |
-| P1D-06 | DEC-009 | Custom 404, Privacy, Terms (legal review flagged) | FE | P1D-02 | Medium | Not Started | T-FE-* |
+| P1D-02 | Part 11 | Tokens in Tailwind/Shadcn, base components | FE | P1D-01 | Critical | Review | T-FE-* |
+| P1D-03 | FE-002, AUTH-001/006 | `(auth)`: login, register, verify email/phone | FE | P1D-02, P1B | Critical | Review | T-FE-*, T-E2E-001 |
+| P1D-04 | AUTH-004/005 | Forgot and reset password screens | FE | P1D-02, P1B-07 | High | Review | T-FE-* |
+| P1D-05 | AUTH-003, TECH-018 | Auth store, silent refresh, role redirect, logout | FE | P1D-03 | Critical | Review | T-FE-* |
+| P1D-06 | DEC-009 | Custom 404, Privacy, Terms (legal review flagged) | FE | P1D-02 | Medium | Review | T-FE-* |
 
 ## Phases 2–14 (from the roadmap; detailed breakdown added when each phase starts)
 

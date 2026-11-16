@@ -189,3 +189,10 @@ Every significant product, architecture, database, design and process decision. 
 - Status: **Approved** (owner, 15:19: "Real team on my Mac")
 - Decision: development continues as a real Claude Code Agent Team launched from Claude Code in the owner's Mac terminal, once its sign-in works. Teammates use the lead's model (`model: inherit`) at `effort: medium` from `.claude/agents/*.md`; the model must be confirmed as Opus 5.5 with `/model` before launch. The cloud chat session cannot create a team (no team tools). Supersedes DEC-022.
 
+### DEC-035: Single-session development (final)
+- Status: **Approved** (owner, 15:28: "We are permanently proceeding with ONE SINGLE CLAUDE CODE SESSION.") Supersedes DEC-034.
+
+### DEC-036: Frontend session handling
+- Status: **Proposed** (Phase 1D implementation)
+- Decision: the access token stays in memory (Zustand), never in browser storage; the page restores a session with `POST /auth/refresh` from the httpOnly cookie; refreshes are single-flight and serialised across tabs with the Web Locks API so two tabs never replay the same rotated token; logout is broadcast to other tabs. Route protection is client-side for rendering only. Fonts are self-hosted through `@fontsource` packages (no runtime third-party requests). The web app sends `X-Frame-Options: DENY`, `nosniff`, a strict referrer policy and a restrictive permissions policy.
+

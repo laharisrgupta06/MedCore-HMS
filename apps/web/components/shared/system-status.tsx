@@ -13,13 +13,13 @@ const LABELS: Record<'db' | 'redis' | 'queue', string> = {
 
 function StatusList({ status }: { status: Pick<HealthStatus, 'db' | 'redis' | 'queue'> }) {
   return (
-    <ul className="mt-4 divide-y divide-neutral-200 border-y border-neutral-200">
+    <ul className="mt-4 divide-y divide-border border-y border-border">
       {(Object.keys(LABELS) as (keyof typeof LABELS)[]).map((key) => {
         const value: DependencyStatus = status[key];
         return (
           <li key={key} className="flex justify-between py-2 text-sm">
             <span>{LABELS[key]}</span>
-            <span className={value === 'up' ? 'text-green-700' : 'text-red-700'}>
+            <span className={value === 'up' ? 'text-success' : 'text-error'}>
               {value === 'up' ? 'Up' : 'Down'}
             </span>
           </li>
@@ -37,7 +37,7 @@ export function SystemStatus() {
 
   if (isPending) {
     return (
-      <p role="status" className="mt-6 text-sm text-neutral-600">
+      <p role="status" className="mt-6 text-sm text-ink-secondary">
         Checking services...
       </p>
     );
@@ -51,13 +51,13 @@ export function SystemStatus() {
         : undefined;
     return (
       <section role="alert" className="mt-6">
-        <p className="text-sm font-medium text-red-700">{error.message}</p>
+        <p className="text-sm font-medium text-error">{error.message}</p>
         {degraded ? <StatusList status={degraded} /> : null}
         <button
           type="button"
           onClick={() => void refetch()}
           disabled={isFetching}
-          className="mt-4 rounded border border-neutral-300 px-3 py-1.5 text-sm hover:bg-neutral-100 focus-visible:outline-2 disabled:opacity-50"
+          className="mt-4 inline-flex h-9 items-center rounded-md border border-border-strong bg-surface px-4 text-body-sm font-medium hover:bg-sage-50 disabled:text-ink-disabled"
         >
           {isFetching ? 'Retrying...' : 'Retry'}
         </button>
@@ -67,7 +67,7 @@ export function SystemStatus() {
 
   return (
     <section className="mt-6" aria-live="polite">
-      <p className="text-sm font-medium text-green-700">All services are running.</p>
+      <p className="text-sm font-medium text-success">All services are running.</p>
       <StatusList status={data} />
     </section>
   );
