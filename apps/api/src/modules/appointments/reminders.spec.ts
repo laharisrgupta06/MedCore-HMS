@@ -1,3 +1,4 @@
+import { assertBullAccepts } from '../../testing/validating-queue';
 import { BullReminderScheduler, sendReminder } from './reminders';
 
 /** APPT-005: reminders 24 h and 1 h before, skipped when the appointment changed. */
@@ -59,16 +60,28 @@ describe('appointment reminders', () => {
   it('queues only reminders still in the future, with stable job ids, replacing earlier ones', async () => {
     const removed: string[] = [];
     const queue = {
-      add: jest.fn().mockResolvedValue(undefined),
+      add: jest.fn(async (name: string, data: unknown, opts: object) =>
+        assertBullAccepts(name, data, opts),
+      ),
       getJob: jest.fn(async (id: string) => ({ remove: async () => void removed.push(id) })),
     };
     const s = new BullReminderScheduler(queue as never);
     await s.schedule('a1', new Date(Date.now() + 3 * 3_600_000));
-    expect(removed).toEqual(['reminder:a1:24h', 'reminder:a1:1h']);
+    // New ids, plus the pre-Phase 6 ids so reminders queued before the change are still replaced.
+    expect(removed).toEqual([
+      'reminder-a1-24h',
+      'reminder:a1:24h',
+      'reminder-a1-1h',
+      'reminder:a1:1h',
+    ]);
     expect(queue.add).toHaveBeenCalledTimes(1);
-    const [, data, opts] = queue.add.mock.calls[0];
+    const [, data, opts] = queue.add.mock.calls[0] as [
+      string,
+      unknown,
+      { jobId: string; delay: number },
+    ];
     expect(data).toMatchObject({ appointmentId: 'a1', offset: '1h' });
-    expect(opts.jobId).toBe('reminder:a1:1h');
+    expect(opts.jobId).toBe('reminder-a1-1h');
     expect(opts.delay).toBeGreaterThan(2 * 3_600_000 - 5_000);
     expect(opts.delay).toBeLessThanOrEqual(2 * 3_600_000);
   });

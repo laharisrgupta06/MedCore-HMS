@@ -14,6 +14,12 @@ export interface PdfJob {
 }
 export type PdfRenderer = (job: PdfJob) => Promise<void>;
 
+/**
+ * One job per document, so a double submit cannot queue two renders. BullMQ refuses custom ids
+ * containing ":" (its separator for repeatable jobs), so the parts are joined with "-".
+ */
+export const pdfJobId = (job: Pick<PdfJob, 'kind' | 'id'>): string => `${job.kind}-${job.id}`;
+
 /** Feature modules register how to build each kind of document; the worker only dispatches. */
 @Injectable()
 export class PdfRenderers {
@@ -38,7 +44,7 @@ export class BullPdfJobs implements PdfJobs {
   constructor(@InjectQueue(PDF_QUEUE) private readonly queue: Queue<PdfJob>) {}
 
   async enqueue(job: PdfJob): Promise<void> {
-    const jobId = `${job.kind}:${job.id}`;
+    const jobId = pdfJobId(job);
     const old = await this.queue.getJob(jobId);
     // A failed job keeps its id; remove it so a retry can be queued.
     if (old && (await old.isFailed())) await old.remove();

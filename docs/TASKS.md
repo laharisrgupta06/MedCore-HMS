@@ -175,7 +175,9 @@ Phase 5 verified 2026-11-16 22:42 (owner report): pnpm install, M-05 applied, dr
 | 6-B5 | LAB-007 | Amended report as a new linked order; report PDF generated on approval | Done | T-LAB-HTTP-004 |
 | 6-D1 | FE | Record view Lab panel and order form; cards with flags, PDFs and cancel; chart section; doctor home "Latest approved lab results"; reception samples; lab worklist; order work page (live flag preview, upload, approve, send back, amend); Lab tests catalogue; portal Lab reports | Done | T-FE-030..035, T-E2E-006 |
 
-Phase 6 built and checked in the VM 2026-11-16. Pending on macOS: apply M-06, drift, `pnpm test:int` (T-LAB-INT-001), Playwright (T-E2E-006).
+| 6-F1 | RX-002, APPT-005, DEC-041 | Defect found in the 23:07 log: BullMQ refused the PDF job id `prescription:<id>`, so no prescription PDF was generated. Ids now use "-"; reminders moved too, with old ids still cleaned up; regression tests use BullMQ's own validation; integration test goes through the real worker | Done (VM); Mac re-run pending | T-PDF-002, T-APPT-REM, T-RX-INT-001 |
+
+Phase 6 Mac run 2026-11-16 23:07 (owner report): M-06 applied, generate ok, drift empty, integration 9 suites 17/17, Playwright 44/44. After the 6-F1 fix (VM): API 1160/1160, web 48/48, lint, format, typecheck and build clean. **Sign-off waits for one Mac re-run of `pnpm test:int`**, the only check that exercises the real queue and worker.
 
 ## Phases 2–14 (from the roadmap; detailed breakdown added when each phase starts)
 
@@ -185,7 +187,7 @@ Phase 6 built and checked in the VM 2026-11-16. Pending on macOS: apply M-06, dr
 | P3-01..08 | SCOPE-007..009, APPT-001..006, CACHE-002 | Weekly availability, exceptions, slots (60 s cache), booking with locks, status lifecycle, emergency, reminders 24 h/1 h, booking UI | BE, FE, QA | Critical | Done (see Phase 3 below) |
 | P4-01..08 | SCOPE-010/011, EMR-001..012, SEC-013/014 | Encounter record, vitals + BMI, diagnoses + ICD-10, histories, corrections UI, attachments, pgcrypto helpers, patient isolation test | BE, FE, QA | Critical | Done (2026-11-16) |
 | P5-01..05 | SCOPE-012, RX-001..008 | Prescriptions, medicine search, PDF with letterhead and signature, verification, ready-for-pickup | BE, FE | High | Done (2026-11-16; verification and ready-for-pickup land with Phase 7 per D9) |
-| P6-01..06 | SCOPE-013, LAB-001..007 | Test catalogue and ranges, orders, sample collection, results, senior approval, amended orders, report PDF | BE, FE, QA | High | Review (built; Mac checks pending, see Phase 6 below) |
+| P6-01..06 | SCOPE-013, LAB-001..007 | Test catalogue and ranges, orders, sample collection, results, senior approval, amended orders, report PDF | BE, FE, QA | High | Review (Mac checks passed 23:07; queue fix awaits one `pnpm test:int` re-run) |
 | P7-01..06 | SCOPE-014, PHARM-001..006 | Medicines and batches, FIFO dispensing, quarantine, low-stock alerts, nightly expiry job, expired-dispense test | BE, FE, QA | High | Not Started |
 | P8-01..07 | SCOPE-015, BILL-001..008 | Invoices and items, totals integrity, Stripe/Razorpay/cash, verified webhooks, receipts, TPA claims, reconciliation | BE, FE, QA | Critical | Not Started |
 | P9-01..05 | SCOPE-016, NOTIF-001..010, TECH-024 | Event fan-out, per-channel queues, Socket.IO gateway, inbox UI, all eight triggers | BE, FE | High | Not Started |

@@ -221,3 +221,12 @@ Every significant product, architecture, database, design and process decision. 
 - Migration M-06 (lab order CANCELLED status with reason fields, rejection fields, result unit and reference snapshot, three CHECKs) approved by the owner 2026-11-16.
 - Implementation notes (Phase 6): the most specific range wins (gender and age band each count) and a value equal to a limit is normal; radiology tests have no ranges and take text findings; a submitted order needs every result or an attached PDF report; the reviewer must be a senior technician (`StaffProfile.isSeniorLabTechnician`) who entered none of the current results; the report PDF is generated on request, not queued.
 - Related: SCOPE-012..014, RX-*, LAB-*, PHARM-*, DEC-024, DEC-039.
+
+### DEC-041: BullMQ job ids use "-" instead of ":" (defect fix)
+- Status: **Proposed** (implementation-level fix, 2026-11-16 23:30, after the owner's Phase 6 Mac run)
+- Problem: the Phase 6 integration log showed "Could not queue the PDF for prescription … Custom Id cannot contain :". BullMQ 6 refuses a custom job id with a ":" unless it has exactly three ":"-separated parts (kept only for old repeatable jobs). The PDF id `prescription:<uuid>` has two, so every `queue.add` threw. Issuing still succeeded (the error is caught and logged by design), but no prescription PDF was ever generated in the running app, and "Request again" failed the same way. Tests missed it: unit tests replace the queue with an inline fake, and the integration test called the renderer directly.
+- Decision: PDF job ids are `{kind}-{id}` (`pdfJobId`). Appointment reminder ids (`reminder:{id}:{offset}`, accepted today only by the three-part exception that BullMQ marks for removal) move to `reminder-{id}-{offset}` (`reminderJobId`); cancelling also removes the old-form ids, so reminders queued before the change are still replaced. Leftover old jobs cannot send a wrong reminder: the sender skips cancelled or moved appointments.
+- Tests: `src/testing/validating-queue.ts` runs BullMQ's own option validation without Redis; used by `infra/pdf/pdf-jobs.spec.ts` (fails on the old id) and `reminders.spec.ts`. `test/prescriptions.int-spec.ts` now waits for the real queue and worker to store the PDF instead of calling the renderer.
+- Owner action: prescriptions issued before this fix have no PDF; the prescribing doctor can press "Request again" on each.
+- Related: RX-002, APPT-005, DEC-040 D1/D5.
+

@@ -18,6 +18,13 @@ export const REMINDER_OFFSETS = [
   { key: '1h', ms: 60 * 60 * 1000, label: 'in one hour' },
 ] as const;
 
+/** BullMQ refuses ":" in custom ids (it reserves it for repeatable jobs), so parts are joined with "-". */
+export const reminderJobId = (appointmentId: string, key: string): string =>
+  `reminder-${appointmentId}-${key}`;
+/** The form used before Phase 6; still removed on cancel so jobs queued earlier are cleaned up. */
+const legacyReminderJobId = (appointmentId: string, key: string): string =>
+  `reminder:${appointmentId}:${key}`;
+
 export interface ReminderScheduler {
   schedule(appointmentId: string, scheduledAt: Date): Promise<void>;
   cancel(appointmentId: string): Promise<void>;
@@ -43,7 +50,7 @@ export class BullReminderScheduler implements ReminderScheduler {
         'reminder',
         { appointmentId, scheduledAt: scheduledAt.toISOString(), offset: o.key },
         {
-          jobId: `reminder:${appointmentId}:${o.key}`,
+          jobId: reminderJobId(appointmentId, o.key),
           delay,
           attempts: 3,
           backoff: { type: 'exponential', delay: 30_000 },
@@ -56,8 +63,13 @@ export class BullReminderScheduler implements ReminderScheduler {
 
   async cancel(appointmentId: string): Promise<void> {
     for (const o of REMINDER_OFFSETS) {
-      const job = await this.queue.getJob(`reminder:${appointmentId}:${o.key}`);
-      if (job) await job.remove().catch(() => undefined);
+      for (const id of [
+        reminderJobId(appointmentId, o.key),
+        legacyReminderJobId(appointmentId, o.key),
+      ]) {
+        const job = await this.queue.getJob(id);
+        if (job) await job.remove().catch(() => undefined);
+      }
     }
   }
 }

@@ -8,7 +8,6 @@ import { AppModule } from '../src/app.module';
 import { configureApp } from '../src/app.setup';
 import { SessionStore } from '../src/common/auth/session.store';
 import { TokenService } from '../src/common/auth/token.service';
-import { PdfRenderers } from '../src/infra/pdf/pdf-jobs';
 import { StorageService } from '../src/infra/storage/storage.service';
 
 /**
@@ -187,8 +186,17 @@ describe('Phase 5 integration: prescriptions on PostgreSQL', () => {
         .expect(201)
     ).body.data;
 
-    // The worker renders asynchronously in the app; run the renderer directly so the test is deterministic.
-    await app.get(PdfRenderers).run({ kind: 'prescription', id: rx.id, hospitalId: hospital.id });
+    // Issuing queued the render on the real BullMQ queue; the app's worker builds and stores it.
+    // (Regression: the queue once refused every job id, which a direct renderer call never noticed.)
+    const deadline = Date.now() + 30_000;
+    while (!(await prisma.prescription.findUniqueOrThrow({ where: { id: rx.id } })).pdfFileId) {
+      if (Date.now() > deadline)
+        throw new Error('The PDF worker did not store the prescription PDF within 30 s');
+      await new Promise((r) => setTimeout(r, 250));
+    }
+    expect((await doc.get(`/api/prescriptions/${rx.id}`).expect(200)).body.data.pdfReady).toBe(
+      true,
+    );
     const stored = await prisma.prescription.findUniqueOrThrow({
       where: { id: rx.id },
       include: { pdfFile: true },
@@ -223,5 +231,5 @@ describe('Phase 5 integration: prescriptions on PostgreSQL', () => {
         where: { action: 'prescription.cancel', actorId: doctor.userId },
       }),
     ).toBe(1);
-  });
+  }, 60_000);
 });
