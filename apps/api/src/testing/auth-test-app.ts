@@ -23,6 +23,9 @@ import { PrismaService } from '../infra/prisma/prisma.service';
 import { REDIS_CLIENT } from '../infra/redis/redis.constants';
 import { AuditModule } from '../modules/audit/audit.module';
 import { AuthModule } from '../modules/auth/auth.module';
+import { StorageModule } from '../infra/storage/storage.service';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { FakePrisma } from './fake-prisma';
 
 export const TEST_ENV = {
@@ -32,6 +35,7 @@ export const TEST_ENV = {
   JWT_ACCESS_SECRET: 'a'.repeat(64),
   JWT_REFRESH_SECRET: 'b'.repeat(64),
   CORS_ORIGINS: 'http://localhost:3000',
+  FILE_STORAGE_DIR: join(tmpdir(), 'medcore-test-storage'),
 };
 
 export interface AuthTestApp {
@@ -89,6 +93,7 @@ export async function createAuthTestApp(
       AuditModule,
       AuthCoreModule,
       TenancyModule,
+      StorageModule,
       AuthModule,
       ...((extra.modules ?? []) as never[]),
     ],

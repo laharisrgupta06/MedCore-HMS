@@ -69,7 +69,8 @@ async function rawRequest<T>(path: string, init: RequestInit): Promise<Envelope<
       credentials: 'same-origin',
       headers: {
         Accept: 'application/json',
-        ...(init.body ? { 'Content-Type': 'application/json' } : {}),
+        // JSON bodies only; FormData lets the browser set the multipart boundary.
+        ...(typeof init.body === 'string' ? { 'Content-Type': 'application/json' } : {}),
         ...init.headers,
       },
     });
@@ -107,6 +108,8 @@ async function rawRequest<T>(path: string, init: RequestInit): Promise<Envelope<
 export interface RequestOptions extends Omit<RequestInit, 'body'> {
   /** JSON body; serialised automatically. */
   json?: unknown;
+  /** Multipart body (file uploads). */
+  form?: FormData;
   /** Attach the access token and refresh it once on expiry. Default true. */
   auth?: boolean;
 }
@@ -116,7 +119,7 @@ async function send<T>(
   opts: RequestOptions = {},
   retried = false,
 ): Promise<Envelope<T>> {
-  const { json, auth = true, ...init } = opts;
+  const { json, form, auth = true, ...init } = opts;
   const method = (init.method ?? 'GET').toUpperCase();
   const headers: Record<string, string> = { ...(init.headers as Record<string, string>) };
   if (!SAFE.has(method)) headers[CSRF_HEADER] = await ensureCsrfToken();
@@ -127,7 +130,7 @@ async function send<T>(
       ...init,
       method,
       headers,
-      body: json === undefined ? undefined : JSON.stringify(json),
+      body: form ?? (json === undefined ? undefined : JSON.stringify(json)),
     });
   } catch (e) {
     if (

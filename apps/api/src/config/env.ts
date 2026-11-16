@@ -44,6 +44,8 @@ export const envSchema = z
     SMTP_USER: z.string().default(''),
     SMTP_PASS: z.string().default(''),
     MAIL_FROM: z.string().min(3).default('MedCore HMS <no-reply@medcore.local>'),
+    /** Local file storage root (development; S3-compatible storage is configured at deployment). */
+    FILE_STORAGE_DIR: z.string().min(1).default('var/storage'),
     /** SMS delivery: "dev-inbox" (local only, DEC-011) or "twilio". */
     SMS_PROVIDER: z.enum(['dev-inbox', 'twilio']).default('dev-inbox'),
     TWILIO_ACCOUNT_SID: z.string().default(''),

@@ -5,6 +5,7 @@
  *   PUBLIC → no guard rejects an anonymous caller     ALLOW → never 401/403 for that role
  *   OWN    → allowed on the caller's own record, 403/404 on someone else's     DENY → 403
  */
+import { randomUUID } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { ALL_ROLES, AUTH_COOKIES, CSRF_HEADER, type Role } from '@medcore/types';
@@ -15,6 +16,12 @@ import { DevSmsInboxController } from './infra/messaging/dev-sms-inbox.controlle
 import { HealthController } from './modules/health/health.controller';
 import { HealthService } from './modules/health/health.service';
 import { UsersModule } from './modules/users/users.module';
+import { DepartmentsModule } from './modules/departments/departments.module';
+import { DoctorsModule } from './modules/doctors/doctors.module';
+import { FacilitiesModule } from './modules/facilities/facilities.module';
+import { HospitalsModule } from './modules/hospitals/hospitals.module';
+import { PatientsModule } from './modules/patients/patients.module';
+import { StaffModule } from './modules/staff/staff.module';
 import { createAuthTestApp, type AuthTestApp } from './testing/auth-test-app';
 
 type Cell = 'PUBLIC' | 'ALLOW' | 'OWN' | 'DENY';
@@ -49,7 +56,15 @@ describe('Permissions matrix (ROLE-011)', () => {
     t = await createAuthTestApp(
       { AUTH_THROTTLE_LIMIT: '100000' },
       {
-        modules: [UsersModule],
+        modules: [
+          UsersModule,
+          HospitalsModule,
+          DepartmentsModule,
+          StaffModule,
+          DoctorsModule,
+          PatientsModule,
+          FacilitiesModule,
+        ],
         controllers: [HealthController, DevSmsInboxController],
         providers: [
           { provide: HealthService, useValue: { check: () => Promise.resolve({ status: 'ok' }) } },
@@ -57,14 +72,105 @@ describe('Permissions matrix (ROLE-011)', () => {
         ],
       },
     );
-    const h = t.prisma.addHospital();
+    const h = t.prisma.addHospital({ code: 'MATRIXA' });
+    const other = t.prisma.addHospital({ code: 'MATRIXB' });
+    ids.hospital = [h.id, other.id];
+    const push = (model: string, row: Record<string, unknown>) => {
+      const r = {
+        id: randomUUID(),
+        hospitalId: h.id,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+        ...row,
+      };
+      t.prisma.rows(model).push(r);
+      return r.id as string;
+    };
+    const dept = push('Department', { name: 'Matrix', description: null });
+    ids.department = [
+      dept,
+      push('Department', { name: 'Other', description: null, hospitalId: other.id }),
+    ];
+    const room = push('Room', {
+      number: '1',
+      type: 'WARD',
+      floor: null,
+      dailyCharge: null,
+      departmentId: null,
+    });
+    ids.room = [room, room];
+    const bed = push('Bed', { roomId: room, label: 'A', status: 'AVAILABLE' });
+    ids.bed = [bed, bed];
     for (const role of ALL_ROLES) {
       const hospitalId = role === 'SUPER_ADMIN' ? null : h.id;
       users[role] = t.prisma.addUser({ role, hospitalId, firstName: role });
       // A second account per role in the same hospital: the "someone else" for OWN checks.
       peers[role] = t.prisma.addUser({ role, hospitalId, firstName: `${role}-peer` });
+      for (const u of [users[role], peers[role]]) {
+        if (role === 'DOCTOR')
+          profile.set(
+            u.id,
+            push('Doctor', {
+              userId: u.id,
+              registrationNumber: 'R',
+              specialisation: 'General',
+              qualification: null,
+              consultationFee: 500,
+              bio: null,
+              signatureFileId: null,
+              deletedAt: null,
+            }),
+          );
+        else if (role === 'PATIENT')
+          profile.set(
+            u.id,
+            push('Patient', {
+              userId: u.id,
+              mrn: `MRN-${u.id.slice(0, 6)}`,
+              dateOfBirth: new Date('1990-01-01'),
+              gender: 'OTHER',
+              bloodGroup: null,
+              emergencyContactName: null,
+              emergencyContactPhone: null,
+              deletedAt: null,
+            }),
+          );
+        else if (role !== 'SUPER_ADMIN')
+          push('StaffProfile', {
+            userId: u.id,
+            departmentId: null,
+            employeeCode: null,
+            designation: null,
+            isSeniorLabTechnician: false,
+          });
+      }
     }
   });
+
+  /** Path parameters: [the caller's own or a same-hospital record, someone else's record]. */
+  const ids: Record<string, [string, string]> = {};
+  const profile = new Map<string, string>();
+  function params(role: Role, path: string): [string, string] {
+    const admin = role === 'SUPER_ADMIN' || role === 'HOSPITAL_ADMIN';
+    if (path.startsWith('/api/hospitals/:id')) return ids.hospital!;
+    if (path.startsWith('/api/departments/')) return ids.department!;
+    if (path.startsWith('/api/rooms/')) return ids.room!;
+    if (path.startsWith('/api/beds/')) return ids.bed!;
+    if (path.startsWith('/api/staff/')) return [peers.NURSE.id, peers.RECEPTIONIST.id];
+    if (path.startsWith('/api/doctors/')) {
+      const own = role === 'DOCTOR' ? users.DOCTOR.id : peers.DOCTOR.id;
+      return [
+        profile.get(own)!,
+        profile.get(role === 'DOCTOR' ? peers.DOCTOR.id : users.DOCTOR.id)!,
+      ];
+    }
+    if (path.startsWith('/api/patients/')) {
+      const own = role === 'PATIENT' ? users.PATIENT.id : peers.PATIENT.id;
+      return [profile.get(own)!, profile.get(peers.PATIENT.id)!];
+    }
+    return [admin ? peers.NURSE.id : users[role].id, peers[role].id];
+  }
+  const fill = (path: string, id: string) => path.replace(/:(id|userId)\b/, id);
   afterAll(() => t.app.close());
 
   it('is a complete, well-formed specification of every registered route', () => {
@@ -102,8 +208,8 @@ describe('Permissions matrix (ROLE-011)', () => {
       const cell = row.cells[role];
       it(`${row.method} ${row.path} as ${role}: ${cell}`, async () => {
         const self = users[role];
-        const target = role === 'SUPER_ADMIN' || role === 'HOSPITAL_ADMIN' ? peers.NURSE : self;
-        const path = row.path.replace(':id', target.id);
+        const [own, others] = params(role, row.path);
+        const path = fill(row.path, own);
         if (cell === 'PUBLIC') {
           // Guards let anonymous callers through; the endpoint may still answer with its own
           // error (refresh without a cookie is REFRESH_TOKEN_INVALID), never a guard rejection.
@@ -126,7 +232,7 @@ describe('Permissions matrix (ROLE-011)', () => {
         // Anonymous callers are always rejected on non-public routes.
         expect((await call(row, path)).status).toBe(401);
         if (cell === 'OWN') {
-          const other = await call(row, row.path.replace(':id', peers[role].id), token);
+          const other = await call(row, fill(row.path, others), token);
           expect([403, 404]).toContain(other.status);
         }
       });

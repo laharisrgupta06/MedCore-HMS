@@ -15,7 +15,8 @@ passed** (environment recorded in [TEST_PLAN.md](TEST_PLAN.md)). Phases follow
 | 1B | Authentication | 12 | 0 | **Review**: P1B-01..12 implemented and unit/HTTP-tested (VM); database integration tests wait for the migration (P1A-04) |
 | 1C | RBAC and tenancy | 7 | 0 | **Review**: P1C-01..06 implemented, 285 API tests pass (VM); PostgreSQL tests wait for the migration; P1C-07 needs an approved push |
 | 1D | Auth frontend | 6 | 1 | **Review**: all screens built, 25 web tests pass (VM); Playwright `e2e/tests/auth.spec.ts` to run on macOS against the live stack |
-| 2–14 | Remaining modules, hardening, deployment | 75 | 0 | Not Started |
+| 2 | Hospital management | 6 | 0 | **Review**: API (6 modules, 35 routes) + 7 admin screens built; 617 API + 29 web tests pass (VM); `test/org.int-spec.ts` to run on macOS |
+| 3–14 | Remaining modules, hardening, deployment | 69 | 0 | Not Started |
 
 ## Phase 0 — Foundation
 
@@ -116,7 +117,7 @@ run in CI with the rest of the suite once pushed (P1C-07).
 
 | Task ID | Req. | Task | Owner | Priority | Status |
 | --- | --- | --- | --- | --- | --- |
-| P2-01..06 | SCOPE-005/006, ROLE-001/002, API-013/014/015 | Hospital onboarding and verification; departments; staff; doctors (signature upload); patients (MRN); rooms and beds | BE, FE | Critical | Not Started |
+| P2-01..06 | SCOPE-005/006, ROLE-001/002, API-013/014/015 | Hospital onboarding and verification; departments; staff; doctors (signature upload); patients (MRN); rooms and beds | BE, FE | Critical | Review (VM tests pass; macOS integration pending) |
 | P3-01..08 | SCOPE-007..009, APPT-001..006, CACHE-002 | Weekly availability, exceptions, slots (60 s cache), booking with locks, status lifecycle, emergency, reminders 24 h/1 h, booking UI | BE, FE, QA | Critical | Not Started |
 | P4-01..08 | SCOPE-010/011, EMR-001..012, SEC-013/014 | Encounter record, vitals + BMI, diagnoses + ICD-10, histories, corrections UI, attachments, pgcrypto helpers, patient isolation test | BE, FE, QA | Critical | Not Started |
 | P5-01..05 | SCOPE-012, RX-001..008 | Prescriptions, medicine search, PDF with letterhead and signature, verification, ready-for-pickup | BE, FE | High | Not Started |

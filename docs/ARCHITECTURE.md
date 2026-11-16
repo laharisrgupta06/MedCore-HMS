@@ -113,6 +113,15 @@ sequenceDiagram
   `cli/create-super-admin.ts` (DEC-013). Contracts and the role→permission list are in `@medcore/types`
   (`auth.ts`). Decisions: DEC-010..013, DEC-026..028.
 
+## 6a. Feature modules (Phase 2)
+
+`modules/hospitals` (onboarding, verify/suspend, profile + billing settings), `modules/departments`,
+`modules/staff`, `modules/doctors` (departments, signature via `infra/storage`), `modules/patients` (MRN,
+reception registration, patient self-read), `modules/facilities` (rooms, beds). All use
+`TenantPrismaService`, `@Roles()`, `@Audit()` and shared DTO fields (`common/dto/fields.ts`); Prisma errors map
+to envelopes in `common/http/prisma-errors.ts`. Contracts: `@medcore/types` `org.ts`. Web screens live in
+`apps/web/components/org/*` on a shared DataTable, Dialog (Radix), Toaster and SearchInput.
+
 ## 7. Tenant isolation
 
 Row-per-tenant (shared schema) with three layers (TEN-001..005, DEC-018):

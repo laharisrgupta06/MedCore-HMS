@@ -32,7 +32,7 @@ passes; environment stated) · **Planned**. No regulatory compliance or certific
 | Audit logging | SEC-012, DB-013 | **Yes**: auth events from the auth service; `AuditInterceptor` for every successful write: actor, hospital, IP, user agent, route, **names** of submitted fields only (values only for fields a route declares safe, e.g. `isActive`); every entry passes `safeChanges` (secret keys redacted, raw bodies dropped, size bounded); append-only trigger in schema | **Yes** (VM T-AUD-001/002, in-memory) | No passwords, tokens, OTPs, personal or clinical values are stored (DEC-030) |
 | Encryption at rest | SEC-014, EMR-012 | `*Enc` bytea columns + pgcrypto extension in schema; helpers planned (Phase 4) | — | Key from env, rotation script planned |
 | Encryption in transit | SEC-002 | Planned (Nginx TLS, Phase 14) | — | Local dev is HTTP on localhost |
-| File uploads | SEC-013, EMR-010 | 20 MB CHECK in schema; validation planned (Phase 4) | — | MIME + extension + magic bytes; reject executables |
+| File uploads | SEC-013, EMR-010 | **Partly**: doctor signatures validated by magic bytes + declared type + 512 KB, generated storage keys; clinical attachments in Phase 4; 20 MB CHECK in schema | **Yes** signatures (VM T-ORG) | Executables rejected by content check |
 | Clinical immutability | EMR-002, DEC-016 | Triggers in `constraints.sql` (not migrated) | — | Originals never changed; who/when/why recorded |
 | Secrets | DEP-002 | **Yes**: `.env` git-ignored, `.env.example` placeholders, CI throwaway values only | Manual check | |
 | Local infrastructure exposure | — | **Yes**: Docker ports bound to 127.0.0.1 | Manual | |

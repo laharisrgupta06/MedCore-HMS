@@ -18,6 +18,13 @@ import { AuditModule } from './modules/audit/audit.module';
 import { AuthModule } from './modules/auth/auth.module';
 import { HealthModule } from './modules/health/health.module';
 import { UsersModule } from './modules/users/users.module';
+import { HospitalsModule } from './modules/hospitals/hospitals.module';
+import { DepartmentsModule } from './modules/departments/departments.module';
+import { StaffModule } from './modules/staff/staff.module';
+import { DoctorsModule } from './modules/doctors/doctors.module';
+import { PatientsModule } from './modules/patients/patients.module';
+import { FacilitiesModule } from './modules/facilities/facilities.module';
+import { StorageModule } from './infra/storage/storage.service';
 
 /** True when the route or its controller carries @AuthRateLimit(). */
 export function isAuthRateLimited(ctx: ExecutionContext): boolean {
@@ -72,6 +79,13 @@ export function buildThrottlerOptions(
     TenancyModule,
     AuthModule,
     UsersModule,
+    StorageModule,
+    HospitalsModule,
+    DepartmentsModule,
+    StaffModule,
+    DoctorsModule,
+    PatientsModule,
+    FacilitiesModule,
   ],
   providers: GLOBAL_PIPELINE,
 })

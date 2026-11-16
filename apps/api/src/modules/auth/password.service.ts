@@ -18,6 +18,8 @@ export class PasswordService {
       this.dummy ??= hash('medcore-timing-equaliser', BCRYPT_COST);
       return this.dummy.then((h) => compare(password, h)).then(() => false);
     }
-    return compare(password, passwordHash);
+    // Accounts created by staff hold an unusable placeholder until the person sets a password.
+    if (!passwordHash.startsWith('$2')) return Promise.resolve(false);
+    return compare(password, passwordHash).catch(() => false);
   }
 }

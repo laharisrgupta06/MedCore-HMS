@@ -47,3 +47,7 @@ docker/data/
 uploads/
 *.pem
 *.key
+
+# Local file storage (development)
+var/
+apps/api/var/

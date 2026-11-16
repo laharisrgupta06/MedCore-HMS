@@ -73,6 +73,10 @@ security, performance (`EXPLAIN ANALYZE`, DB-019), responsive and accessibility 
 | T-FE-004 | AUTH-002 | `services/auth.test.ts`: role home; `?next=` only same-origin and same area (no open redirect) | As specified | 2/2 pass | Pass | VM | 2026-11-16 |
 | T-FE-005..013 | AUTH-001/002/005/006 | `components/auth/auth-forms.test.tsx`: login validation, silent-session redirect, sign-in + safe next, EMAIL_NOT_VERIFIED link, expired notice; register password rules, exact API body, hospital-code field error; reset token guard and success | As specified | 10/10 pass | Pass | VM | 2026-11-16 |
 | T-E2E-001 | TEST-004, FE-002 | `e2e/tests/auth.spec.ts` (desktop + mobile Chromium): public links, sign-in errors from the API, unknown hospital code, protected-route redirects, reset without token, 404, no horizontal overflow | As specified | Not run (needs live stack on macOS) | Pending | **Mac** | — |
+| T-ORG-001..010 | SCOPE-005/006, API-013..015, TEN-003 | `modules/org/org.http.spec.ts`: onboarding creates PENDING hospital + admin, welcome link sets password and signs in; duplicate code/email 409; verify/suspend (sessions revoked); admin edits own hospital only; departments with IN_USE delete guard; staff role/senior/employee-code rules and invite; doctors with departments, patient-visible list, self-edit limits; signature magic-byte check and download; reception patient registration with MRN, search, TEST-011 own-record; rooms/beds with nurse status-only and delete guards; cross-hospital 404 throughout | As specified | 10/10 pass | Pass | VM | 2026-11-16 |
+| T-RBAC-001b | ROLE-011 | Matrix extended to 54 routes × 9 roles (487 cases) incl. own-vs-other hospital/doctor/patient checks | As specified | 487/487 pass | Pass | VM | 2026-11-16 |
+| T-FE-014..017 | FE | `components/org/org-ui.test.tsx`: DataTable loading/empty/error-retry; role-aware navigation; patients list from API and exact registration body; registration hidden for non-reception roles | As specified | 4/4 pass | Pass | VM | 2026-11-16 |
+| T-ORG-INT-001 | SCOPE-005/006 | `test/org.int-spec.ts`: Super Admin onboards via API, admin activates from Mailpit link, creates department, receptionist, doctor, room/bed; receptionist registers patient; real role/profile triggers and composite keys | Pass | Not run (macOS) | Pending | **Mac** | — |
 | T-STA-001 | DEP-003 | Prettier, ESLint, TypeScript (all packages) | Clean | Clean | Pass | VM | 2026-11-16 |
 | T-STA-002 | SCOPE-021 | `pnpm build` (types, API, web) | Builds | Builds | Pass | VM | 2026-11-16 |
 | T-STA-003 | DB-001 | `prisma validate` schema revision 2 | Valid | Valid | Pass | VM (offline validator) | 2026-11-16 |
@@ -80,7 +84,7 @@ security, performance (`EXPLAIN ANALYZE`, DB-019), responsive and accessibility 
 | T-STA-005 | SCOPE-001 | Docker services PostgreSQL, Redis, Mailpit healthy | Healthy | Healthy (owner report) | Pass | **Mac** | 2026-11-16 |
 | T-STA-006 | DB-020 | `prisma generate` | Succeeds | Succeeds (owner report) | Pass | **Mac** | 2026-11-16 |
 
-Totals: API unit 292/292 (VM); integration 4 suites pass (Mac, 14:53), web 25/25 (VM), integration 2/2 (Mac). CI: not run.
+Totals: API unit 617/617 (VM); integration 4 suites pass (Mac, 14:53), web 29/29 (VM), integration 2/2 (Mac). CI: not run.
 Not run yet: **T-AUTH-INT-001** (`test/auth.int-spec.ts`: register → Mailpit OTP → login → refresh → logout
 → audit rows, with the real role/profile trigger). It fails with an explicit message until the initial
 migration exists (P1A-04). Also not run: **T-MIG-001..006** (`test/constraints.int-spec.ts`; T-MIG-005 covers audit, medical-record locks only so far; clinical correction triggers are tested with the EMR in Phase 4) and **T-TEN-INT-001** (`test/tenancy.int-spec.ts`: scoped client with real

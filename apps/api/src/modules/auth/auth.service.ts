@@ -39,6 +39,7 @@ import { OTP_TTL_SECONDS, OtpService } from './otp.service';
 import { PasswordService } from './password.service';
 
 export const RESET_TOKEN_TTL_SECONDS = 30 * 60;
+export const WELCOME_TOKEN_TTL_SECONDS = 72 * 60 * 60;
 const REFRESH_TTL_MS = REFRESH_TOKEN_TTL_SECONDS * 1000;
 const MRN_RETRIES = 5;
 
@@ -434,19 +435,58 @@ export class AuthService {
     return `pwreset:${createHash('sha256').update(token).digest('hex')}`;
   }
 
+  /**
+   * Emails a single-use link to /reset-password. 'reset' (forgot password, 30 min) or 'welcome'
+   * (account created by staff, 72 h: the person sets their own password; no password is ever
+   * chosen or seen by staff). Following the link also verifies the email address.
+   */
+  async sendPasswordLink(
+    user: Pick<User, 'id' | 'email' | 'firstName'>,
+    kind: 'reset' | 'welcome',
+    hospitalName?: string,
+  ): Promise<void> {
+    const ttl = kind === 'reset' ? RESET_TOKEN_TTL_SECONDS : WELCOME_TOKEN_TTL_SECONDS;
+    const token = randomBytes(32).toString('base64url');
+    await this.redis.set(AuthService.resetKey(token), user.id, 'EX', ttl);
+    const link = new URL('/reset-password', this.config.get('WEB_APP_URL', { infer: true }));
+    link.searchParams.set('token', token);
+    if (kind === 'reset') {
+      await this.mail.send({
+        to: user.email,
+        subject: 'Reset your MedCore password',
+        text: `Hello ${user.firstName},\n\nUse this link to choose a new password. It expires in ${ttl / 60} minutes and works once:\n\n${link.toString()}\n\nIf you did not ask for this, ignore this email; your password stays the same.`,
+      });
+    } else {
+      await this.mail.send({
+        to: user.email,
+        subject: 'Your MedCore account is ready',
+        text: `Hello ${user.firstName},\n\n${hospitalName ?? 'Your hospital'} has created a MedCore account for you. Use this link to choose your password. It expires in ${ttl / 3600} hours and works once:\n\n${link.toString()}\n\nAfter that, sign in with this email address.`,
+      });
+    }
+  }
+
+  /**
+   * Welcome link for an account created by staff. The account already exists, so a mail failure
+   * is logged rather than failing the request; staff can resend it later.
+   */
+  async sendWelcome(
+    user: Pick<User, 'id' | 'email' | 'firstName'>,
+    hospitalName?: string,
+  ): Promise<boolean> {
+    try {
+      await this.sendPasswordLink(user, 'welcome', hospitalName);
+      return true;
+    } catch (e) {
+      this.logger.warn(`Welcome email not sent for user ${user.id}: ${(e as Error).message}`);
+      return false;
+    }
+  }
+
   /** Always succeeds from the caller's point of view, so it cannot be used to discover accounts. */
   async forgotPassword(email: string, meta: RequestMeta): Promise<void> {
     const user = await this.prisma.user.findUnique({ where: { email } });
     if (!user || user.deletedAt || !user.isActive) return;
-    const token = randomBytes(32).toString('base64url');
-    await this.redis.set(AuthService.resetKey(token), user.id, 'EX', RESET_TOKEN_TTL_SECONDS);
-    const link = new URL('/reset-password', this.config.get('WEB_APP_URL', { infer: true }));
-    link.searchParams.set('token', token);
-    await this.mail.send({
-      to: user.email,
-      subject: 'Reset your MedCore password',
-      text: `Hello ${user.firstName},\n\nUse this link to choose a new password. It expires in ${RESET_TOKEN_TTL_SECONDS / 60} minutes and works once:\n\n${link.toString()}\n\nIf you did not ask for this, ignore this email; your password stays the same.`,
-    });
+    await this.sendPasswordLink(user, 'reset');
     await this.audit.record({
       action: 'auth.password_reset_requested',
       entityType: 'User',
