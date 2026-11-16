@@ -389,6 +389,35 @@ describe('Phase 3: availability and appointments (in-memory Prisma)', () => {
         .expect(201);
     });
 
+    it('patients cannot cancel online within 2 hours of the start; reception still can (DEC-038)', async () => {
+      const soon = new Date(Date.now() + 90 * 60_000).toISOString();
+      const rec = await as(reception);
+      const em = await rec
+        .post('/api/appointments', {
+          doctorId,
+          patientId,
+          scheduledAt: soon,
+          type: 'EMERGENCY',
+          departmentId: dept,
+        })
+        .expect(201);
+      const late = await (
+        await as(patientUser)
+      )
+        .patch(`/api/appointments/${em.body.data.id}/status`, {
+          status: 'CANCELLED',
+          reason: 'Running late',
+        })
+        .expect(400);
+      expect(late.body.error.code).toBe('CANCELLATION_TOO_LATE');
+      await rec
+        .patch(`/api/appointments/${em.body.data.id}/status`, {
+          status: 'CANCELLED',
+          reason: 'Patient called',
+        })
+        .expect(200);
+    });
+
     it('no-show only after the appointment time; reschedule moves to a free slot only', async () => {
       const rec = await as(reception);
       await rec.patch(`/api/appointments/${apptId}/status`, { status: 'CONFIRMED' }).expect(200);

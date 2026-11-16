@@ -5,7 +5,7 @@ import type { ReactNode } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { addDays, dayBounds, localDate, zonedToUtc } from '@/lib/time';
 import { useAuth } from '@/store/auth';
-import { allowedActions, canReschedule } from './appointment-actions';
+import { allowedActions, canReschedule, tooLateToCancelOnline } from './appointment-actions';
 import { AppointmentsView } from './appointments-view';
 import { PortalBook } from './portal-appointments';
 
@@ -105,7 +105,14 @@ describe('status actions mirror the API rules (APPT-003)', () => {
       status: 'CONFIRMED',
       scheduledAt: new Date(Date.now() - 60_000).toISOString(),
     });
-    expect(allowedActions(future, 'PATIENT')).toEqual(['CANCELLED']);
+    // Patients cancel online only until 2 hours before the start (DEC-038).
+    expect(allowedActions(future, 'PATIENT')).toEqual([]);
+    expect(
+      allowedActions(
+        appt({ scheduledAt: new Date(Date.now() + 3 * 3_600_000).toISOString() }),
+        'PATIENT',
+      ),
+    ).toEqual(['CANCELLED']);
     expect(allowedActions(past, 'PATIENT')).toEqual([]);
     expect(allowedActions(future, 'RECEPTIONIST')).toEqual(['CONFIRMED', 'CANCELLED']);
     expect(allowedActions(appt({ status: 'CONFIRMED' }), 'RECEPTIONIST')).toEqual(['CANCELLED']);
@@ -113,6 +120,8 @@ describe('status actions mirror the API rules (APPT-003)', () => {
     expect(allowedActions(past, 'DOCTOR')).toEqual(['IN_PROGRESS', 'CANCELLED', 'NO_SHOW']);
     expect(allowedActions(appt({ status: 'IN_PROGRESS' }), 'DOCTOR')).toEqual(['COMPLETED']);
     expect(allowedActions(future, 'NURSE')).toEqual([]);
+    expect(tooLateToCancelOnline(future)).toBe(true);
+    expect(tooLateToCancelOnline(past)).toBe(false);
     expect(canReschedule(future, 'PATIENT')).toBe(true);
     expect(canReschedule(future, 'DOCTOR')).toBe(false);
     expect(canReschedule(appt({ type: 'EMERGENCY' }), 'RECEPTIONIST')).toBe(false);

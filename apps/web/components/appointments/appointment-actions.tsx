@@ -2,6 +2,7 @@
 
 import {
   APPOINTMENT_TRANSITIONS,
+  PATIENT_CANCEL_NOTICE_MS,
   type Appointment,
   type AppointmentStatus,
   type Slot,
@@ -34,12 +35,26 @@ export function allowedActions(
 ): AppointmentStatus[] {
   const started = new Date(a.scheduledAt).getTime() <= now;
   return APPOINTMENT_TRANSITIONS[a.status].filter((s) => {
-    if (role === 'PATIENT') return s === 'CANCELLED' && !started;
+    if (role === 'PATIENT') return s === 'CANCELLED' && patientMayCancel(a, now);
     if (s === 'IN_PROGRESS' || s === 'COMPLETED') return role === 'DOCTOR';
     if (s === 'NO_SHOW')
       return started && ['DOCTOR', 'RECEPTIONIST', 'HOSPITAL_ADMIN'].includes(role);
     return ['DOCTOR', 'RECEPTIONIST', 'HOSPITAL_ADMIN'].includes(role);
   });
+}
+
+/** Patients cancel online only until 2 hours before the start (DEC-038); the API enforces it too. */
+export function patientMayCancel(a: Appointment, now = Date.now()) {
+  return new Date(a.scheduledAt).getTime() - now >= PATIENT_CANCEL_NOTICE_MS;
+}
+
+/** Upcoming, but inside the 2-hour window: the patient is told to call the hospital. */
+export function tooLateToCancelOnline(a: Appointment, now = Date.now()) {
+  return (
+    ['PENDING', 'CONFIRMED'].includes(a.status) &&
+    new Date(a.scheduledAt).getTime() > now &&
+    !patientMayCancel(a, now)
+  );
 }
 
 export function canReschedule(a: Appointment, role: string, now = Date.now()) {
@@ -98,6 +113,11 @@ export function AppointmentActions({ appt, tz }: { appt: Appointment; tz: string
         <Button size="compact" variant="ghost" onClick={() => setCancelling(true)}>
           Cancel
         </Button>
+      )}
+      {role === 'PATIENT' && tooLateToCancelOnline(appt) && (
+        <p className="text-body-sm text-ink-secondary">
+          To cancel within 2 hours of the start, please call the hospital.
+        </p>
       )}
       {cancelling && (
         <CancelDialog appt={appt} tz={tz} onClose={() => setCancelling(false)} onDone={refresh} />

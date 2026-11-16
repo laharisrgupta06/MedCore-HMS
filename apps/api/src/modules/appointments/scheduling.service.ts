@@ -13,6 +13,7 @@ import {
   type DoctorSchedule as ScheduleView,
   type ScheduleException as ExceptionView,
   type Slot,
+  PATIENT_CANCEL_NOTICE_MS,
 } from '@medcore/types';
 import { Prisma, type DoctorSchedule, type ScheduleException } from '@prisma/client';
 import type { Redis } from 'ioredis';
@@ -622,10 +623,16 @@ export class SchedulingService {
           code: 'FORBIDDEN',
           message: 'Patients can only cancel their appointments.',
         });
-      if (new Date(current.scheduledAt).getTime() <= Date.now())
+      const left = new Date(current.scheduledAt).getTime() - Date.now();
+      if (left <= 0)
         throw bad(
           AppointmentErrorCode.IN_THE_PAST,
           'This appointment has already started. Contact the hospital.',
+        );
+      if (left < PATIENT_CANCEL_NOTICE_MS)
+        throw bad(
+          AppointmentErrorCode.CANCELLATION_TOO_LATE,
+          'Appointments can be cancelled online up to 2 hours before the start. Please call the hospital.',
         );
     }
     if (dto.status === 'NO_SHOW' && new Date(current.scheduledAt).getTime() > Date.now())

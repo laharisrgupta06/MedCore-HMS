@@ -94,10 +94,14 @@ export interface BookAppointmentRequest {
   reason?: string;
 }
 
+/** Patients may cancel online only up to this long before the start (DEC-038, owner 17:24). */
+export const PATIENT_CANCEL_NOTICE_MS = 2 * 60 * 60 * 1000;
+
 export const AppointmentErrorCode = {
   SLOT_UNAVAILABLE: 'SLOT_UNAVAILABLE',
   PATIENT_DOUBLE_BOOKED: 'PATIENT_DOUBLE_BOOKED',
   NOT_A_SLOT: 'NOT_A_SLOT',
   INVALID_TRANSITION: 'INVALID_TRANSITION',
   IN_THE_PAST: 'IN_THE_PAST',
+  CANCELLATION_TOO_LATE: 'CANCELLATION_TOO_LATE',
 } as const;

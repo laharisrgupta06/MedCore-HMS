@@ -50,8 +50,8 @@ Abandoned by the owner on 2026-11-16 13:46 (DEC-022 superseded in practice). Sin
 
 ## Next actions
 
-1. Owner: go-ahead for Phase 4 (EMR).
-2. Owner: acknowledge DEC-036, DEC-037, DEC-038 (Proposed); decide whether to push and run CI.
+1. Phase 4 (EMR) started 17:24 after approval.
+2. DEC-036/037/038 approved 17:24 (2-hour patient cancellation notice added). Owner decides whether to push and run CI.
 3. Carried forward: signed-in E2E journeys need seed data (P14); legal review of Privacy/Terms text; browser check of Swagger UI.
 
 ## Document map
