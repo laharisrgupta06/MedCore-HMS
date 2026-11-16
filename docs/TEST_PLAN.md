@@ -93,8 +93,8 @@ security, performance (`EXPLAIN ANALYZE`, DB-019), responsive and accessibility 
 | T-RX-HTTP-001..005 | RX-001..007, API-020/021/024, TEST-011 | `modules/prescriptions/prescriptions.http.spec.ts`: catalogue roles, duplicate 409, stock counts only active unexpired batches, no cost fields, deactivated not listed; issue with signed PDF, event published, patient downloads own PDF, other patient 404, nurse and pharmacist read, receptionist refused, PDF view audited; issuing rules (treating doctor, closed record, empty, duplicate, inactive, bad frequency, zero days, no signature); allergy conflict 409 with details, short reason refused, reason stored; cancel with reason by the prescriber only, twice refused, refused after any dispense | As specified | 5/5 pass | Pass | VM | 2026-11-16 |
 | T-RBAC-001e | ROLE-011 | Matrix extended with 9 Phase 5 routes (838 cases) | As specified | 838/838 pass | Pass | VM | 2026-11-16 |
 | T-FE-026..029 | FE, RX | `components/prescriptions/prescriptions-ui.test.tsx`: stock badge states; form quantity suggestion, exact request body, allergy conflict then reason; card cancel with reason by the prescriber only; PDF pending, dispensed quantity shown | As specified | 4/4 pass | Pass | VM | 2026-11-16 |
-| T-RX-INT-001 | RX-002, DEC-040 D3/D4, TEST-011 | `test/prescriptions.int-spec.ts`: allergy 409 then issue with reason, PDF rendered and stored as PRESCRIPTION_PDF, patient downloads own, other patient 404, M-05 CHECK refuses CANCELLED without reason, cancel audited | As specified | Not run (macOS, after M-05) | Pending | **Mac** | — |
-| T-E2E-005 | FE-002 | `e2e/tests/prescriptions.spec.ts`: Phase 5 routes require sign-in | As specified | Not run | Pending | **Mac** | — |
+| T-RX-INT-001 | RX-002, DEC-040 D3/D4, TEST-011 | `test/prescriptions.int-spec.ts`: allergy 409 then issue with reason, PDF rendered and stored as PRESCRIPTION_PDF, patient downloads own, other patient 404, M-05 CHECK refuses CANCELLED without reason, cancel audited | As specified | Pass (owner report 22:42: all Phase 5 macOS checks passed, after pnpm install, M-05 applied, drift check) | Pass | **Mac** | 2026-11-16 |
+| T-E2E-005 | FE-002 | `e2e/tests/prescriptions.spec.ts`: Phase 5 routes require sign-in | As specified | Pass (owner report 22:42: all Phase 5 macOS checks passed, after pnpm install, M-05 applied, drift check) | Pass | **Mac** | 2026-11-16 |
 | T-STA-001 | DEP-003 | Prettier, ESLint, TypeScript (all packages) | Clean | Clean | Pass | VM | 2026-11-16 |
 | T-STA-002 | SCOPE-021 | `pnpm build` (types, API, web) | Builds | Builds | Pass | VM | 2026-11-16 |
 | T-STA-003 | DB-001 | `prisma validate` schema revision 2 | Valid | Valid | Pass | VM (offline validator) | 2026-11-16 |
@@ -102,7 +102,7 @@ security, performance (`EXPLAIN ANALYZE`, DB-019), responsive and accessibility 
 | T-STA-005 | SCOPE-001 | Docker services PostgreSQL, Redis, Mailpit healthy | Healthy | Healthy (owner report) | Pass | **Mac** | 2026-11-16 |
 | T-STA-006 | DB-020 | `prisma generate` | Succeeds | Succeeds (owner report) | Pass | **Mac** | 2026-11-16 |
 
-Totals (Phase 5, VM): API unit 1007/1007, web 42/42, lint, format, typecheck, build. Pending on Mac: M-05, integration (adds T-RX-INT-001), Playwright (adds T-E2E-005).
+Totals (Phase 5): API unit 1007/1007 and web 42/42, lint, format, typecheck, build (VM); macOS (owner report 22:42): M-05 applied, integration and Playwright all passed (counts not reported; expected 8 suites incl. prescriptions, Playwright incl. prescriptions.spec.ts).
 Totals (Phase 4, 2026-11-16 22:10): API unit 919/919 and web 38/38 (VM); integration 15/15 in 7 suites and Playwright 30/30, desktop and mobile (Mac, owner report); ICD-10 starter list loaded (78 codes). CI: not run (nothing pushed).
 All integration suites listed above as "Not run" in earlier revisions ran in the 14/14 macOS run (owner report, 17:17). Still open: browser checks of the status page and Swagger UI (Phase 0), CI on GitHub.
 

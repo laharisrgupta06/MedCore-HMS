@@ -13,7 +13,7 @@ Claude (main session acting as Team Lead).
 
 | Area | Status |
 | --- | --- |
-| Phase | **5: Review** (shared foundations + prescriptions, VM-verified, committed locally; Mac: install, M-05, integration, Playwright). 4 and earlier: Done. Next: Phase 6 after Phase 5 sign-off. Branch `feat/phase-1-auth`; nothing pushed |
+| Phase | **5: Done** (2026-11-16 22:42, M-05 applied). **6: in progress** (laboratory; M-06 awaiting owner approval). Branch `feat/phase-1-auth`; nothing pushed |
 | Phase 0 | Done and verified (VM + macOS). Open: CI never run on GitHub; browser checks of status page and Swagger UI |
 | Database | Schema revision 2 + DEC-031 declarations. Initial migration `20261116085814_init` **applied on macOS** by the owner; drift (4 SQL-only keys) fixed in schema.prisma (DEC-031), drift now empty. All unit + 4 integration suites pass on macOS (14:53). Migration 2 `20261116092500_hospital_id_db_default` (DEC-032, approved) created, not yet applied. No other migrations |
 | Backend | Foundation + Phase 1B auth (register, email/phone OTP, login, refresh rotation, logout one/all, forgot/reset, me, CSRF, auth rate limit, RBAC guard, audit of auth events, create-super-admin CLI). Phase 1C: tenant context + scoped Prisma client, permissions matrix, audit interceptor, users endpoints. Verified only with in-memory Prisma/Redis. Phase 2 org modules. **Phase 3** `modules/appointments`: schedules, exceptions, cached slots, locked booking, lifecycle, emergency, reminders (DEC-038), `GET /doctors/me` |
@@ -50,8 +50,8 @@ Abandoned by the owner on 2026-11-16 13:46 (DEC-022 superseded in practice). Sin
 
 ## Next actions
 
-1. Owner on macOS: `pnpm install` (pdfkit), apply M-05 (`pnpm --filter @medcore/api prisma:deploy`), `prisma:generate`, `prisma:drift`, then `pnpm test:int` and Playwright.
-2. After Phase 5 sign-off: Phase 6 (laboratory) per DEC-040; M-06 shown for approval first.
+1. Phase 6 (laboratory) per DEC-040; M-06 shown for approval first.
+2. Then Phase 7 (pharmacy).
 3. Carried forward: seed data (P14); legal review of Privacy/Terms; Swagger UI check; key rotation (R-04).
 
 ## Document map
