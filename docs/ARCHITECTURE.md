@@ -91,12 +91,15 @@ sequenceDiagram
 - Error codes: `VALIDATION_ERROR`, `UNAUTHENTICATED`, `FORBIDDEN`, `NOT_FOUND`, `CONFLICT`, `RATE_LIMITED`, `SERVICE_UNAVAILABLE`, `INTERNAL_ERROR` plus module codes. 5xx messages never leak internals.
 - Pagination: `PaginatedResult.of(items, total, page, limit)` produces `meta`.
 
-## 6. Authentication and authorisation [Phase 1B implemented; 1C in progress]
+## 6. Authentication and authorisation [Phase 1B and 1C implemented]
 
 - Global guards in order: Throttler (general 1000/min; auth 100/15 min on `@AuthRateLimit()` controllers) →
   `CsrfGuard` (double-submit `mc_csrf` cookie + `x-csrf-token` header on every state-changing request;
   `@SkipCsrf()` only for signed webhooks) → `JwtAuthGuard` (Bearer access token; `@Public()` opts out) →
-  `RolesGuard` (`@Roles()`). The tenant-context guard/Prisma extension is added in 1C (P1C-02).
+  `TenantGuard` (puts the principal in the request's AsyncLocalStorage context; 404 for a `hospitalId`
+  param/query naming another hospital, configurable with `@TenantParam()`) → `RolesGuard` (`@Roles()`);
+  then `AuditInterceptor` (every successful write, plus Super Admin cross-tenant reads). The pipeline is
+  defined once in `common/global-pipeline.ts`.
 - Access JWT (HS256, 15 min, claims `sub`, `sid`, `role`, `hid`, `typ: access`) is kept in memory by the web
   app. The refresh JWT (7 days, `jti`, `typ: refresh`) lives only in the httpOnly SameSite=Strict cookie
   `mc_rt` scoped to `/api/auth`. Redis `rt:{userId}:{sessionId}` holds the current `jti`; rotation is an
@@ -112,13 +115,16 @@ sequenceDiagram
 
 ## 7. Tenant isolation
 
-| Layer | Status |
-| --- | --- |
-| `hospitalId` on 37 tables (required) and 4 (optional, platform-level); 3 global tables | In schema |
-| 85 composite `(id, hospitalId)` foreign keys + 3 SQL composite keys | In schema / constraints.sql |
-| `schema-tenancy.spec.ts` guard test | Implemented, passing |
-| `hospitalId` only from the verified JWT; Prisma extension scoping every query; audited Super Admin client | [planned] Phase 1C |
-| Route-level isolation test suite in CI | [planned] Phase 1C |
+Row-per-tenant (shared schema) with three layers (TEN-001..005, DEC-018):
+1. **Database:** every hospital-specific table has `hospitalId`; tenant relations are composite
+   `(id, hospitalId)` foreign keys, so a row can never reference another hospital's row.
+2. **Query layer:** `TenantPrismaService.client` (`common/tenancy/`) is a Prisma query extension that forces
+   `hospitalId` into every where clause and create, and rejects tenant changes (`scopeArgs`). Other
+   hospitals' rows do not exist for the caller (404). Super Admins get the unscoped client; the request is
+   flagged and audited. Outside an authenticated request the client throws.
+3. **Request layer:** `hospitalId` comes only from the verified access token; `TenantGuard` rejects URLs
+   naming another hospital.
+Verified by the tenancy unit tests, the users isolation tests and `test/tenancy.int-spec.ts` (PostgreSQL).
 
 ## 8. Database
 

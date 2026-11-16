@@ -156,3 +156,8 @@ Every significant product, architecture, database, design and process decision. 
 - Behaviour: login requires a verified email (403 EMAIL_NOT_VERIFIED); suspended hospitals cannot sign in; resend and forgot-password give the same answer whether or not the account exists; the CSRF token rotates at login and refresh and is also returned in the response body; reset tokens are single use, 30 minutes, and revoke every session; refresh-token reuse revokes every session of the user; patient MRN format `MRN-{year}-{6-digit sequence}` per hospital.
 - Related: AUTH-001..010, SEC-010.
 
+### DEC-029: Tenant scoping mechanism and users endpoint rules
+- Status: **Proposed** (Phase 1C implementation of the approved row-per-tenant design)
+- Decision: AsyncLocalStorage request context + `TenantGuard` + a Prisma query extension (`TenantPrismaService`); other tenants' records answer 404; Super Admin uses the unscoped client and those requests are audited. Users endpoints: list for administrators (Super Admin may filter by hospital); get/patch for self or administrator; `isActive` and delete for administrators only, never on oneself; delete is a soft delete that signs the user out everywhere; email and role are not editable here (email change needs a verification flow; roles change with staff management in Phase 2). The audit interceptor logs every successful write with the redacted body.
+- Related: TEN-003/004, API-012, SEC-012, ROLE-011.
+

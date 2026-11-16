@@ -53,6 +53,12 @@ security, performance (`EXPLAIN ANALYZE`, DB-019), responsive and accessibility 
 | T-AUTH-012 | AUTH-002 | tokens: access/refresh round trip; type confusion rejected; tampered, foreign-secret and `alg: none` tokens rejected | As specified | 3/3 pass | Pass | VM | 2026-11-16 |
 | T-RBAC-000 | ROLE-010 | `@Roles()` guard: 403 FORBIDDEN for unlisted role, open routes, public routes, anonymous | As specified | 2/2 pass | Pass | VM | 2026-11-16 |
 | T-ENV-007 | DEC-011 | production refuses dev SMS inbox and Mailpit host; Twilio variables required | As specified | 1/1 pass | Pass | VM | 2026-11-16 |
+| T-TEN-001 | TEN-002/003 | `tenant-scope.spec.ts`: 41 scoped models, 3 global untouched; hospitalId forced into every where; creates get hospitalId; other hospital or relation connect rejected; updates/upserts cannot move tenants; optional-hospital models scoped | As specified | 14/14 pass | Pass | VM | 2026-11-16 |
+| T-TEN-002 | TEN-003/004 | `tenant-prisma.service.spec.ts`: hospital user sees only own hospital; Super Admin sees all and request is flagged; no context → error | As specified | 3/3 pass | Pass | VM | 2026-11-16 |
+| T-TEN-003 | TEST-010, TEST-016 | `users.http.spec.ts` isolation: another hospital's users are 404 for GET/PATCH/DELETE with guessed ids, nothing changed; `?hospitalId=` of another hospital → 404; Super Admin cross-tenant write audited. Negative check performed: disabling User scoping made 2 tests fail | As specified | 2/2 pass (+3 related) | Pass | VM | 2026-11-16 |
+| T-RBAC-001 | ROLE-011 | `permissions-matrix.spec.ts` from `docs/permissions-matrix.csv`: 19 routes × 9 roles (PUBLIC/ALLOW/OWN/DENY, anonymous 401, OWN on another record 403/404) plus "every registered route is in the matrix". Negative checks performed: one wrong cell and one missing row each failed | As specified | 172/172 pass | Pass | VM | 2026-11-16 |
+| T-USR-001 | API-012 | `users.http.spec.ts`: list scoping, search/role/paging, limit validation; self-or-admin get; profile update clears phone verification; isActive admin-only and revokes sessions; unknown fields rejected; soft delete revokes sessions; no self-delete; CSRF required | As specified | 13/13 pass | Pass | VM | 2026-11-16 |
+| T-AUD-001 | SEC-012 | audit interceptor: user.update/user.delete entries with actor, hospital, entity, IP, redacted body; Super Admin reads audited; auth routes not double-logged | As specified | Pass (in users/auth specs) | Pass | VM | 2026-11-16 |
 | T-STA-001 | DEP-003 | Prettier, ESLint, TypeScript (all packages) | Clean | Clean | Pass | VM | 2026-11-16 |
 | T-STA-002 | SCOPE-021 | `pnpm build` (types, API, web) | Builds | Builds | Pass | VM | 2026-11-16 |
 | T-STA-003 | DB-001 | `prisma validate` schema revision 2 | Valid | Valid | Pass | VM (offline validator) | 2026-11-16 |
@@ -60,10 +66,11 @@ security, performance (`EXPLAIN ANALYZE`, DB-019), responsive and accessibility 
 | T-STA-005 | SCOPE-001 | Docker services PostgreSQL, Redis, Mailpit healthy | Healthy | Healthy (owner report) | Pass | **Mac** | 2026-11-16 |
 | T-STA-006 | DB-020 | `prisma generate` | Succeeds | Succeeds (owner report) | Pass | **Mac** | 2026-11-16 |
 
-Totals: API unit 81/81 (VM; statements 88.8%, lines 90.9%), web 7/7 (VM), integration 2/2 (Mac). CI: not run.
+Totals: API unit 285/285 (VM; statements 90.1%, lines 92.8%), web 7/7 (VM), integration 2/2 (Mac). CI: not run.
 Not run yet: **T-AUTH-INT-001** (`test/auth.int-spec.ts`: register → Mailpit OTP → login → refresh → logout
 → audit rows, with the real role/profile trigger). It fails with an explicit message until the initial
-migration exists (P1A-04).
+migration exists (P1A-04). Also not run: **T-TEN-INT-001** (`test/tenancy.int-spec.ts`: scoped client with real
+queries, TENANT_MISMATCH, composite FK rejects a cross-tenant staff profile).
 Not yet confirmed in a browser: web status page through the proxy, Swagger UI (Phase 0 checklist).
 
 ## 3. Planned tests (not run)

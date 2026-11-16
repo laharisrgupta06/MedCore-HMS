@@ -1,8 +1,7 @@
 import { resolve } from 'node:path';
 import { Module } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
-import { APP_GUARD } from '@nestjs/core';
-import { ThrottlerGuard, ThrottlerModule, type ThrottlerModuleOptions } from '@nestjs/throttler';
+import { ThrottlerModule, type ThrottlerModuleOptions } from '@nestjs/throttler';
 import type { ExecutionContext } from '@nestjs/common';
 import type { Redis } from 'ioredis';
 import { validateEnv, type Env } from './config/env';
@@ -11,14 +10,14 @@ import { REDIS_CLIENT } from './infra/redis/redis.constants';
 import { RedisModule } from './infra/redis/redis.module';
 import { RedisThrottlerStorage } from './infra/throttler/redis-throttler.storage';
 import { AuthCoreModule } from './common/auth/auth-core.module';
-import { CsrfGuard } from './common/auth/csrf.guard';
 import { AUTH_RATE_LIMIT } from './common/auth/decorators';
-import { JwtAuthGuard } from './common/auth/jwt-auth.guard';
-import { RolesGuard } from './common/auth/roles.guard';
+import { GLOBAL_PIPELINE } from './common/global-pipeline';
+import { TenancyModule } from './common/tenancy/tenancy.module';
 import { MessagingModule } from './infra/messaging/messaging.module';
 import { AuditModule } from './modules/audit/audit.module';
 import { AuthModule } from './modules/auth/auth.module';
 import { HealthModule } from './modules/health/health.module';
+import { UsersModule } from './modules/users/users.module';
 
 /** True when the route or its controller carries @AuthRateLimit(). */
 export function isAuthRateLimited(ctx: ExecutionContext): boolean {
@@ -70,14 +69,10 @@ export function buildThrottlerOptions(
     AuditModule,
     AuthCoreModule,
     HealthModule,
+    TenancyModule,
     AuthModule,
+    UsersModule,
   ],
-  // Order matters: rate limit, then CSRF, then authentication, then roles.
-  providers: [
-    { provide: APP_GUARD, useClass: ThrottlerGuard },
-    { provide: APP_GUARD, useExisting: CsrfGuard },
-    { provide: APP_GUARD, useExisting: JwtAuthGuard },
-    { provide: APP_GUARD, useExisting: RolesGuard },
-  ],
+  providers: GLOBAL_PIPELINE,
 })
 export class AppModule {}

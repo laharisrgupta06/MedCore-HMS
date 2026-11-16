@@ -215,3 +215,19 @@ export interface VerifyEmailRequest {
 export interface CsrfResponse {
   csrfToken: string;
 }
+
+/** GET /users, GET/PATCH /users/:id (API-012). Never includes credentials. */
+export interface UserSummary {
+  id: string;
+  email: string;
+  phone: string | null;
+  firstName: string;
+  lastName: string;
+  role: Role;
+  hospitalId: string | null;
+  isActive: boolean;
+  emailVerified: boolean;
+  phoneVerified: boolean;
+  lastLoginAt: string | null;
+  createdAt: string;
+}

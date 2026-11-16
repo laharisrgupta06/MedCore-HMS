@@ -12,8 +12,8 @@ passed** (environment recorded in [TEST_PLAN.md](TEST_PLAN.md)). Phases follow
 | --- | --- | --- | --- | --- |
 | 0 | Foundation | 16 | 13 | **Done** except CI run on GitHub (P0-14) and two browser checks (P0-15, P0-16) |
 | 1A | Database schema | 7 | 2 | **Review**: awaiting "approve schema", then migration on macOS |
-| 1B | Authentication | 12 | 0 | **Review**: P1B-01..11 implemented, 81 unit tests pass (VM); database integration test waits for the migration (P1A-04). P1B-12 not started |
-| 1C | RBAC and tenancy | 7 | 0 | In Progress: P1C-01 guards implemented (Review) |
+| 1B | Authentication | 12 | 0 | **Review**: P1B-01..12 implemented and unit/HTTP-tested (VM); database integration tests wait for the migration (P1A-04) |
+| 1C | RBAC and tenancy | 7 | 0 | **Review**: P1C-01..06 implemented, 285 API tests pass (VM); PostgreSQL tests wait for the migration; P1C-07 needs an approved push |
 | 1D | Auth frontend | 6 | 0 | Blocked: design approval |
 | 2–14 | Remaining modules, hardening, deployment | 75 | 0 | Not Started |
 
@@ -65,7 +65,7 @@ passed** (environment recorded in [TEST_PLAN.md](TEST_PLAN.md)). Phases follow
 | P1B-09 | SEC-005 | Auth rate limit 100 / 15 min per IP | BE | P1B-04 | High | Review | T-AUTH-009 |
 | P1B-10 | SEC-010 | CSRF token for state-changing requests | BE | P1B-04 | High | Review | T-AUTH-010 |
 | P1B-11 | DEC-013 | `create-super-admin` CLI | BE | P1A-04 | High | Review | T-AUTH-011 |
-| P1B-12 | API-012 | `GET/PATCH/DELETE /users/:id`, `GET /users` | BE | P1C-02 | Medium | Not Started | T-RBAC-001 |
+| P1B-12 | API-012 | `GET/PATCH/DELETE /users/:id`, `GET /users` | BE | P1C-02 | Medium | Review | T-RBAC-001 |
 
 Phase 1B notes (branch `feat/phase-1-auth`): "Review" = implemented and unit/HTTP-tested in the VM with
 in-memory Prisma and Redis; not Done until `test/auth.int-spec.ts` (T-AUTH-INT-001) passes on macOS against
@@ -76,12 +76,19 @@ PostgreSQL, Redis and Mailpit, which needs the initial migration. Endpoint addit
 | Task ID | Req. | Task | Owner | Deps | Priority | Status | Tests |
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | P1C-01 | ROLE-010 | JWT guard, `@Public()`, `@Roles()` guard, `@CurrentUser()` | BE | P1B-04 | Critical | Review | T-RBAC-001 |
-| P1C-02 | TEN-003/004 | Tenant context + Prisma extension; audited Super Admin client | BE | P1C-01 | Critical | Not Started | T-TEN-001 |
-| P1C-03 | ROLE-011 | `docs/permissions-matrix.csv` and generated matrix test | QA | P1C-01 | Critical | Not Started | T-RBAC-001 |
-| P1C-04 | TEST-010, TEST-016 | Route-level tenancy isolation suite as required CI check | QA | P1C-02 | Critical | Not Started | T-TEN-001 |
-| P1C-05 | SEC-012 | Audit interceptor for writes and auth events | BE | P1C-02 | High | Not Started | T-AUD-001 |
-| P1C-06 | — | Update docs (ARCHITECTURE, SECURITY, TEST_PLAN, MEMORY) | LEAD | P1C-05 | High | Not Started | Review |
-| P1C-07 | DEP-003 | CI green on GitHub (after approved push) | LEAD | P1C-04 | High | Not Started | CI |
+| P1C-02 | TEN-003/004 | Tenant context + Prisma extension; audited Super Admin client | BE | P1C-01 | Critical | Review | T-TEN-001 |
+| P1C-03 | ROLE-011 | `docs/permissions-matrix.csv` and generated matrix test | QA | P1C-01 | Critical | Review | T-RBAC-001 |
+| P1C-04 | TEST-010, TEST-016 | Route-level tenancy isolation suite as required CI check | QA | P1C-02 | Critical | Review | T-TEN-001 |
+| P1C-05 | SEC-012 | Audit interceptor for writes and auth events | BE | P1C-02 | High | Review | T-AUD-001 |
+| P1C-06 | — | Update docs (ARCHITECTURE, SECURITY, TEST_PLAN, MEMORY) | LEAD | P1C-05 | High | Review | Review |
+| P1C-07 | DEP-003 | CI green on GitHub (after approved push) | LEAD | P1C-04 | High | Blocked (push approval) | CI |
+
+Phase 1C notes: tenant context (AsyncLocalStorage) + `TenantGuard` + `TenantPrismaService` (Prisma query
+extension) ; Super Admin uses the unscoped client and every such request is audited (`super_admin.read`,
+`crossTenant: true`); `AuditInterceptor` logs every successful write; `docs/permissions-matrix.csv` drives
+`src/permissions-matrix.spec.ts` (172 cases, also checks every registered route is listed); isolation tests
+in `users.http.spec.ts` (VM) and `test/tenancy.int-spec.ts` (PostgreSQL, not yet run). The isolation tests
+run in CI with the rest of the suite once pushed (P1C-07).
 
 ## Phase 1D — Authentication frontend
 

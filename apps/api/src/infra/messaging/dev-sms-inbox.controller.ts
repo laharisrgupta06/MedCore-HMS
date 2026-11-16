@@ -1,5 +1,6 @@
 import { Controller, Delete, Get, HttpCode } from '@nestjs/common';
 import { ApiExcludeController } from '@nestjs/swagger';
+import { SkipAudit } from '../../common/audit/audit.decorators';
 import { Public } from '../../common/auth/decorators';
 import { DevSmsInboxAdapter, type DevSmsRecord } from './dev-sms-inbox.adapter';
 
@@ -9,6 +10,7 @@ import { DevSmsInboxAdapter, type DevSmsRecord } from './dev-sms-inbox.adapter';
  */
 @ApiExcludeController()
 @Public()
+@SkipAudit() // development-only tool
 @Controller('dev/sms-inbox')
 export class DevSmsInboxController {
   constructor(private readonly inbox: DevSmsInboxAdapter) {}

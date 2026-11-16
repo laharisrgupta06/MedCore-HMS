@@ -13,12 +13,12 @@ Claude (main session acting as Team Lead).
 
 | Area | Status |
 | --- | --- |
-| Phase | **1B authentication: Review** on branch `feat/phase-1-auth` (uncommitted until verified commit). 1A still awaits "approve schema" → P1A-04 migration |
+| Phase | **1B + 1C: Review** on branch `feat/phase-1-auth` (commits `d5354ac`, 1C commit). 1A still awaits "approve schema" → P1A-04 migration. Next independent work: blocked on approvals (see below) |
 | Phase 0 | Done and verified (VM + macOS). Open: CI never run on GitHub; browser checks of status page and Swagger UI |
 | Database | Schema revision 2 written and validated: 44 models, 36 enums, 85 composite tenant FKs, constraints.sql (syntax-checked). **No migrations exist; nothing applied** |
-| Backend | Foundation + Phase 1B auth (register, email/phone OTP, login, refresh rotation, logout one/all, forgot/reset, me, CSRF, auth rate limit, RBAC guard, audit of auth events, create-super-admin CLI). Verified only with in-memory Prisma/Redis |
+| Backend | Foundation + Phase 1B auth (register, email/phone OTP, login, refresh rotation, logout one/all, forgot/reset, me, CSRF, auth rate limit, RBAC guard, audit of auth events, create-super-admin CLI). Phase 1C: tenant context + scoped Prisma client, permissions matrix, audit interceptor, users endpoints. Verified only with in-memory Prisma/Redis |
 | Frontend | Foundation only: same-origin proxy, API client, service status page. **Design tokens proposed, not approved** ([DESIGN.md](DESIGN.md)) |
-| Tests | 81 API unit + 7 web pass (VM); 2 integration pass (Mac); auth integration (T-AUTH-INT-001) written, not run (needs migration). Details: [TEST_PLAN.md](TEST_PLAN.md) |
+| Tests | 285 API unit + 7 web pass (VM); 2 integration pass (Mac); auth and tenancy integration tests (T-AUTH-INT-001, T-TEN-INT-001) written, not run (need migration). Details: [TEST_PLAN.md](TEST_PLAN.md) |
 | Agent Teams | **Abandoned** by the owner (13:46): single session only. Untracked `.claude/agents/*` and `.claude/team-kickoff.md` from the abandoned setup are not used and not committed |
 
 ## Git
@@ -52,7 +52,7 @@ Abandoned by the owner on 2026-11-16 13:46 (DEC-022 superseded in practice). Sin
 
 1. Owner: reply "approve schema" (or request changes).
 2. Run on macOS: `prisma:migrate:create --name init`, append `prisma/sql/constraints.sql`, review, `prisma:migrate`; then T-MIG-001..006 and `pnpm test:int` (includes T-AUTH-INT-001).
-3. Phase 1C: tenant context + Prisma extension, permissions matrix, audit interceptor, users endpoints (P1B-12).
+3. Phase 2 (hospital onboarding, departments, staff, doctors, patients, beds) needs the migrated database to be verified; backend code can proceed, but the auth screens (1D) need design approval.
 4. Design approval, then Phase 1D auth screens.
 
 ## Document map

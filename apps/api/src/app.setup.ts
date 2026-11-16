@@ -7,6 +7,7 @@ import helmet from 'helmet';
 import { AllExceptionsFilter } from './common/filters/all-exceptions.filter';
 import { EnvelopeInterceptor } from './common/interceptors/envelope.interceptor';
 import { createValidationPipe } from './common/pipes/validation';
+import { tenantContextMiddleware } from './common/tenancy/tenant-context';
 
 export const API_PREFIX = 'api';
 export const DOCS_PATH = `${API_PREFIX}/docs`;
@@ -28,6 +29,7 @@ export function configureApp(app: INestApplication, options: AppSetupOptions): v
   app.use((req: Request, res: Response, next: NextFunction) =>
     req.path.startsWith(`/${DOCS_PATH}`) ? docs(req, res, next) : strict(req, res, next),
   );
+  app.use(tenantContextMiddleware); // per-request tenant context (TEN-003)
   app.use(cookieParser());
   app.enableCors({
     origin: (origin: string | undefined, cb: (err: Error | null, allow?: boolean) => void) =>

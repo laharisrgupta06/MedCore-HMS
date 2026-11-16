@@ -33,7 +33,8 @@ specifications, (4) existing implementation and verified tests, (5) proposals, w
 ## Backend
 
 - Every endpoint: DTO validation, `@Roles()`, tenant scoping, Swagger decorators, audit entry for writes, happy-path and error-path tests.
-- `hospitalId` comes only from the verified token.
+- `hospitalId` comes only from the verified token. Tenant data is read and written only through `TenantPrismaService.client`; `PrismaService` directly is reserved for auth, system jobs and platform-level (global) tables.
+- Every new route gets a row in `docs/permissions-matrix.csv` (the matrix test fails otherwise); write routes get `@Audit(action, entity)` or are audited generically.
 - Errors use the envelope and common codes; never leak internals.
 - External services only through adapter interfaces with local implementations (DEC-003).
 

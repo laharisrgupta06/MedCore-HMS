@@ -11,6 +11,7 @@ import {
   type SessionResponse,
 } from '@medcore/types';
 import type { CookieOptions, Request, Response } from 'express';
+import { SkipAudit } from '../../common/audit/audit.decorators';
 import { newCsrfToken } from '../../common/auth/csrf.guard';
 import {
   AuthRateLimit,
@@ -41,6 +42,7 @@ const GENERIC_EMAIL_SENT =
   required: false,
 })
 @AuthRateLimit()
+@SkipAudit() // the service writes specific auth.* audit entries
 @Controller('auth')
 export class AuthController {
   constructor(

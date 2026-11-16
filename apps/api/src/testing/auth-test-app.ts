@@ -1,17 +1,20 @@
 /** Builds the auth HTTP stack for unit tests with in-memory Prisma and Redis (no external services). */
+import { randomUUID } from 'node:crypto';
 import { INestApplication, Module } from '@nestjs/common';
+import type { Role } from '@medcore/types';
+import type { User } from '@prisma/client';
+import { SessionStore } from '../common/auth/session.store';
+import { TokenService } from '../common/auth/token.service';
 import { ConfigModule, ConfigService } from '@nestjs/config';
-import { APP_GUARD } from '@nestjs/core';
 import { Test } from '@nestjs/testing';
-import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
 import RedisMock from 'ioredis-mock';
 import type { Redis } from 'ioredis';
 import { buildThrottlerOptions } from '../app.module';
 import { configureApp } from '../app.setup';
+import { ThrottlerModule } from '@nestjs/throttler';
 import { AuthCoreModule } from '../common/auth/auth-core.module';
-import { CsrfGuard } from '../common/auth/csrf.guard';
-import { JwtAuthGuard } from '../common/auth/jwt-auth.guard';
-import { RolesGuard } from '../common/auth/roles.guard';
+import { GLOBAL_PIPELINE } from '../common/global-pipeline';
+import { TenancyModule } from '../common/tenancy/tenancy.module';
 import { validateEnv } from '../config/env';
 import type { EmailMessage, SmsMessage } from '../infra/messaging/messaging.types';
 import { MAIL_ADAPTER, SMS_ADAPTER } from '../infra/messaging/messaging.types';
@@ -33,6 +36,8 @@ export const TEST_ENV = {
 
 export interface AuthTestApp {
   app: INestApplication;
+  /** Signs in a fixture user without the HTTP login flow: a live session and an access token. */
+  tokenFor(user: Pick<User, 'id' | 'role' | 'hospitalId'>): Promise<string>;
   prisma: FakePrisma;
   redis: Redis;
   emails: EmailMessage[];
@@ -44,7 +49,7 @@ class TestInfraModule {}
 
 export async function createAuthTestApp(
   env: Record<string, string> = {},
-  extra: { controllers?: unknown[] } = {},
+  extra: { controllers?: unknown[]; modules?: unknown[]; providers?: unknown[] } = {},
 ): Promise<AuthTestApp> {
   const prisma = new FakePrisma();
   const redis = new RedisMock() as unknown as Redis;
@@ -83,15 +88,12 @@ export async function createAuthTestApp(
       }),
       AuditModule,
       AuthCoreModule,
+      TenancyModule,
       AuthModule,
+      ...((extra.modules ?? []) as never[]),
     ],
     controllers: (extra.controllers ?? []) as never[],
-    providers: [
-      { provide: APP_GUARD, useClass: ThrottlerGuard },
-      { provide: APP_GUARD, useExisting: CsrfGuard },
-      { provide: APP_GUARD, useExisting: JwtAuthGuard },
-      { provide: APP_GUARD, useExisting: RolesGuard },
-    ],
+    providers: [...GLOBAL_PIPELINE, ...((extra.providers ?? []) as never[])],
   })
     .overrideProvider(PrismaService)
     .useValue(prisma)
@@ -99,7 +101,14 @@ export async function createAuthTestApp(
   const app = mod.createNestApplication();
   configureApp(app, { corsOrigins: ['http://localhost:3000'], enableSwagger: false });
   await app.init();
-  return { app, prisma, redis, emails, sms };
+  const tokens = app.get(TokenService);
+  const sessions = app.get(SessionStore);
+  const tokenFor = async (u: Pick<User, 'id' | 'role' | 'hospitalId'>) => {
+    const sid = randomUUID();
+    await sessions.create(u.id, sid, randomUUID(), 60_000);
+    return tokens.signAccess({ sub: u.id, sid, role: u.role as Role, hid: u.hospitalId });
+  };
+  return { app, prisma, redis, emails, sms, tokenFor };
 }
 
 /** Extracts the 6-digit code from the most recent message, as a person reading Mailpit would. */

@@ -128,6 +128,8 @@ describe('Auth HTTP flows (in-memory Prisma and Redis)', () => {
       expect(t.emails[0]!.to).toBe('asha@example.com');
       expect(JSON.stringify(res.body)).not.toContain(lastCode(t.emails));
       expect(t.prisma.actions()).toContain('auth.register');
+      // Auth routes write specific entries only; the generic write audit is skipped (@SkipAudit).
+      expect(t.prisma.actions().filter((x) => x.startsWith('http.'))).toEqual([]);
     });
 
     it('rejects an unknown or unverified hospital code with the same error', async () => {
