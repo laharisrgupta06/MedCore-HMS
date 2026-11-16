@@ -12,6 +12,9 @@ const nextConfig: NextConfig = {
   poweredByHeader: false,
   // Linting runs once for the whole monorepo via `pnpm lint` (root eslint.config.mjs).
   eslint: { ignoreDuringBuilds: true },
+  // The dev-only floating indicator sits over the footer links on phone widths and blocks clicks in
+  // the mobile E2E run. Build and runtime errors still show in the dev overlay; production is unaffected.
+  devIndicators: false,
   async headers() {
     return [
       {

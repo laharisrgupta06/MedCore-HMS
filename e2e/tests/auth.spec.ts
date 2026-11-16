@@ -23,13 +23,15 @@ test.describe('public and authentication pages', () => {
     await page.getByLabel(/^Email/).fill('nobody-e2e@example.com');
     await page.getByLabel(/^Password/).fill('Wrong-password-1');
     await page.getByRole('button', { name: 'Sign in' }).click();
-    await expect(page.getByRole('alert')).toContainText('Email or password is incorrect.');
+    // Next.js keeps its own empty role="alert" route announcer on every page, so target the form's alert.
+    const error = page.getByRole('alert').filter({ hasText: 'Could not sign in' });
+    await expect(error).toContainText('Email or password is incorrect.');
   });
 
   test('registration rejects an unknown hospital code', async ({ page }) => {
     await page.goto('/register');
     await page.getByLabel(/^Hospital code/).fill('NO-SUCH-CODE');
-    await page.getByLabel(/^First name/).fill('E2E');
+    await page.getByLabel(/^First name/).fill('Asha'); // names are letters only (API PERSON_NAME)
     await page.getByLabel(/^Last name/).fill('Patient');
     await page.getByLabel(/^Email/).fill(`e2e-${Date.now()}@example.com`);
     await page.getByLabel(/^Date of birth/).fill('1990-01-01');
