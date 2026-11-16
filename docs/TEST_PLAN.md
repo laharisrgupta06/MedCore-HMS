@@ -58,7 +58,8 @@ security, performance (`EXPLAIN ANALYZE`, DB-019), responsive and accessibility 
 | T-TEN-003 | TEST-010, TEST-016 | `users.http.spec.ts` isolation: another hospital's users are 404 for GET/PATCH/DELETE with guessed ids, nothing changed; `?hospitalId=` of another hospital → 404; Super Admin cross-tenant write audited. Negative check performed: disabling User scoping made 2 tests fail | As specified | 2/2 pass (+3 related) | Pass | VM | 2026-11-16 |
 | T-RBAC-001 | ROLE-011 | `permissions-matrix.spec.ts` from `docs/permissions-matrix.csv`: 19 routes × 9 roles (PUBLIC/ALLOW/OWN/DENY, anonymous 401, OWN on another record 403/404) plus "every registered route is in the matrix". Negative checks performed: one wrong cell and one missing row each failed | As specified | 172/172 pass | Pass | VM | 2026-11-16 |
 | T-USR-001 | API-012 | `users.http.spec.ts`: list scoping, search/role/paging, limit validation; self-or-admin get; profile update clears phone verification; isActive admin-only and revokes sessions; unknown fields rejected; soft delete revokes sessions; no self-delete; CSRF required | As specified | 13/13 pass | Pass | VM | 2026-11-16 |
-| T-AUD-001 | SEC-012 | audit interceptor: user.update/user.delete entries with actor, hospital, entity, IP, redacted body; Super Admin reads audited; auth routes not double-logged | As specified | Pass (in users/auth specs) | Pass | VM | 2026-11-16 |
+| T-AUD-001 | SEC-012 | audit interceptor: user.update/user.delete entries with actor, hospital, entity, IP and submitted field names; Super Admin reads audited; auth routes not double-logged | As specified | Pass (in users/auth specs) | Pass | VM | 2026-11-16 |
+| T-AUD-002 | SEC-012, AUTH-012, DEC-030 | `common/audit/audit.spec.ts`: field names only; values only for declared safe scalar fields (still redacted); `safeChanges` drops raw bodies, redacts secrets, bounds size/depth; end to end: password, OTP, refresh token, diagnosis, notes and the bearer token never appear in stored audit rows | As specified | 3/3 pass | Pass | VM | 2026-11-16 |
 | T-STA-001 | DEP-003 | Prettier, ESLint, TypeScript (all packages) | Clean | Clean | Pass | VM | 2026-11-16 |
 | T-STA-002 | SCOPE-021 | `pnpm build` (types, API, web) | Builds | Builds | Pass | VM | 2026-11-16 |
 | T-STA-003 | DB-001 | `prisma validate` schema revision 2 | Valid | Valid | Pass | VM (offline validator) | 2026-11-16 |
@@ -66,10 +67,10 @@ security, performance (`EXPLAIN ANALYZE`, DB-019), responsive and accessibility 
 | T-STA-005 | SCOPE-001 | Docker services PostgreSQL, Redis, Mailpit healthy | Healthy | Healthy (owner report) | Pass | **Mac** | 2026-11-16 |
 | T-STA-006 | DB-020 | `prisma generate` | Succeeds | Succeeds (owner report) | Pass | **Mac** | 2026-11-16 |
 
-Totals: API unit 285/285 (VM; statements 90.1%, lines 92.8%), web 7/7 (VM), integration 2/2 (Mac). CI: not run.
+Totals: API unit 288/288 (VM), web 7/7 (VM), integration 2/2 (Mac). CI: not run.
 Not run yet: **T-AUTH-INT-001** (`test/auth.int-spec.ts`: register → Mailpit OTP → login → refresh → logout
 → audit rows, with the real role/profile trigger). It fails with an explicit message until the initial
-migration exists (P1A-04). Also not run: **T-TEN-INT-001** (`test/tenancy.int-spec.ts`: scoped client with real
+migration exists (P1A-04). Also not run: **T-MIG-001..006** (`test/constraints.int-spec.ts`; T-MIG-005 covers audit, medical-record locks only so far; clinical correction triggers are tested with the EMR in Phase 4) and **T-TEN-INT-001** (`test/tenancy.int-spec.ts`: scoped client with real
 queries, TENANT_MISMATCH, composite FK rejects a cross-tenant staff profile).
 Not yet confirmed in a browser: web status page through the proxy, Swagger UI (Phase 0 checklist).
 
@@ -77,12 +78,12 @@ Not yet confirmed in a browser: web status page through the proxy, Swagger UI (P
 
 | Test ID | Req. | Scenario | Expected | Phase | Status |
 | --- | --- | --- | --- | --- | --- |
-| T-MIG-001 | DB-020, DEC-019 | Initial migration + constraints apply on a fresh database | Applies cleanly; constraints present | 1A | Not run |
-| T-MIG-002 | APPT-002, APPT-006 | Overlapping doctor appointment rejected by exclusion constraint; EMERGENCY allowed; patient overlap rejected | DB errors as designed | 1A | Not run |
-| T-MIG-003 | DEC-017 | Role/profile trigger: each of the 9 roles valid and invalid combinations at commit | Only valid combinations commit | 1A | Not run |
-| T-MIG-004 | DEC-018 | Child row pointing to a parent in another hospital rejected | FK violation | 1A | Not run |
-| T-MIG-005 | DEC-016, EMR-002 | Append-only, status-only, closed-record and approved-lab locks; corrections require reason and same parent | Triggers fire as designed | 1A | Not run |
-| T-MIG-006 | BILL-001, TEST-015 | Invoice CHECKs: total = subtotal + tax − discount; line total; item links | Violations rejected | 1A | Not run |
+| T-MIG-001 | DB-020, DEC-019 | `test/constraints.int-spec.ts`: 44 tables, 31 triggers, 2 exclusion constraints, pgcrypto + btree_gist | Applies cleanly; constraints present | 1A | Written, not run (needs migration) |
+| T-MIG-002 | APPT-002, APPT-006 | Overlapping doctor appointment rejected by exclusion constraint; EMERGENCY allowed; patient overlap rejected | DB errors as designed | 1A | Written, not run |
+| T-MIG-003 | DEC-017 | Role/profile trigger: each of the 9 roles valid and invalid combinations at commit | Only valid combinations commit | 1A | Written, not run |
+| T-MIG-004 | DEC-018 | Child row pointing to a parent in another hospital rejected | FK violation | 1A | Written, not run |
+| T-MIG-005 | DEC-016, EMR-002 | Append-only, status-only, closed-record and approved-lab locks; corrections require reason and same parent | Triggers fire as designed | 1A | Written, not run |
+| T-MIG-006 | BILL-001, TEST-015 | Invoice CHECKs: total = subtotal + tax − discount; line total; item links | Violations rejected | 1A | Written, not run |
 | T-AUTH-001 | TEST-013, SEC-004 | Refresh token reused after rotation → 401 and all sessions revoked | Rejected | 1B | Not run |
 | T-AUTH-002..010 | AUTH-001..012 | Register, verify email/phone, login, me, refresh, logout one/all, forgot/reset, OTP attempt limit, auth rate limit 429, bcrypt cost, cookie flags, CSRF, no secrets in logs | As specified | 1B | Not run |
 | T-RBAC-001 | ROLE-011 | Every endpoint × 9 roles matches `permissions-matrix.csv` | Allowed/denied per matrix | 1C | Not run |

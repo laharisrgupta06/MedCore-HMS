@@ -5,6 +5,7 @@ import { mergeMap, Observable } from 'rxjs';
 import { AuditService } from '../../modules/audit/audit.service';
 import type { AuthenticatedRequest } from '../auth/decorators';
 import { TenantContext } from '../tenancy/tenant-context';
+import { bodyMetadata } from './audit-metadata';
 import { AUDIT, SKIP_AUDIT, type AuditMeta } from './audit.decorators';
 
 const WRITES = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
@@ -18,7 +19,7 @@ function entityIdOf(req: Request, result: unknown): string | null {
 
 /**
  * SEC-012: every successful create/update/delete is logged with user, IP, timestamp and the
- * (redacted) request body. Super Admin requests that used the cross-tenant client are logged too,
+ * names of the submitted fields (values only for fields the route declares safe; DEC-030). Super Admin requests that used the cross-tenant client are logged too,
  * including reads (TEN-004). Failed requests change nothing and are not logged here.
  */
 @Injectable()
@@ -56,9 +57,7 @@ export class AuditInterceptor implements NestInterceptor {
           changes: {
             method: req.method,
             route,
-            ...(isWrite && req.body && Object.keys(req.body as object).length
-              ? { body: req.body as Record<string, unknown> }
-              : {}),
+            ...(isWrite ? bodyMetadata(req.body, meta?.safeFields) : {}),
             ...(crossTenant ? { crossTenant: true } : {}),
           },
         });

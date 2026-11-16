@@ -150,7 +150,13 @@ describe('Users endpoints (API-012) with tenant scoping', () => {
         entityId: nurseA.id,
         hospitalId: a.id,
       });
-      expect(entry?.changes).toMatchObject({ method: 'PATCH', body: { firstName: 'Nora' } });
+      expect(entry?.changes).toEqual({
+        method: 'PATCH',
+        route: '/api/users/:id',
+        fields: ['firstName', 'phone'],
+      });
+      // Personal values (name, phone) are never stored in the audit log (DEC-030).
+      expect(JSON.stringify(entry?.changes)).not.toMatch(/Nora|2222222222/);
     });
 
     it('only administrators change isActive; deactivation signs the user out everywhere', async () => {

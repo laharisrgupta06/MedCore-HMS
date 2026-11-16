@@ -225,6 +225,8 @@ service (Phase 3) also locks rows and returns `409 SLOT_UNAVAILABLE` cleanly.
 
 ## Migration workflow
 
+Full review package with exact commands, verification queries and risks: [migration-review.md](migration-review.md).
+
 Prisma's migration engine cannot run in the build VM, so migrations are created on macOS:
 
 1. `pnpm --filter @medcore/api prisma:migrate:create --name init` creates the SQL without applying it.

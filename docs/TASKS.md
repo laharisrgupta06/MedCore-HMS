@@ -45,8 +45,8 @@ passed** (environment recorded in [TEST_PLAN.md](TEST_PLAN.md)). Phases follow
 | P1A-01 | SCOPE-002, DB-001..019 | Complete schema, 44 models, 36 enums | DB | — | Critical | Review | T-STA-003, T-DB-001..004 | `8576b24`, `e487298` |
 | P1A-02 | DEC-016..018 | Corrections, gap fixes, composite tenant keys | DB | P1A-01 | Critical | Review | T-DB-*, T-STA-004 | Approved designs; schema approval pending |
 | P1A-03 | DB-014, EMR-002, APPT-006 | `constraints.sql`: CHECKs, exclusions, triggers | DB | P1A-01 | Critical | Review | T-STA-004 (syntax only) | Not executed by PostgreSQL yet |
-| P1A-04 | DB-020 | Create initial migration on macOS, append constraints, review SQL | DB | owner "approve schema" | Critical | Blocked | T-MIG-001 | DEC-019, DEC-025 |
-| P1A-05 | DB-001..019 | Database constraint tests against real PostgreSQL | QA | P1A-04 | Critical | Not Started | T-MIG-002..006 | |
+| P1A-04 | DB-020 | Create initial migration on macOS, append constraints, review SQL ([migration-review.md](migration-review.md)) | DB | owner "approve schema" | Critical | Blocked | T-MIG-001 | DEC-019, DEC-025 |
+| P1A-05 | DB-001..019 | Database constraint tests against real PostgreSQL | QA | P1A-04 | Critical | Review (written: `test/constraints.int-spec.ts`; not run) | T-MIG-002..006 | |
 | P1A-06 | DEL-004 | ER diagrams | DB | P1A-01 | Medium | Done | Review | Mermaid in `database-schema.md`; Prisma-generated ER at deliverable stage |
 | P1A-07 | TEN-002 | Schema tenancy guard test | QA | P1A-01 | High | Done | T-DB-001..004 (VM) | Negative check performed |
 
@@ -89,6 +89,17 @@ extension) ; Super Admin uses the unscoped client and every such request is audi
 `src/permissions-matrix.spec.ts` (172 cases, also checks every registered route is listed); isolation tests
 in `users.http.spec.ts` (VM) and `test/tenancy.int-spec.ts` (PostgreSQL, not yet run). The isolation tests
 run in CI with the rest of the suite once pushed (P1C-07).
+
+### Open blockers (2026-11-16)
+
+| # | Blocker | Needs | Unblocks |
+| --- | --- | --- | --- |
+| B-1 | Initial migration | Owner "approve schema", then steps 0–6 of [migration-review.md](migration-review.md) on macOS | P1A-04/05, Done for 1B/1C (T-AUTH-INT-001, T-TEN-INT-001, T-MIG-*), Phase 2 |
+| B-2 | Design tokens | Owner approval of [DESIGN.md](DESIGN.md) | Phase 1D and every styled screen |
+| B-3 | CI on GitHub | Owner approval to push | P0-14, P1C-07 |
+| B-4 | Browser checks | Owner opens the status page and Swagger UI | P0-15, P0-16 |
+| B-5 | Proposed decisions | Owner acknowledgement of DEC-014/015/020/023/025..030 | Records only; not blocking code |
+| B-6 | Part 8 of the documentation instruction was cut off | Owner resends if it adds rules | — |
 
 ## Phase 1D — Authentication frontend
 

@@ -161,3 +161,8 @@ Every significant product, architecture, database, design and process decision. 
 - Decision: AsyncLocalStorage request context + `TenantGuard` + a Prisma query extension (`TenantPrismaService`); other tenants' records answer 404; Super Admin uses the unscoped client and those requests are audited. Users endpoints: list for administrators (Super Admin may filter by hospital); get/patch for self or administrator; `isActive` and delete for administrators only, never on oneself; delete is a soft delete that signs the user out everywhere; email and role are not editable here (email change needs a verification flow; roles change with staff management in Phase 2). The audit interceptor logs every successful write with the redacted body.
 - Related: TEN-003/004, API-012, SEC-012, ROLE-011.
 
+### DEC-030: Audit entries store metadata, never values
+- Status: **Proposed** (owner request 14:17: "Prefer safe, redacted audit metadata")
+- Decision: generic write audits record method, route, entity, actor, hospital, IP, user agent and the **names** of submitted fields. Values are stored only for fields a route lists as safe in `@Audit(action, entity, safeFields)` and only as short scalars, still redacted. Every entry, from any source, passes `safeChanges()`: sensitive keys redacted, any `body` key dropped, strings cut at 200 characters, nesting limited. Auth audit entries carry only the opaque session id (not a credential: a refresh requires the signed token). Before/after values for clinical data are not stored in the audit log; the clinical tables keep originals and corrections themselves (DEC-016).
+- Related: SEC-012, AUTH-012, DB-013.
+

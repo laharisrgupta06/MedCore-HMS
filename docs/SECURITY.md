@@ -28,8 +28,8 @@ passes; environment stated) · **Planned**. No regulatory compliance or certific
 | SQL injection | SEC-008 | **Yes**: Prisma only; one tagged-template health probe | Structural | pgcrypto helpers approved (DEC-024) |
 | XSS | SEC-009 | Planned (DOMPurify where user HTML renders) | — | React escapes by default |
 | Error handling | API-003 | **Yes**: 5xx never leak internals | **Yes** (VM T-API-006, T-ERR-*) | |
-| Log sanitisation | AUTH-012 | **Yes** (`AppLogger` + `sanitize`) | **Yes** (VM T-LOG-*) | |
-| Audit logging | SEC-012, DB-013 | **Yes**: auth events from the auth service; `AuditInterceptor` for every successful write (actor, hospital, IP, user agent, redacted body); append-only trigger in schema | **Yes** (VM T-AUD-001, in-memory) | Before/after values per field added module by module where useful |
+| Log sanitisation | AUTH-012 | **Yes** (`AppLogger` + `sanitize`; keys: password, token, secret, otp, authorization, cookie, api key, cvv, card number, csrf, jwt, credential, private key, hash) | **Yes** (VM T-LOG-*) | |
+| Audit logging | SEC-012, DB-013 | **Yes**: auth events from the auth service; `AuditInterceptor` for every successful write: actor, hospital, IP, user agent, route, **names** of submitted fields only (values only for fields a route declares safe, e.g. `isActive`); every entry passes `safeChanges` (secret keys redacted, raw bodies dropped, size bounded); append-only trigger in schema | **Yes** (VM T-AUD-001/002, in-memory) | No passwords, tokens, OTPs, personal or clinical values are stored (DEC-030) |
 | Encryption at rest | SEC-014, EMR-012 | `*Enc` bytea columns + pgcrypto extension in schema; helpers planned (Phase 4) | — | Key from env, rotation script planned |
 | Encryption in transit | SEC-002 | Planned (Nginx TLS, Phase 14) | — | Local dev is HTTP on localhost |
 | File uploads | SEC-013, EMR-010 | 20 MB CHECK in schema; validation planned (Phase 4) | — | MIME + extension + magic bytes; reject executables |
@@ -52,4 +52,5 @@ passes; environment stated) · **Planned**. No regulatory compliance or certific
 | R-06 | ESLint 9 is marked deprecated upstream | Revisit after Phase 1; no security impact today |
 | R-08 | Account enumeration: register returns 409 EMAIL_IN_USE (standard sign-up behaviour); login, resend and forgot-password answer generically | Auth rate limit; accepted trade-off, revisit if required |
 | R-09 | Auth flows verified only against in-memory Prisma/Redis so far | T-AUTH-INT-001 on macOS after the migration |
+| R-10 | Prisma does not model the SQL-only keys/indexes, CHECKs, exclusions and triggers; a future migration may try to drop them | Every migration `--create-only` + review; `prisma:drift` check (migration-review.md M-02) |
 | R-07 | CI workflow has never run on GitHub (nothing pushed) | Push only with owner approval; then verify CI |

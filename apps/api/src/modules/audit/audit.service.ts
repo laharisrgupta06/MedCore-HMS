@@ -1,6 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import type { Prisma } from '@prisma/client';
-import { sanitize } from '../../common/logger/sanitize';
+import { safeChanges } from '../../common/audit/audit-metadata';
 import { PrismaService } from '../../infra/prisma/prisma.service';
 
 export interface AuditEvent {
@@ -15,7 +15,8 @@ export interface AuditEvent {
 }
 
 /**
- * Writes append-only audit entries (SEC-012, DB-013). Sensitive keys are redacted before storage.
+ * Writes append-only audit entries (SEC-012, DB-013). Every entry passes safeChanges(): sensitive
+ * keys redacted, no raw bodies, bounded size.
  * A failed audit write is logged as an error but does not undo the action that already happened.
  */
 @Injectable()
@@ -35,7 +36,7 @@ export class AuditService {
           hospitalId: e.hospitalId ?? null,
           ipAddress: e.ipAddress ?? null,
           userAgent: e.userAgent?.slice(0, 512) ?? null,
-          changes: e.changes ? (sanitize(e.changes) as Prisma.InputJsonValue) : undefined,
+          changes: e.changes ? (safeChanges(e.changes) as Prisma.InputJsonValue) : undefined,
         },
       });
     } catch (err) {

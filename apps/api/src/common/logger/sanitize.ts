@@ -3,7 +3,7 @@
  * Redacts sensitive keys at any depth and bearer tokens inside strings.
  */
 const SENSITIVE_KEY =
-  /(pass(word)?|token|secret|otp|authorization|cookie|api[-_]?key|cvv|card[-_]?number)/i;
+  /(pass(word)?|token|secret|otp|authorization|cookie|api[-_]?key|cvv|card[-_]?number|csrf|jwt|credential|private[-_]?key|hash)/i;
 const BEARER = /Bearer\s+[A-Za-z0-9\-._~+/]+=*/g;
 export const REDACTED = '[REDACTED]';
 const MAX_DEPTH = 8;

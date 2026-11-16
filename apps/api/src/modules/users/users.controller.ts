@@ -35,7 +35,7 @@ export class UsersController {
   }
 
   @Patch(':id')
-  @Audit('user.update', 'User')
+  @Audit('user.update', 'User', ['isActive'])
   @ApiOperation({
     summary: 'Update name or phone (self or administrator); isActive (administrator only)',
   })

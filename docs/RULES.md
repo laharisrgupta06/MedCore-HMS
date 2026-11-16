@@ -27,6 +27,7 @@ specifications, (4) existing implementation and verified tests, (5) proposals, w
 - The Database Engineer owns `apps/api/prisma/**` (DEC-008). Others request changes by message.
 - Every hospital-specific table has `hospitalId`; tenant relations are composite `(id, hospitalId)` keys (DEC-018). `schema-tenancy.spec.ts` must pass.
 - Never edit an applied migration; add a new one. Production uses `prisma migrate deploy` only.
+- Every migration is created with `--create-only` and reviewed before it is applied; remove any `DROP` of an object from `prisma/sql/constraints.sql` (Prisma does not model them), and run `pnpm --filter @medcore/api prisma:drift` afterwards ([migration-review.md](migration-review.md)).
 - Clinical data is never deleted or overwritten; corrections follow DEC-016.
 - No raw SQL at runtime except the approved pgcrypto helpers (DEC-024) and the health probe.
 
@@ -34,7 +35,7 @@ specifications, (4) existing implementation and verified tests, (5) proposals, w
 
 - Every endpoint: DTO validation, `@Roles()`, tenant scoping, Swagger decorators, audit entry for writes, happy-path and error-path tests.
 - `hospitalId` comes only from the verified token. Tenant data is read and written only through `TenantPrismaService.client`; `PrismaService` directly is reserved for auth, system jobs and platform-level (global) tables.
-- Every new route gets a row in `docs/permissions-matrix.csv` (the matrix test fails otherwise); write routes get `@Audit(action, entity)` or are audited generically.
+- Every new route gets a row in `docs/permissions-matrix.csv` (the matrix test fails otherwise); write routes get `@Audit(action, entity, safeFields)` or are audited generically. Never pass request bodies, personal or clinical values to the audit log (DEC-030).
 - Errors use the envelope and common codes; never leak internals.
 - External services only through adapter interfaces with local implementations (DEC-003).
 
