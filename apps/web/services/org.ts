@@ -88,6 +88,7 @@ export interface DoctorInput {
 export const doctorsApi = {
   list: (q: Q) => apiList<Doctor>(`/doctors${qs(q)}`),
   get: (id: string) => apiRequest<Doctor>(`/doctors/${id}`),
+  me: () => apiRequest<Doctor>('/doctors/me'),
   create: (b: DoctorInput) => apiRequest<Doctor>('/doctors', { method: 'POST', json: b }),
   update: (
     id: string,

@@ -122,6 +122,19 @@ reception registration, patient self-read), `modules/facilities` (rooms, beds). 
 to envelopes in `common/http/prisma-errors.ts`. Contracts: `@medcore/types` `org.ts`. Web screens live in
 `apps/web/components/org/*` on a shared DataTable, Dialog (Radix), Toaster and SearchInput.
 
+## 6b. Appointments (Phase 3)
+
+`modules/appointments`: `SchedulingService` behind two controllers. `AvailabilityController` serves
+`/doctors/:id/schedules`, `/schedules/:id`, `/doctors/:id/exceptions`, `/exceptions/:id` and
+`/doctors/:id/slots`; `AppointmentsController` serves `/appointments` (book, list, get, status,
+reschedule). Times are hospital-local (`common/time/zoned.ts`, Intl-based, DST-safe). Booking:
+transaction → `UPDATE doctor` row lock → overlap re-check → insert; the exclusion constraints
+`appointments_doctor_no_overlap` (EMERGENCY excluded) and `appointments_patient_no_overlap` are the final
+guard and map to 409. Reminders: `@Global RemindersModule` with queue `appointments`, jobs
+`reminder:{id}:{24h|1h}` processed by `ReminderProcessor` (email; SMS to verified phones). Contracts:
+`@medcore/types` `appointments.ts`. Web: `components/appointments/*` (slot picker, booking form,
+staff agenda, availability, patient portal), all times shown in the hospital time zone (DEC-038).
+
 ## 7. Tenant isolation
 
 Row-per-tenant (shared schema) with three layers (TEN-001..005, DEC-018):
@@ -159,7 +172,8 @@ erDiagram
 ## 9. Redis, caching and background jobs
 
 - Implemented: shared ioredis client; Redis rate-limit counters (atomic Lua); BullMQ connection with prefix `medcore` and one `system` queue used by the health check.
-- [planned] refresh-token sessions, OTPs, availability cache (60 s), inventory counts; queues `email`, `sms`, `push`, `pdf`, `reports`, `reminders`; nightly expiry scan.
+- Implemented (Phase 1B/3): refresh-token sessions, OTPs; slot cache `slots:{doctorId}:{date}` for 60 s, cleared by SCAN on changes; queue `appointments` with delayed reminder jobs.
+- [planned] inventory counts; queues `email`, `sms`, `push`, `pdf`, `reports`; nightly expiry scan.
 
 ## 10. Real-time, files and external integrations [planned]
 

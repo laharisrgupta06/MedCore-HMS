@@ -1,6 +1,9 @@
 import type { Role } from '@medcore/types';
 import {
   BedDouble,
+  CalendarClock,
+  CalendarDays,
+  CalendarPlus,
   Building2,
   Home,
   Layers,
@@ -37,6 +40,18 @@ const STAFF: readonly Role[] = [
 export const STAFF_NAV: NavItem[] = [
   { href: '/dashboard', label: 'Home', icon: Home, roles: STAFF },
   { href: '/dashboard/hospitals', label: 'Hospitals', icon: Building2, roles: ['SUPER_ADMIN'] },
+  {
+    href: '/dashboard/appointments',
+    label: 'Appointments',
+    icon: CalendarDays,
+    roles: ['HOSPITAL_ADMIN', 'DOCTOR', 'NURSE', 'RECEPTIONIST', 'ACCOUNTANT'],
+  },
+  {
+    href: '/dashboard/availability',
+    label: 'Availability',
+    icon: CalendarClock,
+    roles: ['HOSPITAL_ADMIN', 'DOCTOR'],
+  },
   {
     href: '/dashboard/patients',
     label: 'Patients',
@@ -84,6 +99,13 @@ export const STAFF_NAV: NavItem[] = [
 
 export const PATIENT_NAV: NavItem[] = [
   { href: '/portal', label: 'Home', icon: Home, roles: ['PATIENT'] },
+  {
+    href: '/portal/appointments',
+    label: 'My appointments',
+    icon: CalendarDays,
+    roles: ['PATIENT'],
+  },
+  { href: '/portal/book', label: 'Book appointment', icon: CalendarPlus, roles: ['PATIENT'] },
   { href: '/portal/account', label: 'My account', icon: UserRound, roles: ['PATIENT'] },
 ];
 

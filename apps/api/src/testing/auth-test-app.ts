@@ -27,6 +27,7 @@ import { StorageModule } from '../infra/storage/storage.service';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { FakePrisma } from './fake-prisma';
+import { REMINDER_SCHEDULER } from '../modules/appointments/reminders';
 
 export const TEST_ENV = {
   NODE_ENV: 'test',
@@ -46,6 +47,7 @@ export interface AuthTestApp {
   redis: Redis;
   emails: EmailMessage[];
   sms: SmsMessage[];
+  reminders: { id: string; at: string }[];
 }
 
 @Module({})
@@ -60,6 +62,7 @@ export async function createAuthTestApp(
   await redis.flushall();
   const emails: EmailMessage[] = [];
   const sms: SmsMessage[] = [];
+  const reminders: { id: string; at: string }[] = [];
   const infra = [
     { provide: REDIS_CLIENT, useValue: redis },
     {
@@ -70,6 +73,16 @@ export async function createAuthTestApp(
       provide: SMS_ADAPTER,
       useValue: { send: (m: SmsMessage) => (sms.push(m), Promise.resolve()) },
     },
+    {
+      provide: REMINDER_SCHEDULER,
+      useValue: {
+        schedule: (id: string, at: Date) => (
+          reminders.push({ id, at: at.toISOString() }),
+          Promise.resolve()
+        ),
+        cancel: (id: string) => (reminders.push({ id, at: 'cancelled' }), Promise.resolve()),
+      },
+    },
   ];
   const mod = await Test.createTestingModule({
     imports: [
@@ -77,7 +90,7 @@ export async function createAuthTestApp(
         module: TestInfraModule,
         global: true,
         providers: infra,
-        exports: [REDIS_CLIENT, MAIL_ADAPTER, SMS_ADAPTER],
+        exports: [REDIS_CLIENT, MAIL_ADAPTER, SMS_ADAPTER, REMINDER_SCHEDULER],
       },
       ConfigModule.forRoot({
         isGlobal: true,
@@ -113,7 +126,7 @@ export async function createAuthTestApp(
     await sessions.create(u.id, sid, randomUUID(), 60_000);
     return tokens.signAccess({ sub: u.id, sid, role: u.role as Role, hid: u.hospitalId });
   };
-  return { app, prisma, redis, emails, sms, tokenFor };
+  return { app, prisma, redis, emails, sms, reminders, tokenFor };
 }
 
 /** Extracts the 6-digit code from the most recent message, as a person reading Mailpit would. */

@@ -113,12 +113,27 @@ run in CI with the rest of the suite once pushed (P1C-07).
 | P1D-05 | AUTH-003, TECH-018 | Auth store, silent refresh, role redirect, logout | FE | P1D-03 | Critical | Review | T-FE-* |
 | P1D-06 | DEC-009 | Custom 404, Privacy, Terms (legal review flagged) | FE | P1D-02 | Medium | Review | T-FE-* |
 
+## Phase 3 — Appointments
+
+| Task ID | Req. | Task | Status | Tests |
+| --- | --- | --- | --- | --- |
+| P3-01 | SCOPE-007 | Weekly windows per doctor and department (hospital-local times, overlap 409, valid-from/to, pause) | Review | T-APPT-HTTP, T-RBAC-001c |
+| P3-02 | SCOPE-008 | Date exceptions: leave, blocked time, extra hours | Review | T-APPT-HTTP |
+| P3-03 | APPT-001, CACHE-002 | Slot generation in the hospital time zone, Redis cache 60 s, invalidated on every change | Review | T-APPT-HTTP, T-FE-018 |
+| P3-04 | APPT-002, APPT-006, TEST-012 | Booking under a doctor row lock + exclusion constraints, 409 SLOT_UNAVAILABLE / PATIENT_DOUBLE_BOOKED | Review | T-APPT-001 (memory), T-APPT-INT-001 (Mac, pending) |
+| P3-05 | APPT-003 | Status lifecycle with role rules, cancellation reason, no-show after start, reschedule | Review | T-APPT-HTTP, T-FE-019 |
+| P3-06 | APPT-004 | Emergency bookings by reception outside slots (no doctor-overlap constraint) | Review | T-APPT-HTTP |
+| P3-07 | APPT-005 | Reminders 24 h and 1 h before (BullMQ delayed jobs; email, SMS to verified phones) | Review | T-APPT-REM |
+| P3-08 | FE | Screens: staff day agenda with actions, reception booking, availability management, patient portal booking and list, `GET /doctors/me` | Review | T-FE-018..021, T-E2E-003 (redirects only) |
+
+Open in Phase 3: integration suite on macOS; signed-in booking E2E needs seed data (P14); existing bookings are not cancelled automatically when leave is added (the UI says so).
+
 ## Phases 2–14 (from the roadmap; detailed breakdown added when each phase starts)
 
 | Task ID | Req. | Task | Owner | Priority | Status |
 | --- | --- | --- | --- | --- | --- |
 | P2-01..06 | SCOPE-005/006, ROLE-001/002, API-013/014/015 | Hospital onboarding and verification; departments; staff; doctors (signature upload); patients (MRN); rooms and beds | BE, FE | Critical | Review (VM tests pass; macOS integration pending) |
-| P3-01..08 | SCOPE-007..009, APPT-001..006, CACHE-002 | Weekly availability, exceptions, slots (60 s cache), booking with locks, status lifecycle, emergency, reminders 24 h/1 h, booking UI | BE, FE, QA | Critical | Not Started |
+| P3-01..08 | SCOPE-007..009, APPT-001..006, CACHE-002 | Weekly availability, exceptions, slots (60 s cache), booking with locks, status lifecycle, emergency, reminders 24 h/1 h, booking UI | BE, FE, QA | Critical | Review (see Phase 3 below; macOS integration pending) |
 | P4-01..08 | SCOPE-010/011, EMR-001..012, SEC-013/014 | Encounter record, vitals + BMI, diagnoses + ICD-10, histories, corrections UI, attachments, pgcrypto helpers, patient isolation test | BE, FE, QA | Critical | Not Started |
 | P5-01..05 | SCOPE-012, RX-001..008 | Prescriptions, medicine search, PDF with letterhead and signature, verification, ready-for-pickup | BE, FE | High | Not Started |
 | P6-01..06 | SCOPE-013, LAB-001..007 | Test catalogue and ranges, orders, sample collection, results, senior approval, amended orders, report PDF | BE, FE, QA | High | Not Started |

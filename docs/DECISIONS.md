@@ -110,7 +110,7 @@ Every significant product, architecture, database, design and process decision. 
 - Files: `apps/api/prisma/schema.prisma` (commit `e487298`). Related: SCOPE-002, DB-001..020.
 
 ### DEC-020: Appointment concurrency control
-- Status: **Proposed** (part of the schema pending DEC-019)
+- Status: **Implemented** (Phase 3; constraints applied with the approved migration)
 - Decision: PostgreSQL exclusion constraints (doctor overlap except EMERGENCY; patient overlap) as the hard guarantee, plus a transaction with row locking in the booking service returning `409 SLOT_UNAVAILABLE`.
 - Related: APPT-002, APPT-004, APPT-006, TEST-012.
 
@@ -200,3 +200,8 @@ Every significant product, architecture, database, design and process decision. 
 - Status: **Proposed** (Phase 2 implementation)
 - Decision: accounts created by staff (hospital admin, staff, doctors, reception-registered patients) start with an unusable password placeholder and receive a single-use 72-hour "set your password" link (the existing reset flow); staff never choose or see passwords; a failed welcome email does not fail the request and can be resent (`POST /staff/:userId/invite`, or forgot password). Hospital codes are immutable after creation. Suspending a hospital revokes every session of its users. Roles never change in place (DEC-017): a different role means a new account. Doctor signatures: PNG or JPEG detected from the file's magic bytes (declared type must match), at most 512 KB, stored through `StorageService` (local disk in development, path-safe generated keys) with a `FileAttachment` row (sha256, size). Nurses may change bed status only. Departments and rooms that are referenced cannot be deleted (409 IN_USE).
 
+
+### DEC-038: Phase 3 booking rules
+- Status: **Proposed** (Phase 3 implementation)
+- Decision: schedules and exceptions are stored as hospital-local wall-clock times and converted with the hospital's IANA time zone, so DST and travelling viewers always see hospital time. Slots are generated per local date, cached in Redis for 60 s (`slots:{doctorId}:{date}`) and invalidated on every booking, status change and schedule change. Booking runs in a transaction that locks the doctor row, re-checks overlaps, and relies on the exclusion constraints as the final guard; conflicts return `409 SLOT_UNAVAILABLE` or `PATIENT_DOUBLE_BOOKED`. Patients and reception book; doctors do not book (they manage availability). Emergency bookings are reception-only, start CONFIRMED, take the hospital default slot length and may overlap the doctor's other appointments. New regular bookings start PENDING; reception, doctors or admins confirm. Only the doctor starts and completes a consultation. Patients may only cancel, before the start time, with a reason; NO_SHOW only after the start time. Rescheduling (reception or the patient) moves to a free slot and returns the appointment to PENDING. Reminders are BullMQ delayed jobs 24 h and 1 h before, re-checked at send time. Adding leave does not cancel existing bookings automatically. `GET /doctors/me` added so a doctor's screens can find their own profile (mirrors `GET /patients/me`).
+- Related: SCOPE-007..009, APPT-001..006, CACHE-002, DEC-020.

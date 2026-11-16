@@ -230,6 +230,15 @@ export class DoctorsService {
     return toDoctor(d);
   }
 
+  async mine(actor: AuthPrincipal): Promise<DoctorView> {
+    const d = await this.db.client.doctor.findFirst({
+      where: { userId: actor.userId, deletedAt: null },
+      include,
+    });
+    if (!d) throw notFound('doctor');
+    return toDoctor(d);
+  }
+
   async create(actor: AuthPrincipal, dto: CreateDoctorDto): Promise<DoctorView> {
     await this.checkDepartments(dto.departmentIds);
     const db = this.db.client;
@@ -411,6 +420,15 @@ export class DoctorsController {
   @ApiOperation({ summary: 'Create a doctor account; the doctor is emailed a set-password link' })
   create(@CurrentUser() actor: AuthPrincipal, @Body() dto: CreateDoctorDto): Promise<DoctorView> {
     return this.doctors.create(actor, dto);
+  }
+
+  @Get('me')
+  @Roles('DOCTOR')
+  @ApiOperation({
+    summary: 'The signed-in doctor (their schedule and appointments key off this id)',
+  })
+  me(@CurrentUser() actor: AuthPrincipal): Promise<DoctorView> {
+    return this.doctors.mine(actor);
   }
 
   @Get(':id')

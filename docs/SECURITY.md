@@ -34,6 +34,7 @@ passes; environment stated) · **Planned**. No regulatory compliance or certific
 | Encryption in transit | SEC-002 | Planned (Nginx TLS, Phase 14) | — | Local dev is HTTP on localhost |
 | File uploads | SEC-013, EMR-010 | **Partly**: doctor signatures validated by magic bytes + declared type + 512 KB, generated storage keys; clinical attachments in Phase 4; 20 MB CHECK in schema | **Yes** signatures (VM T-ORG) | Executables rejected by content check |
 | Clinical immutability | EMR-002, DEC-016 | Triggers in `constraints.sql` (not migrated) | — | Originals never changed; who/when/why recorded |
+| Booking integrity and privacy | APPT-002/006, TEST-011/012 | **Yes**: doctor row lock + exclusion constraints; patients and doctors list and read only their own appointments (other ids answer 404); reminder texts contain no clinical detail and SMS goes only to verified phones | **Yes** in memory (VM T-APPT-HTTP, T-RBAC-001c); real DB T-APPT-INT-001 pending | |
 | Secrets | DEP-002 | **Yes**: `.env` git-ignored, `.env.example` placeholders, CI throwaway values only | Manual check | |
 | Local infrastructure exposure | — | **Yes**: Docker ports bound to 127.0.0.1 | Manual | |
 | Monitoring | SEC-015 | **Partly**: Sentry initialised when `SENTRY_DSN` set; 5xx captured | — | No DSN configured yet |

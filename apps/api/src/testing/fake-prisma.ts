@@ -59,6 +59,18 @@ export function matches(row: Row, where: Row | undefined): boolean {
           : hay.includes(needle);
       }
       if ('in' in cond) return (cond.in as unknown[]).some((v) => same(v, value));
+      if ('gt' in cond || 'gte' in cond || 'lt' in cond || 'lte' in cond || 'startsWith' in cond) {
+        const num = (v: unknown) => (v instanceof Date ? v.getTime() : (v as number));
+        if (value == null) return false;
+        if ('startsWith' in cond && !String(value).startsWith(String(cond.startsWith)))
+          return false;
+        if ('gt' in cond && !(num(value) > num(cond.gt))) return false;
+        if ('gte' in cond && !(num(value) >= num(cond.gte))) return false;
+        if ('lt' in cond && !(num(value) < num(cond.lt))) return false;
+        if ('lte' in cond && !(num(value) <= num(cond.lte))) return false;
+        if ('not' in cond && same(cond.not, value)) return false;
+        return true;
+      }
       if ('equals' in cond) return same(cond.equals, value);
       if ('not' in cond) return !same(cond.not, value);
       // Compound unique selector such as { id_hospitalId: { id, hospitalId } }.
@@ -131,6 +143,7 @@ const RELATIONS: Record<string, Record<string, Relation>> = {
   },
   Bed: { room: { model: 'Room', local: 'roomId', foreign: 'id' } },
   Appointment: {
+    hospital: { model: 'Hospital', local: 'hospitalId', foreign: 'id' },
     doctor: { model: 'Doctor', local: 'doctorId', foreign: 'id' },
     patient: { model: 'Patient', local: 'patientId', foreign: 'id' },
     department: { model: 'Department', local: 'departmentId', foreign: 'id' },
@@ -181,7 +194,15 @@ const DEFAULTS: Record<string, Row> = {
   Department: { description: null },
   Room: { departmentId: null, floor: null, dailyCharge: null },
   Bed: { status: 'AVAILABLE' },
-  Appointment: { status: 'PENDING', type: 'REGULAR', deletedAt: null },
+  DoctorSchedule: { isActive: true, validTo: null },
+  ScheduleException: { startTime: null, endTime: null, reason: null },
+  Appointment: {
+    status: 'PENDING',
+    type: 'REGULAR',
+    deletedAt: null,
+    reason: null,
+    cancellationReason: null,
+  },
   Doctor: { deletedAt: null, signatureFileId: null, qualification: null, bio: null },
 };
 
@@ -309,6 +330,28 @@ export class FakePrisma {
 
   private checkUnique(model: string, row: Row, ignore?: Row): void {
     const rows = this.table(model).filter((r) => r !== ignore);
+    if (model === 'Appointment') {
+      // Mirrors the exclusion constraints appointments_doctor_no_overlap / appointments_patient_no_overlap.
+      const live = (r: Row) =>
+        !['CANCELLED', 'NO_SHOW'].includes(r.status as string) && r.deletedAt == null;
+      const overlaps = (r: Row) =>
+        (r.scheduledAt as Date) < (row.endAt as Date) &&
+        (row.scheduledAt as Date) < (r.endAt as Date);
+      if (live(row)) {
+        const others = rows.filter((r) => live(r) && overlaps(r));
+        if (
+          row.type !== 'EMERGENCY' &&
+          others.some((r) => r.doctorId === row.doctorId && r.type !== 'EMERGENCY')
+        )
+          throw new Error(
+            'conflicting key value violates exclusion constraint "appointments_doctor_no_overlap"',
+          );
+        if (others.some((r) => r.patientId === row.patientId))
+          throw new Error(
+            'conflicting key value violates exclusion constraint "appointments_patient_no_overlap"',
+          );
+      }
+    }
     for (const keys of UNIQUES[model] ?? []) {
       if (keys.some((k) => row[k] == null)) continue;
       if (rows.some((r) => keys.every((k) => same(r[k], row[k])))) throw unique(keys);

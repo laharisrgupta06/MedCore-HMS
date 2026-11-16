@@ -61,3 +61,27 @@ export const Select = forwardRef<HTMLSelectElement, SelectHTMLAttributes<HTMLSel
   ),
 );
 Select.displayName = 'Select';
+
+/** A labelled group for composite controls (pickers, slot grids) that are not a single input. */
+export function FieldGroup({
+  label,
+  required,
+  children,
+  className,
+}: {
+  label: string;
+  required?: boolean;
+  children: ReactNode;
+  className?: string;
+}) {
+  const id = useId();
+  return (
+    <div role="group" aria-labelledby={id} className={cn('flex flex-col gap-1.5', className)}>
+      <span id={id} className="text-label font-medium text-ink">
+        {label}
+        {required && <span className="text-ink-muted"> (required)</span>}
+      </span>
+      {children}
+    </div>
+  );
+}

@@ -22,6 +22,7 @@ import { FacilitiesModule } from './modules/facilities/facilities.module';
 import { HospitalsModule } from './modules/hospitals/hospitals.module';
 import { PatientsModule } from './modules/patients/patients.module';
 import { StaffModule } from './modules/staff/staff.module';
+import { SchedulingModule } from './modules/appointments/appointments.module';
 import { createAuthTestApp, type AuthTestApp } from './testing/auth-test-app';
 
 type Cell = 'PUBLIC' | 'ALLOW' | 'OWN' | 'DENY';
@@ -64,6 +65,7 @@ describe('Permissions matrix (ROLE-011)', () => {
           DoctorsModule,
           PatientsModule,
           FacilitiesModule,
+          SchedulingModule,
         ],
         controllers: [HealthController, DevSmsInboxController],
         providers: [
@@ -145,7 +147,58 @@ describe('Permissions matrix (ROLE-011)', () => {
           });
       }
     }
+    const later = new Date(Date.now() + 7 * 86_400_000);
+    const docOf = (u: User) => profile.get(u.id)!;
+    for (const [key, d] of [
+      ['own', users.DOCTOR],
+      ['peer', peers.DOCTOR],
+    ] as const) {
+      sched.set(
+        key,
+        push('DoctorSchedule', {
+          doctorId: docOf(d),
+          departmentId: dept,
+          weekday: 'MONDAY',
+          startTime: new Date('1970-01-01T09:00:00Z'),
+          endTime: new Date('1970-01-01T12:00:00Z'),
+          slotMinutes: 30,
+          validFrom: new Date('2020-01-01'),
+          validTo: null,
+          isActive: true,
+        }),
+      );
+      exc.set(
+        key,
+        push('ScheduleException', {
+          doctorId: docOf(d),
+          date: later,
+          type: 'LEAVE',
+          startTime: null,
+          endTime: null,
+          reason: null,
+        }),
+      );
+    }
+    const appt = (doctor: User, patient: User, hours: number) =>
+      push('Appointment', {
+        doctorId: docOf(doctor),
+        patientId: profile.get(patient.id)!,
+        departmentId: dept,
+        scheduledAt: new Date(later.getTime() + hours * 3_600_000),
+        endAt: new Date(later.getTime() + (hours + 0.5) * 3_600_000),
+        status: 'PENDING',
+        type: 'REGULAR',
+        reason: null,
+        cancellationReason: null,
+        createdById: patient.id,
+        deletedAt: null,
+      });
+    appts.set('own', appt(users.DOCTOR, users.PATIENT, 1));
+    appts.set('peer', appt(peers.DOCTOR, peers.PATIENT, 2));
   });
+  const sched = new Map<string, string>();
+  const exc = new Map<string, string>();
+  const appts = new Map<string, string>();
 
   /** Path parameters: [the caller's own or a same-hospital record, someone else's record]. */
   const ids: Record<string, [string, string]> = {};
@@ -157,6 +210,11 @@ describe('Permissions matrix (ROLE-011)', () => {
     if (path.startsWith('/api/rooms/')) return ids.room!;
     if (path.startsWith('/api/beds/')) return ids.bed!;
     if (path.startsWith('/api/staff/')) return [peers.NURSE.id, peers.RECEPTIONIST.id];
+    const pair = (m: Map<string, string>, mine: boolean): [string, string] =>
+      mine ? [m.get('own')!, m.get('peer')!] : [m.get('own')!, m.get('peer')!];
+    if (path.startsWith('/api/schedules/')) return pair(sched, true);
+    if (path.startsWith('/api/exceptions/')) return pair(exc, true);
+    if (path.startsWith('/api/appointments/')) return pair(appts, true);
     if (path.startsWith('/api/doctors/')) {
       const own = role === 'DOCTOR' ? users.DOCTOR.id : peers.DOCTOR.id;
       return [
@@ -200,7 +258,21 @@ describe('Permissions matrix (ROLE-011)', () => {
     if (token) r.set('Authorization', `Bearer ${token}`);
     if (row.method !== 'GET')
       r.set('Cookie', `${AUTH_COOKIES.csrf}=${CSRF}`).set(CSRF_HEADER, CSRF);
-    return row.method === 'GET' ? r : r.send({});
+    // Valid bodies where the route has required fields, so ownership (not validation) is what is tested.
+    const BODIES: Record<string, object> = {
+      'POST /api/doctors/:id/schedules': {
+        departmentId: ids.department![0],
+        weekday: 'TUESDAY',
+        startTime: '14:00',
+        endTime: '15:00',
+        slotMinutes: 30,
+        validFrom: '2030-01-01',
+      },
+      'POST /api/doctors/:id/exceptions': { date: '2030-01-02', type: 'LEAVE' },
+      'PATCH /api/appointments/:id/status': { status: 'CANCELLED', reason: 'Matrix check' },
+      'POST /api/appointments/:id/reschedule': { scheduledAt: '2030-01-07T03:30:00.000Z' },
+    };
+    return row.method === 'GET' ? r : r.send(BODIES[`${row.method} ${row.path}`] ?? {});
   };
 
   for (const row of readMatrix()) {

@@ -25,6 +25,7 @@ import { DoctorsModule } from './modules/doctors/doctors.module';
 import { PatientsModule } from './modules/patients/patients.module';
 import { FacilitiesModule } from './modules/facilities/facilities.module';
 import { StorageModule } from './infra/storage/storage.service';
+import { RemindersModule, SchedulingModule } from './modules/appointments/appointments.module';
 
 /** True when the route or its controller carries @AuthRateLimit(). */
 export function isAuthRateLimited(ctx: ExecutionContext): boolean {
@@ -86,6 +87,8 @@ export function buildThrottlerOptions(
     DoctorsModule,
     PatientsModule,
     FacilitiesModule,
+    RemindersModule,
+    SchedulingModule,
   ],
   providers: GLOBAL_PIPELINE,
 })

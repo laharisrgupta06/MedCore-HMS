@@ -77,6 +77,12 @@ security, performance (`EXPLAIN ANALYZE`, DB-019), responsive and accessibility 
 | T-RBAC-001b | ROLE-011 | Matrix extended to 54 routes × 9 roles (487 cases) incl. own-vs-other hospital/doctor/patient checks | As specified | 487/487 pass | Pass | VM | 2026-11-16 |
 | T-FE-014..017 | FE | `components/org/org-ui.test.tsx`: DataTable loading/empty/error-retry; role-aware navigation; patients list from API and exact registration body; registration hidden for non-reception roles | As specified | 4/4 pass | Pass | VM | 2026-11-16 |
 | T-ORG-INT-001 | SCOPE-005/006 | `test/org.int-spec.ts`: Super Admin onboards via API, admin activates from Mailpit link, creates department, receptionist, doctor, room/bed; receptionist registers patient; real role/profile triggers and composite keys | Pass | Not run (macOS) | Pending | **Mac** | — |
+| T-APPT-HTTP-001..011 | SCOPE-007/008, APPT-001..006 | `modules/appointments/appointments.http.spec.ts`: own-schedule management with overlap 409 and department check; slots in Asia/Kolkata with BLOCKED, EXTRA_HOURS and LEAVE; patient booking + reminders + slot taken; NOT_A_SLOT, IN_THE_PAST, SLOT_UNAVAILABLE; PATIENT_DOUBLE_BOOKED across doctors; concurrent booking (one 201, one 409); reception booking and emergency outside slots (CONFIRMED, no reminders, patients refused); lifecycle with roles; patient cancel with reason frees the slot; no-show only after start; reschedule to free slots only; own-only lists | As specified | 11/11 pass | Pass | VM | 2026-11-16 |
+| T-APPT-REM-001..007 | APPT-005 | `modules/appointments/reminders.spec.ts`: email in hospital time, SMS only to verified phones, skipped when cancelled/completed/rescheduled/deleted, future-only jobs with stable ids | As specified | 7/7 pass | Pass | VM | 2026-11-16 |
+| T-RBAC-001c | ROLE-011 | Matrix extended with 14 Phase 3 routes and `GET /doctors/me` (613 cases), own-vs-other doctor/patient appointments | As specified | 613/613 pass | Pass | VM | 2026-11-16 |
+| T-FE-018..021 | FE, APPT-001..003 | `components/appointments/appointments-ui.test.tsx`: time-zone conversion incl. DST; role action rules; patient booking shows taken slots, recovers from a 409 and books with the exact body; reception agenda confirm and cancel-with-reason | As specified | 4/4 pass | Pass | VM | 2026-11-16 |
+| T-APPT-INT-001 | TEST-012, APPT-001 | `test/appointments.int-spec.ts`: real PostgreSQL + Redis, slots from a schedule, five simultaneous bookings → one 201 and four 409 SLOT_UNAVAILABLE, one row | As specified | Not run (macOS) | Pending | **Mac** | — |
+| T-E2E-003 | FE-002 | `e2e/tests/appointments.spec.ts`: Phase 3 routes redirect to sign-in (booking journey awaits seed data) | As specified | Not run | Pending | **Mac** | — |
 | T-STA-001 | DEP-003 | Prettier, ESLint, TypeScript (all packages) | Clean | Clean | Pass | VM | 2026-11-16 |
 | T-STA-002 | SCOPE-021 | `pnpm build` (types, API, web) | Builds | Builds | Pass | VM | 2026-11-16 |
 | T-STA-003 | DB-001 | `prisma validate` schema revision 2 | Valid | Valid | Pass | VM (offline validator) | 2026-11-16 |
@@ -84,7 +90,7 @@ security, performance (`EXPLAIN ANALYZE`, DB-019), responsive and accessibility 
 | T-STA-005 | SCOPE-001 | Docker services PostgreSQL, Redis, Mailpit healthy | Healthy | Healthy (owner report) | Pass | **Mac** | 2026-11-16 |
 | T-STA-006 | DB-020 | `prisma generate` | Succeeds | Succeeds (owner report) | Pass | **Mac** | 2026-11-16 |
 
-Totals: API unit 617/617 (VM); integration 4 suites pass (Mac, 14:53), web 29/29 (VM), integration 2/2 (Mac). CI: not run.
+Totals: API unit 764/764 (VM, after Phase 3), web 33/33 (VM). Earlier: API unit 617/617 (VM); integration 4 suites pass (Mac, 14:53), web 29/29 (VM), integration 2/2 (Mac). CI: not run.
 Not run yet: **T-AUTH-INT-001** (`test/auth.int-spec.ts`: register → Mailpit OTP → login → refresh → logout
 → audit rows, with the real role/profile trigger). It fails with an explicit message until the initial
 migration exists (P1A-04). Also not run: **T-MIG-001..006** (`test/constraints.int-spec.ts`; T-MIG-005 covers audit, medical-record locks only so far; clinical correction triggers are tested with the EMR in Phase 4) and **T-TEN-INT-001** (`test/tenancy.int-spec.ts`: scoped client with real
@@ -106,7 +112,7 @@ Not yet confirmed in a browser: web status page through the proxy, Swagger UI (P
 | T-RBAC-001 | ROLE-011 | Every endpoint × 9 roles matches `permissions-matrix.csv` | Allowed/denied per matrix | 1C | Not run |
 | T-TEN-001 | TEST-010, TEST-016 | Doctor from hospital A gets 404 for every hospital B resource by id; lists exclude B | 404 / empty | 1C (CI required) | Not run |
 | T-TEN-002 | TEST-011 | Patient cannot read another patient's records | 403/404 | 4 | Not run |
-| T-APPT-001 | TEST-012 | Two simultaneous bookings of one slot: one 201, one 409 SLOT_UNAVAILABLE, repeated 20× | Exactly one succeeds | 3 | Not run |
+| T-APPT-001 | TEST-012 | Two simultaneous bookings of one slot: one 201, one 409 SLOT_UNAVAILABLE | Exactly one succeeds | 3 | In-memory version passes (T-APPT-HTTP); real-database version is T-APPT-INT-001 (pending, macOS) |
 | T-PH-001 | TEST-014 | Expired batch cannot be dispensed; FIFO uses valid batch | 422 MEDICINE_EXPIRED | 7 | Not run |
 | T-BILL-001 | TEST-015, BILL-007 | Invoice total equals sum of lines; signed webhook accepted, bad signature rejected, replay ignored | As specified | 8 | Not run |
 | T-E2E-001..004 | TEST-004 | Registration, book appointment, pay invoice, download report | Journeys succeed | 10+ | Not run |

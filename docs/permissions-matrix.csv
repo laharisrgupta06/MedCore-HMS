@@ -36,6 +36,7 @@ PATCH,/api/staff/:userId,DENY,ALLOW,DENY,DENY,DENY,DENY,DENY,DENY,DENY,
 POST,/api/staff/:userId/invite,DENY,ALLOW,DENY,DENY,DENY,DENY,DENY,DENY,DENY,Resend set-password link
 GET,/api/doctors,ALLOW,ALLOW,ALLOW,ALLOW,ALLOW,ALLOW,ALLOW,ALLOW,ALLOW,API-015
 POST,/api/doctors,DENY,ALLOW,DENY,DENY,DENY,DENY,DENY,DENY,DENY,Create doctor
+GET,/api/doctors/me,DENY,DENY,ALLOW,DENY,DENY,DENY,DENY,DENY,DENY,The signed-in doctor
 GET,/api/doctors/:id,ALLOW,ALLOW,ALLOW,ALLOW,ALLOW,ALLOW,ALLOW,ALLOW,ALLOW,
 PATCH,/api/doctors/:id,DENY,ALLOW,OWN,DENY,DENY,DENY,DENY,DENY,DENY,Doctor: own qualification and bio
 POST,/api/doctors/:id/signature,DENY,ALLOW,OWN,DENY,DENY,DENY,DENY,DENY,DENY,PNG/JPEG, 512 KB, magic bytes
@@ -53,3 +54,16 @@ DELETE,/api/rooms/:id,DENY,ALLOW,DENY,DENY,DENY,DENY,DENY,DENY,DENY,Rooms withou
 POST,/api/rooms/:id/beds,DENY,ALLOW,DENY,DENY,DENY,DENY,DENY,DENY,DENY,
 PATCH,/api/beds/:id,DENY,ALLOW,DENY,ALLOW,DENY,DENY,DENY,DENY,DENY,Nurse: status only
 DELETE,/api/beds/:id,DENY,ALLOW,DENY,DENY,DENY,DENY,DENY,DENY,DENY,Not while occupied
+GET,/api/doctors/:id/schedules,DENY,ALLOW,ALLOW,ALLOW,ALLOW,DENY,DENY,ALLOW,DENY,APPT-001
+POST,/api/doctors/:id/schedules,DENY,ALLOW,OWN,DENY,DENY,DENY,DENY,DENY,DENY,Weekly window
+PATCH,/api/schedules/:id,DENY,ALLOW,OWN,DENY,DENY,DENY,DENY,DENY,DENY,Activate or end a window
+DELETE,/api/schedules/:id,DENY,ALLOW,OWN,DENY,DENY,DENY,DENY,DENY,DENY,
+GET,/api/doctors/:id/exceptions,DENY,ALLOW,ALLOW,ALLOW,ALLOW,DENY,DENY,ALLOW,DENY,Leave, blocks, extra hours
+POST,/api/doctors/:id/exceptions,DENY,ALLOW,OWN,DENY,DENY,DENY,DENY,DENY,DENY,
+DELETE,/api/exceptions/:id,DENY,ALLOW,OWN,DENY,DENY,DENY,DENY,DENY,DENY,
+GET,/api/doctors/:id/slots,DENY,ALLOW,ALLOW,ALLOW,ALLOW,DENY,DENY,ALLOW,ALLOW,CACHE-002 (60 s)
+POST,/api/appointments,DENY,DENY,DENY,DENY,ALLOW,DENY,DENY,DENY,ALLOW,API-016; emergency by reception
+GET,/api/appointments,DENY,ALLOW,ALLOW,ALLOW,ALLOW,DENY,DENY,ALLOW,ALLOW,Patients and doctors: own only
+GET,/api/appointments/:id,DENY,ALLOW,OWN,ALLOW,ALLOW,DENY,DENY,ALLOW,OWN,
+PATCH,/api/appointments/:id/status,DENY,ALLOW,OWN,DENY,ALLOW,DENY,DENY,DENY,OWN,API-017; patient: cancel only
+POST,/api/appointments/:id/reschedule,DENY,DENY,DENY,DENY,ALLOW,DENY,DENY,DENY,OWN,
