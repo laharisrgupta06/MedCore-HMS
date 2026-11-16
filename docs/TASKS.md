@@ -141,7 +141,7 @@ Carried forward (not phase gates): signed-in booking E2E journey once seed data 
 | P4-07 | SEC-014, EMR-012, DEC-024 | pgcrypto column encryption (two parameterised helpers), `EMR_ENCRYPTION_KEY` | Review | T-EMR-INT-001 |
 | P4-08 | API-019, TEST-011, FE | Access: doctors, nurses, own patient; read audit; screens: encounter start, record, chart, portal health record | Review | T-RBAC-001d, T-FE-022..025, T-E2E-004 |
 
-Open in Phase 4: macOS `pnpm test:int` (T-EMR-INT-001), Playwright, owner adds `EMR_ENCRYPTION_KEY` to `.env` and runs `icd10:load`. Signed-in encounter E2E awaits seed data (P14).
+Open in Phase 4: macOS `pnpm test:int` rerun (T-EMR-INT-001, test defect fixed) and confirmation that `icd10:load` ran. Done: DEC-039 approved, key configured, Playwright 30/30. Signed-in encounter E2E awaits seed data (P14).
 
 ## Phases 2–14 (from the roadmap; detailed breakdown added when each phase starts)
 

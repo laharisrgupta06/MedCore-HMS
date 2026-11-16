@@ -110,7 +110,7 @@ describe('Phase 4 integration: medical records on PostgreSQL', () => {
     const client = async (u: { id: string; role: 'DOCTOR' | 'PATIENT' }) => {
       const sid = randomUUID();
       await sessions.create(u.id, sid, randomUUID(), 60_000);
-      const auth = `Bearer ${tokens.signAccess({ sub: u.id, sid, role: u.role, hid: hospital.id })}`;
+      const auth = `Bearer ${await tokens.signAccess({ sub: u.id, sid, role: u.role, hid: hospital.id })}`;
       const s = app.getHttpServer();
       return {
         get: (url: string) => request(s).get(url).set('Authorization', auth),
