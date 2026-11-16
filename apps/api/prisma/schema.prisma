@@ -1,6 +1,20 @@
-// MedCore HMS Prisma schema.
-// Phase 0 contains only the generator and datasource. Models are designed and
-// owned by the Database Engineer starting in Phase 1 (see docs/implementation-roadmap.md, section 5).
+// MedCore HMS database schema (PRD section 05; roadmap section 5).
+//
+// Conventions
+// - Every table that holds hospital-specific data carries `hospitalId` (PRD section 03,
+//   multi-tenancy). This is the one deliberate exception to strict 3NF: on child tables the
+//   value is also reachable through the parent, but the PRD requires it on every tenant table
+//   so tenant scoping can be enforced on each query.
+// - Otherwise 3NF: values derivable from other columns are not stored (e.g. BMI, a prescription's
+//   patient). Deliberate, documented denormalisations: Invoice money totals (PRD billing
+//   integrity test) and MedicineBatch.quantity (current balance, kept consistent with the
+//   StockMovement ledger inside one transaction).
+// - Soft delete (`deletedAt`) on User, Patient, Doctor, Appointment (PRD section 05 hint).
+//   Medical records, record entries, diagnoses and lab results have no delete path.
+// - Columns ending in `Enc` are encrypted at rest with pgcrypto (PRD section 10). They are
+//   written and read only through the EMR repository helpers (Phase 4).
+// - Constraints Prisma cannot express (CHECK, exclusion, partial and expression indexes) are
+//   added by a hand-written SQL migration: see prisma/sql/constraints.sql.
 
 generator client {
   provider = "prisma-client-js"
@@ -9,4 +23,1325 @@ generator client {
 datasource db {
   provider = "postgresql"
   url      = env("DATABASE_URL")
+}
+
+// ---------------------------------------------------------------------------
+// Enums
+// ---------------------------------------------------------------------------
+
+/// The nine system roles (PRD section 06).
+enum Role {
+  SUPER_ADMIN
+  HOSPITAL_ADMIN
+  DOCTOR
+  NURSE
+  RECEPTIONIST
+  LAB_TECHNICIAN
+  PHARMACIST
+  ACCOUNTANT
+  PATIENT
+}
+
+enum HospitalStatus {
+  PENDING
+  VERIFIED
+  SUSPENDED
+}
+
+/// Minimal subscription state (approved default A4: no subscription payments).
+enum SubscriptionStatus {
+  TRIAL
+  ACTIVE
+  SUSPENDED
+}
+
+enum Gender {
+  MALE
+  FEMALE
+  OTHER
+  UNDISCLOSED
+}
+
+enum BloodGroup {
+  A_POSITIVE
+  A_NEGATIVE
+  B_POSITIVE
+  B_NEGATIVE
+  AB_POSITIVE
+  AB_NEGATIVE
+  O_POSITIVE
+  O_NEGATIVE
+}
+
+enum RoomType {
+  WARD
+  PRIVATE
+  ICU
+  CONSULTATION
+  OTHER
+}
+
+enum BedStatus {
+  AVAILABLE
+  OCCUPIED
+  MAINTENANCE
+}
+
+enum Weekday {
+  MONDAY
+  TUESDAY
+  WEDNESDAY
+  THURSDAY
+  FRIDAY
+  SATURDAY
+  SUNDAY
+}
+
+enum ScheduleExceptionType {
+  LEAVE
+  BLOCKED
+  EXTRA_HOURS
+}
+
+/// PRD 7.2: PENDING -> CONFIRMED -> IN_PROGRESS -> COMPLETED | CANCELLED | NO_SHOW.
+enum AppointmentStatus {
+  PENDING
+  CONFIRMED
+  IN_PROGRESS
+  COMPLETED
+  CANCELLED
+  NO_SHOW
+}
+
+enum AppointmentType {
+  REGULAR
+  FOLLOW_UP
+  EMERGENCY
+}
+
+enum MedicalRecordStatus {
+  OPEN
+  CLOSED
+}
+
+enum RecordEntryKind {
+  NOTE
+  ADDENDUM
+}
+
+enum DiagnosisType {
+  DIFFERENTIAL
+  CONFIRMED
+}
+
+enum AllergyKind {
+  ALLERGY
+  ADVERSE_DRUG_REACTION
+}
+
+enum Severity {
+  MILD
+  MODERATE
+  SEVERE
+}
+
+/// Family history flags (PRD 7.3).
+enum FamilyCondition {
+  DIABETES
+  HYPERTENSION
+  CANCER
+  CARDIAC
+}
+
+enum FilePurpose {
+  MEDICAL_ATTACHMENT
+  LAB_REPORT
+  DOCTOR_SIGNATURE
+  PRESCRIPTION_PDF
+  RECEIPT_PDF
+}
+
+/// PRD 7.4: tablet / capsule / syrup / injection / topical.
+enum MedicineForm {
+  TABLET
+  CAPSULE
+  SYRUP
+  INJECTION
+  TOPICAL
+}
+
+/// PRD 7.4: OD / BD / TDS / QID / SOS.
+enum DoseFrequency {
+  OD
+  BD
+  TDS
+  QID
+  SOS
+}
+
+enum PrescriptionStatus {
+  ISSUED
+  PARTIALLY_DISPENSED
+  DISPENSED
+  CANCELLED
+}
+
+/// RADIOLOGY covers radiology orders as report-only tests (approved default A2; no DICOM).
+enum LabTestCategory {
+  LABORATORY
+  RADIOLOGY
+}
+
+/// PRD 7.5 workflow.
+enum LabOrderStatus {
+  ORDERED
+  SAMPLE_COLLECTED
+  PROCESSING
+  RESULT_UPLOADED
+  APPROVED
+  REJECTED
+}
+
+enum LabPriority {
+  ROUTINE
+  URGENT
+}
+
+enum ResultFlag {
+  NORMAL
+  LOW
+  HIGH
+}
+
+enum BatchStatus {
+  ACTIVE
+  QUARANTINED
+  DEPLETED
+}
+
+enum StockMovementType {
+  RECEIPT
+  DISPENSE
+  ADJUSTMENT
+  QUARANTINE
+}
+
+enum InvoiceStatus {
+  DRAFT
+  FINALISED
+  PARTIALLY_PAID
+  PAID
+  VOID
+}
+
+enum InvoiceItemKind {
+  CONSULTATION
+  LAB
+  PHARMACY
+  ROOM
+  OTHER
+}
+
+/// PRD 7.7: Stripe card, Razorpay UPI/Netbanking, or cash at counter.
+enum PaymentMethod {
+  STRIPE_CARD
+  RAZORPAY_UPI
+  RAZORPAY_NETBANKING
+  CASH
+}
+
+enum PaymentStatus {
+  PENDING
+  SUCCEEDED
+  FAILED
+}
+
+enum PaymentProvider {
+  STRIPE
+  RAZORPAY
+}
+
+enum ClaimStatus {
+  SUBMITTED
+  APPROVED
+  REJECTED
+  SETTLED
+}
+
+enum NotificationChannel {
+  EMAIL
+  SMS
+  IN_APP
+}
+
+enum DeliveryStatus {
+  PENDING
+  SENT
+  FAILED
+}
+
+// ---------------------------------------------------------------------------
+// Tenancy, identity and organisation
+// ---------------------------------------------------------------------------
+
+/// Shared address (PRD hint: reuse for hospitals, patients and suppliers).
+model Address {
+  id         String   @id @default(uuid()) @db.Uuid
+  line1      String
+  line2      String?
+  city       String
+  state      String
+  postalCode String
+  country    String   @default("IN") @db.Char(2)
+  createdAt  DateTime @default(now()) @db.Timestamptz(3)
+  updatedAt  DateTime @updatedAt @db.Timestamptz(3)
+
+  hospital  Hospital?
+  patients  Patient[]
+  suppliers Supplier[]
+
+  @@map("addresses")
+}
+
+/// A tenant. `code` is the short identifier patients enter at self-registration (decision 1a).
+model Hospital {
+  id                 String             @id @default(uuid()) @db.Uuid
+  name               String
+  code               String             @unique
+  email              String
+  phone              String
+  licenseNumber      String
+  status             HospitalStatus     @default(PENDING)
+  verifiedAt         DateTime?          @db.Timestamptz(3)
+  timezone           String             @default("Asia/Kolkata")
+  currency           String             @default("INR") @db.Char(3)
+  defaultSlotMinutes Int                @default(30)
+  subscriptionPlan   String?
+  subscriptionStatus SubscriptionStatus @default(TRIAL)
+  addressId          String?            @unique @db.Uuid
+  createdAt          DateTime           @default(now()) @db.Timestamptz(3)
+  updatedAt          DateTime           @updatedAt @db.Timestamptz(3)
+
+  address             Address?             @relation(fields: [addressId], references: [id])
+  users               User[]
+  staffProfiles       StaffProfile[]
+  departments         Department[]
+  rooms               Room[]
+  beds                Bed[]
+  doctors             Doctor[]
+  doctorDepartments   DoctorDepartment[]
+  patients            Patient[]
+  doctorSchedules     DoctorSchedule[]
+  scheduleExceptions  ScheduleException[]
+  appointments        Appointment[]
+  medicalRecords      MedicalRecord[]
+  recordEntries       RecordEntry[]
+  administrationNotes AdministrationNote[]
+  vitals              Vitals[]
+  diagnoses           Diagnosis[]
+  allergies           Allergy[]
+  medicationHistory   MedicationHistory[]
+  vaccinations        Vaccination[]
+  familyHistory       FamilyHistory[]
+  files               FileAttachment[]
+  medicines           Medicine[]
+  suppliers           Supplier[]
+  medicineBatches     MedicineBatch[]
+  stockMovements      StockMovement[]
+  prescriptions       Prescription[]
+  prescriptionItems   PrescriptionItem[]
+  dispenses           Dispense[]
+  labTests            LabTest[]
+  labTestRanges       LabTestRange[]
+  labOrders           LabOrder[]
+  labOrderItems       LabOrderItem[]
+  labResults          LabResult[]
+  invoices            Invoice[]
+  invoiceItems        InvoiceItem[]
+  payments            Payment[]
+  insuranceClaims     InsuranceClaim[]
+  notifications       Notification[]
+  auditLogs           AuditLog[]
+
+  @@index([status])
+  @@map("hospitals")
+}
+
+/// Every person who can sign in. hospitalId is null only for SUPER_ADMIN (CHECK constraint).
+/// Email is unique platform-wide (approved limitation: one hospital per user).
+model User {
+  id              String    @id @default(uuid()) @db.Uuid
+  hospitalId      String?   @db.Uuid
+  email           String    @unique
+  phone           String?
+  passwordHash    String
+  role            Role
+  firstName       String
+  lastName        String
+  emailVerifiedAt DateTime? @db.Timestamptz(3)
+  phoneVerifiedAt DateTime? @db.Timestamptz(3)
+  isActive        Boolean   @default(true)
+  lastLoginAt     DateTime? @db.Timestamptz(3)
+  deletedAt       DateTime? @db.Timestamptz(3)
+  createdAt       DateTime  @default(now()) @db.Timestamptz(3)
+  updatedAt       DateTime  @updatedAt @db.Timestamptz(3)
+
+  hospital     Hospital?     @relation(fields: [hospitalId], references: [id], onDelete: Restrict)
+  staffProfile StaffProfile?
+  doctor       Doctor?
+  patient      Patient?
+
+  createdAppointments   Appointment[]        @relation("AppointmentCreatedBy")
+  recordEntries         RecordEntry[]
+  administrationNotes   AdministrationNote[]
+  vitalsRecorded        Vitals[]
+  diagnosesRecorded     Diagnosis[]
+  allergiesRecorded     Allergy[]
+  medicationsRecorded   MedicationHistory[]
+  vaccinationsRecorded  Vaccination[]
+  familyHistoryRecorded FamilyHistory[]
+  filesUploaded         FileAttachment[]
+  stockMovements        StockMovement[]
+  dispenses             Dispense[]
+  labOrdersPlaced       LabOrder[]           @relation("LabOrderOrderedBy")
+  labSamplesCollected   LabOrder[]           @relation("LabOrderSampleCollectedBy")
+  labOrdersApproved     LabOrder[]           @relation("LabOrderApprovedBy")
+  labResultsEntered     LabResult[]
+  invoicesFinalised     Invoice[]
+  paymentsReceived      Payment[]
+  notifications         Notification[]
+  auditLogs             AuditLog[]
+
+  @@index([hospitalId, role])
+  @@map("users")
+}
+
+/// Profile for non-doctor staff. `isSeniorLabTechnician` allows lab report approval (approved default A1).
+model StaffProfile {
+  id                    String   @id @default(uuid()) @db.Uuid
+  hospitalId            String   @db.Uuid
+  userId                String   @unique @db.Uuid
+  departmentId          String?  @db.Uuid
+  employeeCode          String?
+  designation           String?
+  isSeniorLabTechnician Boolean  @default(false)
+  createdAt             DateTime @default(now()) @db.Timestamptz(3)
+  updatedAt             DateTime @updatedAt @db.Timestamptz(3)
+
+  hospital   Hospital    @relation(fields: [hospitalId], references: [id], onDelete: Restrict)
+  user       User        @relation(fields: [userId], references: [id], onDelete: Restrict)
+  department Department? @relation(fields: [departmentId], references: [id], onDelete: SetNull)
+
+  @@unique([hospitalId, employeeCode])
+  @@map("staff_profiles")
+}
+
+model Department {
+  id          String   @id @default(uuid()) @db.Uuid
+  hospitalId  String   @db.Uuid
+  name        String
+  description String?
+  createdAt   DateTime @default(now()) @db.Timestamptz(3)
+  updatedAt   DateTime @updatedAt @db.Timestamptz(3)
+
+  hospital     Hospital           @relation(fields: [hospitalId], references: [id], onDelete: Restrict)
+  doctors      DoctorDepartment[]
+  staff        StaffProfile[]
+  rooms        Room[]
+  schedules    DoctorSchedule[]
+  appointments Appointment[]
+
+  @@unique([hospitalId, name])
+  @@map("departments")
+}
+
+model Room {
+  id           String   @id @default(uuid()) @db.Uuid
+  hospitalId   String   @db.Uuid
+  departmentId String?  @db.Uuid
+  number       String
+  type         RoomType
+  floor        String?
+  /// Daily charge billed as a ROOM invoice item (PRD 7.7 "room charges").
+  dailyCharge  Decimal? @db.Decimal(12, 2)
+  createdAt    DateTime @default(now()) @db.Timestamptz(3)
+  updatedAt    DateTime @updatedAt @db.Timestamptz(3)
+
+  hospital     Hospital      @relation(fields: [hospitalId], references: [id], onDelete: Restrict)
+  department   Department?   @relation(fields: [departmentId], references: [id], onDelete: SetNull)
+  beds         Bed[]
+  invoiceItems InvoiceItem[]
+
+  @@unique([hospitalId, number])
+  @@map("rooms")
+}
+
+/// Beds feed the "occupied beds" KPI (PRD section 09). No full admission workflow (approved default A3).
+model Bed {
+  id         String    @id @default(uuid()) @db.Uuid
+  hospitalId String    @db.Uuid
+  roomId     String    @db.Uuid
+  label      String
+  status     BedStatus @default(AVAILABLE)
+  createdAt  DateTime  @default(now()) @db.Timestamptz(3)
+  updatedAt  DateTime  @updatedAt @db.Timestamptz(3)
+
+  hospital Hospital @relation(fields: [hospitalId], references: [id], onDelete: Restrict)
+  room     Room     @relation(fields: [roomId], references: [id], onDelete: Restrict)
+
+  @@unique([roomId, label])
+  @@index([hospitalId, status])
+  @@map("beds")
+}
+
+// ---------------------------------------------------------------------------
+// Doctors, patients and scheduling
+// ---------------------------------------------------------------------------
+
+/// One-to-one with User (PRD section 05). Works in one or more departments (PRD 7.2).
+model Doctor {
+  id                 String    @id @default(uuid()) @db.Uuid
+  hospitalId         String    @db.Uuid
+  userId             String    @unique @db.Uuid
+  registrationNumber String
+  specialisation     String
+  qualification      String?
+  consultationFee    Decimal   @db.Decimal(12, 2)
+  bio                String?
+  /// Signature image (SVG or PNG) overlaid on prescription PDFs (PRD 7.4).
+  signatureFileId    String?   @unique @db.Uuid
+  deletedAt          DateTime? @db.Timestamptz(3)
+  createdAt          DateTime  @default(now()) @db.Timestamptz(3)
+  updatedAt          DateTime  @updatedAt @db.Timestamptz(3)
+
+  hospital           Hospital            @relation(fields: [hospitalId], references: [id], onDelete: Restrict)
+  user               User                @relation(fields: [userId], references: [id], onDelete: Restrict)
+  signatureFile      FileAttachment?     @relation("DoctorSignature", fields: [signatureFileId], references: [id], onDelete: SetNull)
+  departments        DoctorDepartment[]
+  schedules          DoctorSchedule[]
+  scheduleExceptions ScheduleException[]
+  appointments       Appointment[]
+
+  @@unique([hospitalId, registrationNumber])
+  @@index([hospitalId, specialisation])
+  @@map("doctors")
+}
+
+model DoctorDepartment {
+  hospitalId   String   @db.Uuid
+  doctorId     String   @db.Uuid
+  departmentId String   @db.Uuid
+  createdAt    DateTime @default(now()) @db.Timestamptz(3)
+
+  hospital   Hospital   @relation(fields: [hospitalId], references: [id], onDelete: Restrict)
+  doctor     Doctor     @relation(fields: [doctorId], references: [id], onDelete: Cascade)
+  department Department @relation(fields: [departmentId], references: [id], onDelete: Restrict)
+
+  @@id([doctorId, departmentId])
+  @@index([hospitalId])
+  @@index([departmentId])
+  @@map("doctor_departments")
+}
+
+/// One-to-one with User (PRD section 05). Name, email and phone live on User.
+model Patient {
+  id                    String      @id @default(uuid()) @db.Uuid
+  hospitalId            String      @db.Uuid
+  userId                String      @unique @db.Uuid
+  /// Medical record number, unique per hospital.
+  mrn                   String
+  dateOfBirth           DateTime    @db.Date
+  gender                Gender
+  bloodGroup            BloodGroup?
+  emergencyContactName  String?
+  emergencyContactPhone String?
+  addressId             String?     @db.Uuid
+  deletedAt             DateTime?   @db.Timestamptz(3)
+  createdAt             DateTime    @default(now()) @db.Timestamptz(3)
+  updatedAt             DateTime    @updatedAt @db.Timestamptz(3)
+
+  hospital          Hospital            @relation(fields: [hospitalId], references: [id], onDelete: Restrict)
+  user              User                @relation(fields: [userId], references: [id], onDelete: Restrict)
+  address           Address?            @relation(fields: [addressId], references: [id], onDelete: SetNull)
+  appointments      Appointment[]
+  allergies         Allergy[]
+  medicationHistory MedicationHistory[]
+  vaccinations      Vaccination[]
+  familyHistory     FamilyHistory[]
+  files             FileAttachment[]
+
+  @@unique([hospitalId, mrn])
+  @@map("patients")
+}
+
+/// Repeating weekly availability (roadmap decision: rules + exceptions, slots generated on demand).
+model DoctorSchedule {
+  id           String    @id @default(uuid()) @db.Uuid
+  hospitalId   String    @db.Uuid
+  doctorId     String    @db.Uuid
+  departmentId String    @db.Uuid
+  weekday      Weekday
+  /// Local wall-clock time in the hospital's timezone, e.g. 09:00.
+  startTime    DateTime  @db.Time(0)
+  endTime      DateTime  @db.Time(0)
+  slotMinutes  Int
+  validFrom    DateTime  @db.Date
+  validTo      DateTime? @db.Date
+  isActive     Boolean   @default(true)
+  createdAt    DateTime  @default(now()) @db.Timestamptz(3)
+  updatedAt    DateTime  @updatedAt @db.Timestamptz(3)
+
+  hospital   Hospital   @relation(fields: [hospitalId], references: [id], onDelete: Restrict)
+  doctor     Doctor     @relation(fields: [doctorId], references: [id], onDelete: Cascade)
+  department Department @relation(fields: [departmentId], references: [id], onDelete: Restrict)
+
+  @@index([hospitalId])
+  @@index([doctorId, weekday])
+  @@map("doctor_schedules")
+}
+
+model ScheduleException {
+  id         String                @id @default(uuid()) @db.Uuid
+  hospitalId String                @db.Uuid
+  doctorId   String                @db.Uuid
+  date       DateTime              @db.Date
+  type       ScheduleExceptionType
+  /// Null start/end means the whole day.
+  startTime  DateTime?             @db.Time(0)
+  endTime    DateTime?             @db.Time(0)
+  reason     String?
+  createdAt  DateTime              @default(now()) @db.Timestamptz(3)
+
+  hospital Hospital @relation(fields: [hospitalId], references: [id], onDelete: Restrict)
+  doctor   Doctor   @relation(fields: [doctorId], references: [id], onDelete: Cascade)
+
+  @@index([hospitalId])
+  @@index([doctorId, date])
+  @@map("schedule_exceptions")
+}
+
+/// No double booking is enforced in the database by exclusion constraints
+/// (doctor overlap, except EMERGENCY; patient overlap) in prisma/sql/constraints.sql.
+model Appointment {
+  id                 String            @id @default(uuid()) @db.Uuid
+  hospitalId         String            @db.Uuid
+  doctorId           String            @db.Uuid
+  patientId          String            @db.Uuid
+  departmentId       String            @db.Uuid
+  scheduledAt        DateTime          @db.Timestamptz(3)
+  endAt              DateTime          @db.Timestamptz(3)
+  status             AppointmentStatus @default(PENDING)
+  type               AppointmentType   @default(REGULAR)
+  reason             String?
+  cancellationReason String?
+  createdById        String            @db.Uuid
+  deletedAt          DateTime?         @db.Timestamptz(3)
+  createdAt          DateTime          @default(now()) @db.Timestamptz(3)
+  updatedAt          DateTime          @updatedAt @db.Timestamptz(3)
+
+  hospital      Hospital       @relation(fields: [hospitalId], references: [id], onDelete: Restrict)
+  doctor        Doctor         @relation(fields: [doctorId], references: [id], onDelete: Restrict)
+  patient       Patient        @relation(fields: [patientId], references: [id], onDelete: Restrict)
+  department    Department     @relation(fields: [departmentId], references: [id], onDelete: Restrict)
+  createdBy     User           @relation("AppointmentCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
+  medicalRecord MedicalRecord?
+  invoice       Invoice?
+
+  @@index([hospitalId, scheduledAt])
+  @@index([hospitalId, status])
+  @@index([doctorId, scheduledAt])
+  @@index([patientId, scheduledAt])
+  @@map("appointments")
+}
+
+// ---------------------------------------------------------------------------
+// Electronic medical records (PRD 7.3). Append-only: no delete path.
+// ---------------------------------------------------------------------------
+
+/// One record per appointment (PRD section 05). Patient and doctor come from the appointment (3NF).
+/// treatmentPlanEnc is editable only while OPEN; after CLOSED, changes are ADDENDUM entries.
+model MedicalRecord {
+  id                 String              @id @default(uuid()) @db.Uuid
+  hospitalId         String              @db.Uuid
+  appointmentId      String              @unique @db.Uuid
+  chiefComplaint     String
+  presentingSymptoms String?
+  treatmentPlanEnc   Bytes?
+  status             MedicalRecordStatus @default(OPEN)
+  closedAt           DateTime?           @db.Timestamptz(3)
+  createdAt          DateTime            @default(now()) @db.Timestamptz(3)
+  updatedAt          DateTime            @updatedAt @db.Timestamptz(3)
+
+  hospital            Hospital             @relation(fields: [hospitalId], references: [id], onDelete: Restrict)
+  appointment         Appointment          @relation(fields: [appointmentId], references: [id], onDelete: Restrict)
+  entries             RecordEntry[]
+  administrationNotes AdministrationNote[]
+  vitals              Vitals[]
+  diagnoses           Diagnosis[]
+  files               FileAttachment[]
+  prescriptions       Prescription[]
+  labOrders           LabOrder[]
+
+  @@index([hospitalId, createdAt])
+  @@map("medical_records")
+}
+
+/// Doctor notes and addenda. Never updated or deleted.
+model RecordEntry {
+  id              String          @id @default(uuid()) @db.Uuid
+  hospitalId      String          @db.Uuid
+  medicalRecordId String          @db.Uuid
+  authorId        String          @db.Uuid
+  kind            RecordEntryKind
+  bodyEnc         Bytes
+  createdAt       DateTime        @default(now()) @db.Timestamptz(3)
+
+  hospital      Hospital      @relation(fields: [hospitalId], references: [id], onDelete: Restrict)
+  medicalRecord MedicalRecord @relation(fields: [medicalRecordId], references: [id], onDelete: Restrict)
+  author        User          @relation(fields: [authorId], references: [id], onDelete: Restrict)
+
+  @@index([medicalRecordId, createdAt])
+  @@map("record_entries")
+}
+
+/// Nurse medication administration notes (PRD section 06; approved default A3).
+model AdministrationNote {
+  id              String   @id @default(uuid()) @db.Uuid
+  hospitalId      String   @db.Uuid
+  medicalRecordId String   @db.Uuid
+  nurseId         String   @db.Uuid
+  medicationGiven String
+  dose            String?
+  route           String?
+  noteEnc         Bytes?
+  administeredAt  DateTime @db.Timestamptz(3)
+  createdAt       DateTime @default(now()) @db.Timestamptz(3)
+
+  hospital      Hospital      @relation(fields: [hospitalId], references: [id], onDelete: Restrict)
+  medicalRecord MedicalRecord @relation(fields: [medicalRecordId], references: [id], onDelete: Restrict)
+  nurse         User          @relation(fields: [nurseId], references: [id], onDelete: Restrict)
+
+  @@index([medicalRecordId])
+  @@map("administration_notes")
+}
+
+/// BMI is not stored: it is calculated from height and weight when read (3NF; PRD 7.3 "auto-calculated").
+model Vitals {
+  id              String   @id @default(uuid()) @db.Uuid
+  hospitalId      String   @db.Uuid
+  medicalRecordId String   @db.Uuid
+  recordedById    String   @db.Uuid
+  systolicBp      Int?
+  diastolicBp     Int?
+  pulse           Int?
+  temperatureC    Decimal? @db.Decimal(4, 1)
+  spo2            Int?
+  heightCm        Decimal? @db.Decimal(5, 1)
+  weightKg        Decimal? @db.Decimal(5, 1)
+  recordedAt      DateTime @default(now()) @db.Timestamptz(3)
+
+  hospital      Hospital      @relation(fields: [hospitalId], references: [id], onDelete: Restrict)
+  medicalRecord MedicalRecord @relation(fields: [medicalRecordId], references: [id], onDelete: Restrict)
+  recordedBy    User          @relation(fields: [recordedById], references: [id], onDelete: Restrict)
+
+  @@index([medicalRecordId])
+  @@map("vitals")
+}
+
+/// ICD-10 reference data (global, not tenant-specific). A seeded subset; codes are optional (PRD: "where possible").
+model Icd10Code {
+  code      String      @id
+  title     String
+  diagnoses Diagnosis[]
+
+  @@map("icd10_codes")
+}
+
+model Diagnosis {
+  id              String        @id @default(uuid()) @db.Uuid
+  hospitalId      String        @db.Uuid
+  medicalRecordId String        @db.Uuid
+  icd10Code       String?
+  descriptionEnc  Bytes
+  type            DiagnosisType
+  recordedById    String        @db.Uuid
+  createdAt       DateTime      @default(now()) @db.Timestamptz(3)
+
+  hospital      Hospital      @relation(fields: [hospitalId], references: [id], onDelete: Restrict)
+  medicalRecord MedicalRecord @relation(fields: [medicalRecordId], references: [id], onDelete: Restrict)
+  icd10         Icd10Code?    @relation(fields: [icd10Code], references: [code], onDelete: Restrict)
+  recordedBy    User          @relation(fields: [recordedById], references: [id], onDelete: Restrict)
+
+  @@index([medicalRecordId])
+  @@index([icd10Code])
+  @@map("diagnoses")
+}
+
+/// Allergies and adverse drug reactions (PRD 7.3). Patient-level, not per visit.
+model Allergy {
+  id           String      @id @default(uuid()) @db.Uuid
+  hospitalId   String      @db.Uuid
+  patientId    String      @db.Uuid
+  kind         AllergyKind
+  substance    String
+  reaction     String?
+  severity     Severity?
+  recordedById String      @db.Uuid
+  recordedAt   DateTime    @default(now()) @db.Timestamptz(3)
+
+  hospital   Hospital @relation(fields: [hospitalId], references: [id], onDelete: Restrict)
+  patient    Patient  @relation(fields: [patientId], references: [id], onDelete: Restrict)
+  recordedBy User     @relation(fields: [recordedById], references: [id], onDelete: Restrict)
+
+  @@index([patientId])
+  @@map("allergies")
+}
+
+/// Medication history (PRD section 02, Week 2: "allergy and medication history"),
+/// including medicines prescribed elsewhere.
+model MedicationHistory {
+  id           String    @id @default(uuid()) @db.Uuid
+  hospitalId   String    @db.Uuid
+  patientId    String    @db.Uuid
+  medicineName String
+  dosage       String?
+  frequency    String?
+  startedOn    DateTime? @db.Date
+  endedOn      DateTime? @db.Date
+  notes        String?
+  recordedById String    @db.Uuid
+  recordedAt   DateTime  @default(now()) @db.Timestamptz(3)
+
+  hospital   Hospital @relation(fields: [hospitalId], references: [id], onDelete: Restrict)
+  patient    Patient  @relation(fields: [patientId], references: [id], onDelete: Restrict)
+  recordedBy User     @relation(fields: [recordedById], references: [id], onDelete: Restrict)
+
+  @@index([patientId])
+  @@map("medication_history")
+}
+
+/// PRD 7.3: date, vaccine name, batch number, next due date.
+model Vaccination {
+  id             String    @id @default(uuid()) @db.Uuid
+  hospitalId     String    @db.Uuid
+  patientId      String    @db.Uuid
+  vaccineName    String
+  administeredOn DateTime  @db.Date
+  batchNumber    String
+  nextDueOn      DateTime? @db.Date
+  recordedById   String    @db.Uuid
+  recordedAt     DateTime  @default(now()) @db.Timestamptz(3)
+
+  hospital   Hospital @relation(fields: [hospitalId], references: [id], onDelete: Restrict)
+  patient    Patient  @relation(fields: [patientId], references: [id], onDelete: Restrict)
+  recordedBy User     @relation(fields: [recordedById], references: [id], onDelete: Restrict)
+
+  @@index([patientId])
+  @@map("vaccinations")
+}
+
+/// Family history flags (PRD 7.3): one row per patient and condition.
+model FamilyHistory {
+  id           String          @id @default(uuid()) @db.Uuid
+  hospitalId   String          @db.Uuid
+  patientId    String          @db.Uuid
+  condition    FamilyCondition
+  present      Boolean
+  relation     String?
+  notes        String?
+  recordedById String          @db.Uuid
+  updatedAt    DateTime        @updatedAt @db.Timestamptz(3)
+
+  hospital   Hospital @relation(fields: [hospitalId], references: [id], onDelete: Restrict)
+  patient    Patient  @relation(fields: [patientId], references: [id], onDelete: Restrict)
+  recordedBy User     @relation(fields: [recordedById], references: [id], onDelete: Restrict)
+
+  @@unique([patientId, condition])
+  @@map("family_history")
+}
+
+/// Uploaded files stored in object storage (max 20 MB, CHECK constraint). Other tables reference files by FK.
+model FileAttachment {
+  id              String      @id @default(uuid()) @db.Uuid
+  hospitalId      String      @db.Uuid
+  patientId       String?     @db.Uuid
+  medicalRecordId String?     @db.Uuid
+  purpose         FilePurpose
+  storageKey      String      @unique
+  originalName    String
+  mimeType        String
+  sizeBytes       Int
+  sha256          String      @db.Char(64)
+  uploadedById    String      @db.Uuid
+  createdAt       DateTime    @default(now()) @db.Timestamptz(3)
+
+  hospital        Hospital       @relation(fields: [hospitalId], references: [id], onDelete: Restrict)
+  patient         Patient?       @relation(fields: [patientId], references: [id], onDelete: Restrict)
+  medicalRecord   MedicalRecord? @relation(fields: [medicalRecordId], references: [id], onDelete: Restrict)
+  uploadedBy      User           @relation(fields: [uploadedById], references: [id], onDelete: Restrict)
+  doctorSignature Doctor?        @relation("DoctorSignature")
+  prescriptionPdf Prescription?  @relation("PrescriptionPdf")
+  labReport       LabOrder?      @relation("LabOrderReport")
+  invoiceReceipt  Invoice?       @relation("InvoiceReceipt")
+
+  @@index([hospitalId, purpose])
+  @@index([patientId])
+  @@index([medicalRecordId])
+  @@map("file_attachments")
+}
+
+// ---------------------------------------------------------------------------
+// Pharmacy and prescriptions (PRD 7.4, 7.6)
+// ---------------------------------------------------------------------------
+
+model Medicine {
+  id           String       @id @default(uuid()) @db.Uuid
+  hospitalId   String       @db.Uuid
+  name         String
+  genericName  String?
+  form         MedicineForm
+  /// e.g. "500 mg"
+  strength     String
+  /// Low-stock alert threshold (PRD 7.6, configurable per medicine).
+  reorderLevel Int
+  isActive     Boolean      @default(true)
+  createdAt    DateTime     @default(now()) @db.Timestamptz(3)
+  updatedAt    DateTime     @updatedAt @db.Timestamptz(3)
+
+  hospital          Hospital           @relation(fields: [hospitalId], references: [id], onDelete: Restrict)
+  batches           MedicineBatch[]
+  prescriptionItems PrescriptionItem[]
+
+  @@unique([hospitalId, name, strength, form])
+  @@index([hospitalId, name])
+  @@map("medicines")
+}
+
+model Supplier {
+  id          String   @id @default(uuid()) @db.Uuid
+  hospitalId  String   @db.Uuid
+  name        String
+  contactName String?
+  phone       String?
+  email       String?
+  addressId   String?  @db.Uuid
+  createdAt   DateTime @default(now()) @db.Timestamptz(3)
+  updatedAt   DateTime @updatedAt @db.Timestamptz(3)
+
+  hospital Hospital        @relation(fields: [hospitalId], references: [id], onDelete: Restrict)
+  address  Address?        @relation(fields: [addressId], references: [id], onDelete: SetNull)
+  batches  MedicineBatch[]
+
+  @@unique([hospitalId, name])
+  @@map("suppliers")
+}
+
+/// PRD 7.6: batch number, manufacturing date, expiry date, quantity, unit cost, MRP.
+/// quantity is the current balance; every change also writes a StockMovement in the same transaction.
+model MedicineBatch {
+  id             String      @id @default(uuid()) @db.Uuid
+  hospitalId     String      @db.Uuid
+  medicineId     String      @db.Uuid
+  supplierId     String?     @db.Uuid
+  batchNumber    String
+  manufacturedOn DateTime    @db.Date
+  expiresOn      DateTime    @db.Date
+  quantity       Int
+  unitCost       Decimal     @db.Decimal(12, 2)
+  mrp            Decimal     @db.Decimal(12, 2)
+  status         BatchStatus @default(ACTIVE)
+  receivedAt     DateTime    @default(now()) @db.Timestamptz(3)
+  updatedAt      DateTime    @updatedAt @db.Timestamptz(3)
+
+  hospital       Hospital        @relation(fields: [hospitalId], references: [id], onDelete: Restrict)
+  medicine       Medicine        @relation(fields: [medicineId], references: [id], onDelete: Restrict)
+  supplier       Supplier?       @relation(fields: [supplierId], references: [id], onDelete: SetNull)
+  stockMovements StockMovement[]
+  dispenses      Dispense[]
+
+  @@unique([medicineId, batchNumber])
+  @@index([medicineId, status, expiresOn])
+  @@index([hospitalId, expiresOn])
+  @@map("medicine_batches")
+}
+
+/// Signed quantity change ledger for every batch.
+model StockMovement {
+  id            String            @id @default(uuid()) @db.Uuid
+  hospitalId    String            @db.Uuid
+  batchId       String            @db.Uuid
+  type          StockMovementType
+  quantity      Int
+  reason        String?
+  dispenseId    String?           @unique @db.Uuid
+  performedById String            @db.Uuid
+  createdAt     DateTime          @default(now()) @db.Timestamptz(3)
+
+  hospital    Hospital      @relation(fields: [hospitalId], references: [id], onDelete: Restrict)
+  batch       MedicineBatch @relation(fields: [batchId], references: [id], onDelete: Restrict)
+  dispense    Dispense?     @relation(fields: [dispenseId], references: [id], onDelete: Restrict)
+  performedBy User          @relation(fields: [performedById], references: [id], onDelete: Restrict)
+
+  @@index([batchId, createdAt])
+  @@map("stock_movements")
+}
+
+/// Issued at the end of an encounter, linked to the medical record (PRD 7.4).
+model Prescription {
+  id              String             @id @default(uuid()) @db.Uuid
+  hospitalId      String             @db.Uuid
+  medicalRecordId String             @db.Uuid
+  status          PrescriptionStatus @default(ISSUED)
+  notes           String?
+  pdfFileId       String?            @unique @db.Uuid
+  issuedAt        DateTime           @default(now()) @db.Timestamptz(3)
+  updatedAt       DateTime           @updatedAt @db.Timestamptz(3)
+
+  hospital      Hospital           @relation(fields: [hospitalId], references: [id], onDelete: Restrict)
+  medicalRecord MedicalRecord      @relation(fields: [medicalRecordId], references: [id], onDelete: Restrict)
+  pdfFile       FileAttachment?    @relation("PrescriptionPdf", fields: [pdfFileId], references: [id], onDelete: SetNull)
+  items         PrescriptionItem[]
+
+  @@index([hospitalId, status])
+  @@index([medicalRecordId])
+  @@map("prescriptions")
+}
+
+/// The prescription to medicine many-to-many, carrying per-item dosage (PRD section 05).
+/// Form comes from the Medicine (3NF). Dispensed quantity is the sum of its Dispense rows.
+model PrescriptionItem {
+  id             String        @id @default(uuid()) @db.Uuid
+  hospitalId     String        @db.Uuid
+  prescriptionId String        @db.Uuid
+  medicineId     String        @db.Uuid
+  /// e.g. "500 mg"
+  dosage         String
+  frequency      DoseFrequency
+  durationDays   Int
+  quantity       Int
+  instructions   String?
+
+  hospital     Hospital     @relation(fields: [hospitalId], references: [id], onDelete: Restrict)
+  prescription Prescription @relation(fields: [prescriptionId], references: [id], onDelete: Restrict)
+  medicine     Medicine     @relation(fields: [medicineId], references: [id], onDelete: Restrict)
+  dispenses    Dispense[]
+
+  @@unique([prescriptionId, medicineId])
+  @@map("prescription_items")
+}
+
+/// One row per batch consumed; first-in-first-out may span several batches (PRD 7.6).
+model Dispense {
+  id                 String   @id @default(uuid()) @db.Uuid
+  hospitalId         String   @db.Uuid
+  prescriptionItemId String   @db.Uuid
+  batchId            String   @db.Uuid
+  quantity           Int
+  dispensedById      String   @db.Uuid
+  dispensedAt        DateTime @default(now()) @db.Timestamptz(3)
+
+  hospital         Hospital         @relation(fields: [hospitalId], references: [id], onDelete: Restrict)
+  prescriptionItem PrescriptionItem @relation(fields: [prescriptionItemId], references: [id], onDelete: Restrict)
+  batch            MedicineBatch    @relation(fields: [batchId], references: [id], onDelete: Restrict)
+  dispensedBy      User             @relation(fields: [dispensedById], references: [id], onDelete: Restrict)
+  stockMovement    StockMovement?
+  invoiceItem      InvoiceItem?
+
+  @@index([prescriptionItemId])
+  @@map("dispenses")
+}
+
+// ---------------------------------------------------------------------------
+// Laboratory (PRD 7.5)
+// ---------------------------------------------------------------------------
+
+model LabTest {
+  id         String          @id @default(uuid()) @db.Uuid
+  hospitalId String          @db.Uuid
+  code       String
+  name       String
+  category   LabTestCategory @default(LABORATORY)
+  unit       String?
+  sampleType String?
+  price      Decimal         @db.Decimal(12, 2)
+  isActive   Boolean         @default(true)
+  createdAt  DateTime        @default(now()) @db.Timestamptz(3)
+  updatedAt  DateTime        @updatedAt @db.Timestamptz(3)
+
+  hospital   Hospital       @relation(fields: [hospitalId], references: [id], onDelete: Restrict)
+  ranges     LabTestRange[]
+  orderItems LabOrderItem[]
+
+  @@unique([hospitalId, code])
+  @@map("lab_tests")
+}
+
+/// Reference ranges for automatic out-of-range flagging (PRD 7.5 hint), optionally by gender and age.
+model LabTestRange {
+  id          String  @id @default(uuid()) @db.Uuid
+  hospitalId  String  @db.Uuid
+  labTestId   String  @db.Uuid
+  gender      Gender?
+  ageMinYears Int?
+  ageMaxYears Int?
+  low         Decimal @db.Decimal(12, 4)
+  high        Decimal @db.Decimal(12, 4)
+
+  hospital Hospital @relation(fields: [hospitalId], references: [id], onDelete: Restrict)
+  labTest  LabTest  @relation(fields: [labTestId], references: [id], onDelete: Cascade)
+
+  @@index([labTestId])
+  @@map("lab_test_ranges")
+}
+
+/// Ordered by a doctor during an encounter; one record has many orders (PRD section 05).
+model LabOrder {
+  id                  String         @id @default(uuid()) @db.Uuid
+  hospitalId          String         @db.Uuid
+  medicalRecordId     String         @db.Uuid
+  orderedById         String         @db.Uuid
+  status              LabOrderStatus @default(ORDERED)
+  priority            LabPriority    @default(ROUTINE)
+  sampleCollectedAt   DateTime?      @db.Timestamptz(3)
+  sampleCollectedById String?        @db.Uuid
+  approvedAt          DateTime?      @db.Timestamptz(3)
+  approvedById        String?        @db.Uuid
+  rejectionReason     String?
+  reportFileId        String?        @unique @db.Uuid
+  createdAt           DateTime       @default(now()) @db.Timestamptz(3)
+  updatedAt           DateTime       @updatedAt @db.Timestamptz(3)
+
+  hospital          Hospital        @relation(fields: [hospitalId], references: [id], onDelete: Restrict)
+  medicalRecord     MedicalRecord   @relation(fields: [medicalRecordId], references: [id], onDelete: Restrict)
+  orderedBy         User            @relation("LabOrderOrderedBy", fields: [orderedById], references: [id], onDelete: Restrict)
+  sampleCollectedBy User?           @relation("LabOrderSampleCollectedBy", fields: [sampleCollectedById], references: [id], onDelete: Restrict)
+  approvedBy        User?           @relation("LabOrderApprovedBy", fields: [approvedById], references: [id], onDelete: Restrict)
+  reportFile        FileAttachment? @relation("LabOrderReport", fields: [reportFileId], references: [id], onDelete: SetNull)
+  items             LabOrderItem[]
+
+  @@index([hospitalId, status])
+  @@index([medicalRecordId])
+  @@map("lab_orders")
+}
+
+model LabOrderItem {
+  id         String @id @default(uuid()) @db.Uuid
+  hospitalId String @db.Uuid
+  labOrderId String @db.Uuid
+  labTestId  String @db.Uuid
+
+  hospital    Hospital     @relation(fields: [hospitalId], references: [id], onDelete: Restrict)
+  labOrder    LabOrder     @relation(fields: [labOrderId], references: [id], onDelete: Restrict)
+  labTest     LabTest      @relation(fields: [labTestId], references: [id], onDelete: Restrict)
+  result      LabResult?
+  invoiceItem InvoiceItem?
+
+  @@unique([labOrderId, labTestId])
+  @@map("lab_order_items")
+}
+
+/// Hybrid storage: structured value per test, plus an optional PDF report on the order.
+model LabResult {
+  id             String      @id @default(uuid()) @db.Uuid
+  hospitalId     String      @db.Uuid
+  labOrderItemId String      @unique @db.Uuid
+  valueNumeric   Decimal?    @db.Decimal(12, 4)
+  valueText      String?
+  flag           ResultFlag?
+  enteredById    String      @db.Uuid
+  enteredAt      DateTime    @default(now()) @db.Timestamptz(3)
+
+  hospital     Hospital     @relation(fields: [hospitalId], references: [id], onDelete: Restrict)
+  labOrderItem LabOrderItem @relation(fields: [labOrderItemId], references: [id], onDelete: Restrict)
+  enteredBy    User         @relation(fields: [enteredById], references: [id], onDelete: Restrict)
+
+  @@map("lab_results")
+}
+
+// ---------------------------------------------------------------------------
+// Billing and payments (PRD 7.7)
+// ---------------------------------------------------------------------------
+
+/// One invoice per appointment (PRD section 05). Totals are stored for the billing-integrity
+/// requirement and protected by CHECK constraints; subtotal is recomputed from items on every change.
+model Invoice {
+  id             String        @id @default(uuid()) @db.Uuid
+  hospitalId     String        @db.Uuid
+  appointmentId  String        @unique @db.Uuid
+  invoiceNumber  String
+  status         InvoiceStatus @default(DRAFT)
+  subtotal       Decimal       @default(0) @db.Decimal(12, 2)
+  taxAmount      Decimal       @default(0) @db.Decimal(12, 2)
+  discountAmount Decimal       @default(0) @db.Decimal(12, 2)
+  total          Decimal       @default(0) @db.Decimal(12, 2)
+  finalisedAt    DateTime?     @db.Timestamptz(3)
+  finalisedById  String?       @db.Uuid
+  receiptFileId  String?       @unique @db.Uuid
+  createdAt      DateTime      @default(now()) @db.Timestamptz(3)
+  updatedAt      DateTime      @updatedAt @db.Timestamptz(3)
+
+  hospital    Hospital         @relation(fields: [hospitalId], references: [id], onDelete: Restrict)
+  appointment Appointment      @relation(fields: [appointmentId], references: [id], onDelete: Restrict)
+  finalisedBy User?            @relation(fields: [finalisedById], references: [id], onDelete: Restrict)
+  receiptFile FileAttachment?  @relation("InvoiceReceipt", fields: [receiptFileId], references: [id], onDelete: SetNull)
+  items       InvoiceItem[]
+  payments    Payment[]
+  claims      InsuranceClaim[]
+
+  @@unique([hospitalId, invoiceNumber])
+  @@index([hospitalId, status])
+  @@index([hospitalId, createdAt])
+  @@map("invoices")
+}
+
+/// Line items from consultation, lab, pharmacy and room charges. Source links are real FKs (no
+/// polymorphic ids); a CHECK constraint requires the link that matches `kind`.
+model InvoiceItem {
+  id             String          @id @default(uuid()) @db.Uuid
+  hospitalId     String          @db.Uuid
+  invoiceId      String          @db.Uuid
+  kind           InvoiceItemKind
+  description    String
+  quantity       Int
+  unitPrice      Decimal         @db.Decimal(12, 2)
+  lineTotal      Decimal         @db.Decimal(12, 2)
+  labOrderItemId String?         @unique @db.Uuid
+  dispenseId     String?         @unique @db.Uuid
+  roomId         String?         @db.Uuid
+  createdAt      DateTime        @default(now()) @db.Timestamptz(3)
+
+  hospital     Hospital      @relation(fields: [hospitalId], references: [id], onDelete: Restrict)
+  invoice      Invoice       @relation(fields: [invoiceId], references: [id], onDelete: Restrict)
+  labOrderItem LabOrderItem? @relation(fields: [labOrderItemId], references: [id], onDelete: Restrict)
+  dispense     Dispense?     @relation(fields: [dispenseId], references: [id], onDelete: Restrict)
+  room         Room?         @relation(fields: [roomId], references: [id], onDelete: Restrict)
+
+  @@index([invoiceId])
+  @@map("invoice_items")
+}
+
+/// Card/UPI/netbanking payments are confirmed only by verified webhooks (PRD 7.7).
+model Payment {
+  id                String           @id @default(uuid()) @db.Uuid
+  hospitalId        String           @db.Uuid
+  invoiceId         String           @db.Uuid
+  method            PaymentMethod
+  provider          PaymentProvider?
+  /// Stripe PaymentIntent id or Razorpay payment id; unique for webhook idempotency.
+  providerReference String?          @unique
+  amount            Decimal          @db.Decimal(12, 2)
+  status            PaymentStatus    @default(PENDING)
+  paidAt            DateTime?        @db.Timestamptz(3)
+  receivedById      String?          @db.Uuid
+  createdAt         DateTime         @default(now()) @db.Timestamptz(3)
+  updatedAt         DateTime         @updatedAt @db.Timestamptz(3)
+
+  hospital   Hospital @relation(fields: [hospitalId], references: [id], onDelete: Restrict)
+  invoice    Invoice  @relation(fields: [invoiceId], references: [id], onDelete: Restrict)
+  receivedBy User?    @relation(fields: [receivedById], references: [id], onDelete: Restrict)
+
+  @@index([invoiceId])
+  @@index([hospitalId, paidAt])
+  @@map("payments")
+}
+
+/// Processed provider webhook events (replay protection). Global: identified by provider event id.
+model WebhookEvent {
+  id          String          @id @default(uuid()) @db.Uuid
+  provider    PaymentProvider
+  eventId     String
+  receivedAt  DateTime        @default(now()) @db.Timestamptz(3)
+  processedAt DateTime?       @db.Timestamptz(3)
+
+  @@unique([provider, eventId])
+  @@map("webhook_events")
+}
+
+/// Insurance claim through a Third Party Administrator (PRD 7.7).
+model InsuranceClaim {
+  id            String      @id @default(uuid()) @db.Uuid
+  hospitalId    String      @db.Uuid
+  invoiceId     String      @db.Uuid
+  tpaName       String
+  policyNumber  String
+  claimAmount   Decimal     @db.Decimal(12, 2)
+  status        ClaimStatus @default(SUBMITTED)
+  settledAmount Decimal?    @db.Decimal(12, 2)
+  notes         String?
+  submittedAt   DateTime    @default(now()) @db.Timestamptz(3)
+  decidedAt     DateTime?   @db.Timestamptz(3)
+  updatedAt     DateTime    @updatedAt @db.Timestamptz(3)
+
+  hospital Hospital @relation(fields: [hospitalId], references: [id], onDelete: Restrict)
+  invoice  Invoice  @relation(fields: [invoiceId], references: [id], onDelete: Restrict)
+
+  @@index([hospitalId, status])
+  @@map("insurance_claims")
+}
+
+// ---------------------------------------------------------------------------
+// Notifications and audit
+// ---------------------------------------------------------------------------
+
+/// Recipient is a user; the linked entity is polymorphic (PRD section 05).
+model Notification {
+  id          String    @id @default(uuid()) @db.Uuid
+  hospitalId  String?   @db.Uuid
+  recipientId String    @db.Uuid
+  type        String
+  title       String
+  body        String
+  entityType  String?
+  entityId    String?   @db.Uuid
+  readAt      DateTime? @db.Timestamptz(3)
+  createdAt   DateTime  @default(now()) @db.Timestamptz(3)
+
+  hospital   Hospital?              @relation(fields: [hospitalId], references: [id], onDelete: Restrict)
+  recipient  User                   @relation(fields: [recipientId], references: [id], onDelete: Restrict)
+  deliveries NotificationDelivery[]
+
+  @@index([recipientId, readAt])
+  @@index([recipientId, createdAt])
+  @@map("notifications")
+}
+
+model NotificationDelivery {
+  id             String              @id @default(uuid()) @db.Uuid
+  notificationId String              @db.Uuid
+  channel        NotificationChannel
+  status         DeliveryStatus      @default(PENDING)
+  attempts       Int                 @default(0)
+  lastError      String?
+  sentAt         DateTime?           @db.Timestamptz(3)
+  createdAt      DateTime            @default(now()) @db.Timestamptz(3)
+  updatedAt      DateTime            @updatedAt @db.Timestamptz(3)
+
+  notification Notification @relation(fields: [notificationId], references: [id], onDelete: Cascade)
+
+  @@unique([notificationId, channel])
+  @@map("notification_deliveries")
+}
+
+/// Every create/update/delete with userId, IP and timestamp (PRD section 10). Append-only.
+model AuditLog {
+  id         String   @id @default(uuid()) @db.Uuid
+  hospitalId String?  @db.Uuid
+  actorId    String?  @db.Uuid
+  /// e.g. "auth.login", "appointment.create"
+  action     String
+  entityType String
+  entityId   String?
+  ipAddress  String?
+  userAgent  String?
+  /// Before/after values with sensitive fields redacted.
+  changes    Json?
+  createdAt  DateTime @default(now()) @db.Timestamptz(3)
+
+  hospital Hospital? @relation(fields: [hospitalId], references: [id], onDelete: Restrict)
+  actor    User?     @relation(fields: [actorId], references: [id], onDelete: Restrict)
+
+  @@index([hospitalId, createdAt])
+  @@index([entityType, entityId])
+  @@index([actorId, createdAt])
+  @@map("audit_logs")
 }
