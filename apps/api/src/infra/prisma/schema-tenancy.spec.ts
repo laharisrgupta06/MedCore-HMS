@@ -29,7 +29,7 @@ const SINGLE_COLUMN_ALLOWED = ['Diagnosis.icd10 -> Icd10Code'];
 
 describe('schema multi-tenancy rules', () => {
   it('parses the expected number of models', () => {
-    expect(models.length).toBe(44);
+    expect(models.length).toBe(45);
   });
 
   it('every model carries hospitalId unless it is a documented global model', () => {

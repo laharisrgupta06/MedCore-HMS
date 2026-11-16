@@ -1,6 +1,7 @@
 'use client';
 
 import {
+  isLowStock,
   DOSE_FREQUENCIES,
   FREQUENCY_LABEL,
   suggestedQuantity,
@@ -26,7 +27,9 @@ import { medicinesApi, prescriptionsApi } from '@/services/prescriptions';
 
 export function StockBadge({ m }: { m: Pick<Medicine, 'available' | 'reorderLevel'> }) {
   if (m.available <= 0) return <Badge tone="error">Out of stock</Badge>;
-  if (m.available <= m.reorderLevel) return <Badge tone="warning">Low stock: {m.available}</Badge>;
+  // PHARM-003 (owner decision): low means strictly below the reorder level, as on the server.
+  if (isLowStock(m.available, m.reorderLevel))
+    return <Badge tone="warning">Low stock: {m.available}</Badge>;
   return <Badge tone="success">In stock: {m.available}</Badge>;
 }
 

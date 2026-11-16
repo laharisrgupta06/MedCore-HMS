@@ -40,8 +40,10 @@ const include = {
     },
   },
   items: { include: { medicine: true, dispenses: true } },
+  verifiedBy: { select: { firstName: true, lastName: true } },
 } as const;
-type Row = Prisma.PrescriptionGetPayload<{ include: typeof include }>;
+export { include as prescriptionInclude };
+export type Row = Prisma.PrescriptionGetPayload<{ include: typeof include }>;
 
 const norm = (s: string) =>
   s
@@ -58,7 +60,7 @@ export function allergyMatches(substance: string, names: (string | null)[]): boo
   });
 }
 
-const toView = (p: Row): PrescriptionView => {
+export const toView = (p: Row): PrescriptionView => {
   const a = p.medicalRecord.appointment;
   return {
     id: p.id,
@@ -98,6 +100,9 @@ const toView = (p: Row): PrescriptionView => {
     allergyOverrideReason: p.allergyOverrideReason,
     pdfReady: p.pdfFileId !== null,
     verifiedAt: p.verifiedAt?.toISOString() ?? null,
+    verifiedBy: p.verifiedBy
+      ? { firstName: p.verifiedBy.firstName, lastName: p.verifiedBy.lastName }
+      : null,
     cancelledAt: p.cancelledAt?.toISOString() ?? null,
     cancellationReason: p.cancellationReason,
   };

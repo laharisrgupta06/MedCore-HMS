@@ -38,6 +38,7 @@ import { CurrentUser, Roles, type AuthPrincipal } from '../../common/auth/decora
 import { PageQuery } from '../../common/dto/fields';
 import { PaginatedResult } from '../../common/http/paginated-result';
 import { mapPrismaError, notFound } from '../../common/http/prisma-errors';
+import { LowStock } from './low-stock';
 import { TenantPrismaService } from '../../common/tenancy/tenant-prisma.service';
 import { localDate } from '../../common/time/zoned';
 import { REDIS_CLIENT } from '../../infra/redis/redis.constants';
@@ -154,6 +155,7 @@ export class MedicinesService {
   constructor(
     private readonly db: TenantPrismaService,
     private readonly stock: StockLevels,
+    private readonly lowStock: LowStock,
   ) {}
 
   async timezone(hospitalId: string | null): Promise<string> {
@@ -236,6 +238,9 @@ export class MedicinesService {
           conflict: 'This medicine, strength and form is already in the catalogue.',
         }),
       );
+    // A new reorder level or (de)activation can start or end a low-stock state (PHARM-003).
+    if (dto.reorderLevel !== undefined || dto.isActive !== undefined)
+      await this.lowStock.evaluate(actor.hospitalId!, [id]);
     return (await this.views(actor, [u]))[0]!;
   }
 }
@@ -278,7 +283,7 @@ export class MedicinesController {
 
 @Module({
   controllers: [MedicinesController],
-  providers: [MedicinesService, StockLevels],
-  exports: [MedicinesService, StockLevels],
+  providers: [MedicinesService, StockLevels, LowStock],
+  exports: [MedicinesService, StockLevels, LowStock],
 })
 export class MedicinesModule {}

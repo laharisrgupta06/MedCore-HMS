@@ -81,6 +81,7 @@ const rx = (over: Partial<Prescription> = {}): Prescription => ({
   allergyOverrideReason: null,
   pdfReady: true,
   verifiedAt: null,
+  verifiedBy: null,
   cancelledAt: null,
   cancellationReason: null,
   ...over,
@@ -95,8 +96,11 @@ describe('StockBadge', () => {
   it('shows out, low and in stock as text', () => {
     const { rerender } = render(<StockBadge m={{ available: 0, reorderLevel: 5 }} />);
     expect(screen.getByText('Out of stock')).toBeInTheDocument();
+    rerender(<StockBadge m={{ available: 4, reorderLevel: 5 }} />);
+    expect(screen.getByText('Low stock: 4')).toBeInTheDocument();
+    // Strictly below the reorder level (PHARM-003, owner decision): equal is not low.
     rerender(<StockBadge m={{ available: 5, reorderLevel: 5 }} />);
-    expect(screen.getByText('Low stock: 5')).toBeInTheDocument();
+    expect(screen.getByText('In stock: 5')).toBeInTheDocument();
     rerender(<StockBadge m={{ available: 6, reorderLevel: 5 }} />);
     expect(screen.getByText('In stock: 6')).toBeInTheDocument();
   });

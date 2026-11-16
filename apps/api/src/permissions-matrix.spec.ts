@@ -25,6 +25,7 @@ import { StaffModule } from './modules/staff/staff.module';
 import { SchedulingModule } from './modules/appointments/appointments.module';
 import { EmrModule } from './modules/emr/emr.module';
 import { MedicinesModule } from './modules/medicines/medicines.module';
+import { PharmacyModule } from './modules/pharmacy/pharmacy.module';
 import { PrescriptionsModule } from './modules/prescriptions/prescriptions.module';
 import { LabModule } from './modules/lab/lab.module';
 import { StorageService } from './infra/storage/storage.service';
@@ -75,6 +76,7 @@ describe('Permissions matrix (ROLE-011)', () => {
           MedicinesModule,
           PrescriptionsModule,
           LabModule,
+          PharmacyModule,
         ],
         controllers: [HealthController, DevSmsInboxController],
         providers: [
@@ -273,6 +275,19 @@ describe('Permissions matrix (ROLE-011)', () => {
       strength: '10 mg',
       reorderLevel: 5,
       isActive: true,
+      lowStockSince: null,
+    });
+    batchId = push('MedicineBatch', {
+      medicineId,
+      batchNumber: 'MX-B1',
+      manufacturedOn: new Date('2026-01-01'),
+      expiresOn: new Date('2035-01-01'),
+      quantity: 100,
+      unitCost: 1,
+      mrp: 2,
+      status: 'ACTIVE',
+      supplierId: null,
+      receivedAt: new Date(),
     });
     for (const u of [users.PATIENT, peers.PATIENT])
       allergyOf.set(
@@ -299,6 +314,7 @@ describe('Permissions matrix (ROLE-011)', () => {
   const labOrders = new Map<string, string>();
   let labTestId = '';
   let medicineId = '';
+  let batchId = '';
   const files = new Map<string, string>();
   const allergyOf = new Map<string, string>();
   const sched = new Map<string, string>();
@@ -323,6 +339,8 @@ describe('Permissions matrix (ROLE-011)', () => {
     if (path.startsWith('/api/medical-records/record/')) return pair(records, true);
     if (path.startsWith('/api/files/')) return pair(files, true);
     if (path.startsWith('/api/prescriptions/')) return pair(rxs, true);
+    if (path.startsWith('/api/pharmacy/prescriptions/')) return pair(rxs, true);
+    if (path.startsWith('/api/batches/')) return [batchId, batchId];
     if (path.startsWith('/api/lab-orders/')) return pair(labOrders, true);
     if (path.startsWith('/api/lab-tests/')) return [labTestId, labTestId];
     if (path.startsWith('/api/medicines/')) return [medicineId, medicineId];
@@ -409,6 +427,19 @@ describe('Permissions matrix (ROLE-011)', () => {
       'PATCH /api/patients/:patientId/:kind/:entryId/status': { status: 'RESOLVED' },
       'POST /api/medicines': { name: 'Matrix', form: 'SYRUP', strength: '5 ml', reorderLevel: 1 },
       'PATCH /api/medicines/:id': { reorderLevel: 7 },
+      'POST /api/medicines/:id/batches': {
+        batchNumber: 'MX-B2',
+        manufacturedOn: '2026-01-01',
+        expiresOn: '2035-01-01',
+        quantity: 5,
+        unitCost: 1,
+        mrp: 2,
+      },
+      'PATCH /api/batches/:id/quarantine': { reason: 'Matrix check' },
+      'POST /api/batches/:id/adjustments': { quantity: 1, reason: 'Matrix check' },
+      'POST /api/pharmacy/prescriptions/:id/dispense': {
+        items: [{ itemId: '00000000-0000-4000-8000-000000000000', quantity: 1 }],
+      },
       'POST /api/prescriptions': {
         medicalRecordId: records.get('own'),
         items: [{ medicineId, dosage: '10 mg', frequency: 'OD', durationDays: 1, quantity: 1 }],

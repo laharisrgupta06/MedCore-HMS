@@ -14,6 +14,7 @@ import { SearchInput } from '@/components/ui/search-input';
 import { toast } from '@/components/ui/toast';
 import { errorMessage } from '@/lib/forms';
 import { medicinesApi } from '@/services/prescriptions';
+import { MedicineStockView } from '@/components/pharmacy/inventory-view';
 import { StockBadge } from './prescription-form';
 
 const FORM_LABEL: Record<MedicineForm, string> = {
@@ -31,6 +32,7 @@ export function MedicinesView() {
   const [active, setActive] = useState<'true' | 'false'>('true');
   const [page, setPage] = useState(1);
   const [editing, setEditing] = useState<Medicine | 'new' | null>(null);
+  const [selected, setSelected] = useState<string | null>(null);
   const q = useQuery({
     queryKey: ['medicines', 'catalogue', search, active, page],
     queryFn: () =>
@@ -54,11 +56,13 @@ export function MedicinesView() {
       toast.error(errorMessage(e));
     }
   };
+  const open = selected ? q.data?.items.find((m) => m.id === selected) : undefined;
+  if (open) return <MedicineStockView medicine={open} onBack={() => setSelected(null)} />;
   return (
     <>
       <PageHeader
-        title="Medicines"
-        description="The catalogue doctors prescribe from. Stock arrives with the pharmacy inventory."
+        title="Inventory"
+        description="The medicines doctors prescribe from, with available stock. Open a medicine for its batches and ledger."
         actions={
           <Button onClick={() => setEditing('new')}>
             <Plus />
@@ -138,6 +142,9 @@ export function MedicinesView() {
           ]}
           actions={(m) => (
             <span className="flex gap-1">
+              <Button size="compact" variant="secondary" onClick={() => setSelected(m.id)}>
+                Stock<span className="sr-only"> of {m.name}</span>
+              </Button>
               <Button size="compact" variant="ghost" onClick={() => setEditing(m)}>
                 Edit
               </Button>

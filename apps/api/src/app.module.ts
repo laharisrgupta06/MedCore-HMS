@@ -28,6 +28,8 @@ import { PdfCoreModule, PdfQueueModule } from './infra/pdf/pdf-jobs';
 import { MedicinesModule } from './modules/medicines/medicines.module';
 import { PrescriptionsModule } from './modules/prescriptions/prescriptions.module';
 import { LabModule } from './modules/lab/lab.module';
+import { PharmacyJobsModule } from './modules/pharmacy/pharmacy-jobs.module';
+import { PharmacyModule } from './modules/pharmacy/pharmacy.module';
 import { RemindersModule, SchedulingModule } from './modules/appointments/appointments.module';
 
 import { buildThrottlerOptions } from './infra/throttler/throttler-options';
@@ -72,6 +74,8 @@ export { buildThrottlerOptions, isAuthRateLimited } from './infra/throttler/thro
     MedicinesModule,
     PrescriptionsModule,
     LabModule,
+    PharmacyModule,
+    PharmacyJobsModule,
   ],
   providers: GLOBAL_PIPELINE,
 })

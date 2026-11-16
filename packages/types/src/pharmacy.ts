@@ -70,6 +70,7 @@ export interface Prescription {
   allergyOverrideReason: string | null;
   pdfReady: boolean;
   verifiedAt: string | null;
+  verifiedBy: { firstName: string; lastName: string } | null;
   cancelledAt: string | null;
   cancellationReason: string | null;
 }
@@ -108,4 +109,143 @@ export const PrescriptionErrorCode = {
   ALREADY_DISPENSED: 'ALREADY_DISPENSED',
   PDF_PENDING: 'PDF_PENDING',
   PDF_READY: 'PDF_READY',
+} as const;
+
+// ---- Phase 7: pharmacy and inventory (SCOPE-014, PHARM-001..006) ----------------------------
+
+/** PHARM-003 (owner decision 23:17): low means strictly below the reorder level. */
+export function isLowStock(available: number, reorderLevel: number): boolean {
+  return available < reorderLevel;
+}
+
+export const BATCH_STATUSES = ['ACTIVE', 'QUARANTINED', 'DEPLETED'] as const;
+export type BatchStatus = (typeof BATCH_STATUSES)[number];
+export const STOCK_MOVEMENT_TYPES = ['RECEIPT', 'DISPENSE', 'ADJUSTMENT', 'QUARANTINE'] as const;
+export type StockMovementType = (typeof STOCK_MOVEMENT_TYPES)[number];
+
+/** Days ahead covered by the expiry report and the "expiring soon" alerts (PHARM-005). */
+export const EXPIRY_WINDOW_DAYS = 30;
+
+/** Adds days to a YYYY-MM-DD date. */
+export function addDays(date: string, days: number): string {
+  const d = new Date(`${date}T00:00:00Z`);
+  d.setUTCDate(d.getUTCDate() + days);
+  return d.toISOString().slice(0, 10);
+}
+
+/**
+ * A batch expiring on `today` (hospital-local date) is already expired from the start of that day
+ * (approved plan, section 6), so only batches with a later expiry date can be dispensed.
+ */
+export function isExpired(expiresOn: string, today: string): boolean {
+  return expiresOn <= today;
+}
+
+/** Expiring within the window: not expired yet and expiry no later than today + 30 days. */
+export function isExpiringSoon(expiresOn: string, today: string): boolean {
+  return !isExpired(expiresOn, today) && expiresOn <= addDays(today, EXPIRY_WINDOW_DAYS);
+}
+
+export interface StockBatch {
+  id: string;
+  medicineId: string;
+  batchNumber: string;
+  manufacturedOn: string;
+  expiresOn: string;
+  quantity: number;
+  unitCost: string;
+  mrp: string;
+  status: BatchStatus;
+  receivedAt: string;
+  /** Expired by the hospital-local date (counts as unusable even before the nightly run). */
+  expired: boolean;
+}
+
+type FifoBatch = Pick<StockBatch, 'id' | 'quantity' | 'expiresOn' | 'receivedAt' | 'status'>;
+
+/** FIFO order (PHARM-002): earliest expiry first, then earliest receipt. */
+export function fifoOrder<T extends Pick<FifoBatch, 'expiresOn' | 'receivedAt'>>(
+  batches: T[],
+): T[] {
+  return [...batches].sort(
+    (a, b) => a.expiresOn.localeCompare(b.expiresOn) || a.receivedAt.localeCompare(b.receivedAt),
+  );
+}
+
+/**
+ * Which batches a dispense of `quantity` takes (PHARM-002/004): active, unexpired batches with
+ * stock, in FIFO order. `short` is how many units are missing; 0 means the whole amount is covered.
+ * The server runs this inside the dispensing transaction; the web shows it as a preview.
+ */
+export function allocateFifo(
+  batches: FifoBatch[],
+  quantity: number,
+  today: string,
+): { allocations: { batchId: string; quantity: number }[]; short: number } {
+  const allocations: { batchId: string; quantity: number }[] = [];
+  let left = quantity;
+  for (const b of fifoOrder(batches)) {
+    if (left <= 0) break;
+    if (b.status !== 'ACTIVE' || b.quantity <= 0 || isExpired(b.expiresOn, today)) continue;
+    const take = Math.min(left, b.quantity);
+    allocations.push({ batchId: b.id, quantity: take });
+    left -= take;
+  }
+  return { allocations, short: left };
+}
+
+export interface StockMovementView {
+  id: string;
+  type: StockMovementType;
+  /** Signed change to the batch quantity; for QUARANTINE, the units set aside (no change). */
+  quantity: number;
+  reason: string | null;
+  createdAt: string;
+  batch: { id: string; batchNumber: string; expiresOn: string };
+  medicine: { id: string; name: string; strength: string };
+  /** Null for automatic quarantine by the nightly expiry run. */
+  performedBy: { id: string; firstName: string; lastName: string } | null;
+  dispenseId: string | null;
+}
+
+export interface ExpiryReportItem {
+  batchId: string;
+  medicineId: string;
+  medicineName: string;
+  strength: string;
+  batchNumber: string;
+  expiresOn: string;
+  quantity: number;
+  kind: 'EXPIRING' | 'QUARANTINED';
+}
+
+export interface ExpiryReport {
+  id: string;
+  runDate: string;
+  createdAt: string;
+  items: ExpiryReportItem[];
+}
+
+export interface PharmacyAlerts {
+  lowStock: (Pick<Medicine, 'id' | 'name' | 'strength' | 'form' | 'reorderLevel' | 'available'> & {
+    lowStockSince: string;
+  })[];
+  expiringSoon: (Pick<StockBatch, 'id' | 'batchNumber' | 'expiresOn' | 'quantity'> & {
+    medicine: { id: string; name: string; strength: string };
+  })[];
+  latestReport: ExpiryReport | null;
+}
+
+export interface DispenseRequest {
+  items: { itemId: string; quantity: number }[];
+}
+
+export const PharmacyErrorCode = {
+  MEDICINE_EXPIRED: 'MEDICINE_EXPIRED',
+  INSUFFICIENT_STOCK: 'INSUFFICIENT_STOCK',
+  NOT_VERIFIED: 'NOT_VERIFIED',
+  EXCEEDS_PRESCRIBED: 'EXCEEDS_PRESCRIBED',
+  NEGATIVE_STOCK: 'NEGATIVE_STOCK',
+  EXPIRY_IN_PAST: 'EXPIRY_IN_PAST',
+  INVALID_TRANSITION: 'INVALID_TRANSITION',
 } as const;

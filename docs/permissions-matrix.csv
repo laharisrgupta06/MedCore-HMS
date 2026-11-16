@@ -86,6 +86,16 @@ GET,/api/icd10,DENY,DENY,ALLOW,ALLOW,DENY,DENY,DENY,DENY,DENY,EMR-005 code searc
 GET,/api/medicines,DENY,ALLOW,ALLOW,DENY,DENY,DENY,ALLOW,DENY,DENY,API-024; RX-003 search with stock
 POST,/api/medicines,DENY,ALLOW,DENY,DENY,DENY,DENY,ALLOW,DENY,DENY,Catalogue (DEC-040 D2)
 PATCH,/api/medicines/:id,DENY,ALLOW,DENY,DENY,DENY,DENY,ALLOW,DENY,DENY,Reorder level; deactivate
+GET,/api/medicines/:id/batches,DENY,ALLOW,DENY,DENY,DENY,DENY,ALLOW,DENY,DENY,PHARM-001; FIFO order; costs shown to pharmacy and admins only
+POST,/api/medicines/:id/batches,DENY,DENY,DENY,DENY,DENY,DENY,ALLOW,DENY,DENY,Receive stock with a RECEIPT ledger entry; expired refused
+PATCH,/api/batches/:id/quarantine,DENY,DENY,DENY,DENY,DENY,DENY,ALLOW,DENY,DENY,PHARM-004; reason; quantity unchanged
+POST,/api/batches/:id/adjustments,DENY,DENY,DENY,DENY,DENY,DENY,ALLOW,DENY,DENY,Count correction with reason; never below zero
+GET,/api/pharmacy/prescriptions,DENY,DENY,DENY,DENY,DENY,DENY,ALLOW,DENY,DENY,PHARM-006 queue; own hospital only
+PATCH,/api/pharmacy/prescriptions/:id/verify,DENY,DENY,DENY,DENY,DENY,DENY,ALLOW,DENY,DENY,PHARM-006; other hospital 404
+POST,/api/pharmacy/prescriptions/:id/dispense,DENY,DENY,DENY,DENY,DENY,DENY,ALLOW,DENY,DENY,PHARM-002/004; FIFO; TEST-014
+PATCH,/api/pharmacy/prescriptions/:id/handover,DENY,DENY,DENY,DENY,DENY,DENY,ALLOW,DENY,DENY,READY_FOR_PICKUP to DISPENSED
+GET,/api/pharmacy/alerts,DENY,ALLOW,DENY,DENY,DENY,DENY,ALLOW,DENY,DENY,PHARM-003/005; no report id in any route
+GET,/api/pharmacy/ledger,DENY,ALLOW,DENY,DENY,DENY,DENY,ALLOW,DENY,DENY,Stock movements; own hospital only
 POST,/api/prescriptions,DENY,DENY,ALLOW,DENY,DENY,DENY,DENY,DENY,DENY,API-020; treating doctor, open record
 GET,/api/prescriptions,DENY,DENY,ALLOW,ALLOW,DENY,DENY,ALLOW,DENY,ALLOW,Patients: own only
 GET,/api/prescriptions/:id,DENY,DENY,ALLOW,ALLOW,DENY,DENY,ALLOW,DENY,OWN,View is audited

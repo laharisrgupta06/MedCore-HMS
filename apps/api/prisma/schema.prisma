@@ -371,6 +371,7 @@ model Hospital {
   vaccinations        Vaccination[]
   familyHistory       FamilyHistory[]
   files               FileAttachment[]
+  expiryReports       ExpiryReport[]
   medicines           Medicine[]
   suppliers           Supplier[]
   medicineBatches     MedicineBatch[]
@@ -1036,18 +1037,21 @@ model FileAttachment {
 // ---------------------------------------------------------------------------
 
 model Medicine {
-  id           String       @id @default(uuid()) @db.Uuid
-  hospitalId   String       @db.Uuid
-  name         String
-  genericName  String?
-  form         MedicineForm
+  id            String       @id @default(uuid()) @db.Uuid
+  hospitalId    String       @db.Uuid
+  name          String
+  genericName   String?
+  form          MedicineForm
   /// e.g. "500 mg"
-  strength     String
+  strength      String
   /// Low-stock alert threshold (PRD 7.6, configurable per medicine).
-  reorderLevel Int
-  isActive     Boolean      @default(true)
-  createdAt    DateTime     @default(now()) @db.Timestamptz(3)
-  updatedAt    DateTime     @updatedAt @db.Timestamptz(3)
+  reorderLevel  Int
+  isActive      Boolean      @default(true)
+  /// PHARM-003 (M-07): set when available stock first falls below reorderLevel, cleared on restock,
+  /// so the low-stock alert is raised once per crossing.
+  lowStockSince DateTime?    @db.Timestamptz(3)
+  createdAt     DateTime     @default(now()) @db.Timestamptz(3)
+  updatedAt     DateTime     @updatedAt @db.Timestamptz(3)
 
   hospital          Hospital           @relation(fields: [hospitalId], references: [id], onDelete: Restrict)
   batches           MedicineBatch[]
@@ -1118,13 +1122,14 @@ model StockMovement {
   quantity      Int
   reason        String?
   dispenseId    String?           @unique @db.Uuid
-  performedById String            @db.Uuid
+  /// Null only for automatic QUARANTINE rows written by the nightly expiry run (M-09 CHECK).
+  performedById String?           @db.Uuid
   createdAt     DateTime          @default(now()) @db.Timestamptz(3)
 
   hospital    Hospital      @relation(fields: [hospitalId], references: [id], onDelete: Restrict)
   batch       MedicineBatch @relation(fields: [batchId, hospitalId], references: [id, hospitalId], onDelete: Restrict)
   dispense    Dispense?     @relation(fields: [dispenseId, hospitalId], references: [id, hospitalId], onDelete: Restrict)
-  performedBy User          @relation(fields: [performedById, hospitalId], references: [id, hospitalId], onDelete: Restrict)
+  performedBy User?         @relation(fields: [performedById, hospitalId], references: [id, hospitalId], onDelete: Restrict)
 
   @@unique([dispenseId, hospitalId])
   @@index([batchId, createdAt])
@@ -1190,6 +1195,23 @@ model PrescriptionItem {
 }
 
 /// One row per batch consumed; first-in-first-out may span several batches (PRD 7.6).
+/// PHARM-005 (M-08): the stored result of one nightly expiry run, one per hospital and
+/// hospital-local day. items: [{batchId, medicineId, medicineName, strength, batchNumber, expiresOn,
+/// quantity, kind: "EXPIRING" | "QUARANTINED"}], a snapshot never used to look rows up.
+model ExpiryReport {
+  id         String   @id @default(uuid()) @db.Uuid
+  hospitalId String   @db.Uuid
+  runDate    DateTime @db.Date
+  items      Json
+  createdAt  DateTime @default(now()) @db.Timestamptz(3)
+
+  hospital Hospital @relation(fields: [hospitalId], references: [id], onDelete: Restrict)
+
+  @@unique([id, hospitalId])
+  @@unique([hospitalId, runDate])
+  @@map("expiry_reports")
+}
+
 model Dispense {
   id                 String   @id @default(uuid()) @db.Uuid
   hospitalId         String   @db.Uuid

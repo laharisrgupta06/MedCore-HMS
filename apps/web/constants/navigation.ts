@@ -18,6 +18,8 @@ import {
   FlaskConical,
   TestTube,
   FileText,
+  ClipboardCheck,
+  BellRing,
 } from 'lucide-react';
 
 export interface NavItem {
@@ -92,9 +94,21 @@ export const STAFF_NAV: NavItem[] = [
     roles: ['HOSPITAL_ADMIN', 'NURSE', 'RECEPTIONIST', 'DOCTOR', 'ACCOUNTANT'],
   },
   {
+    href: '/dashboard/pharmacy',
+    label: 'Pharmacy queue',
+    icon: ClipboardCheck,
+    roles: ['PHARMACIST'],
+  },
+  {
     href: '/dashboard/medicines',
-    label: 'Medicines',
+    label: 'Inventory',
     icon: Pill,
+    roles: ['PHARMACIST', 'HOSPITAL_ADMIN'],
+  },
+  {
+    href: '/dashboard/pharmacy/alerts',
+    label: 'Pharmacy alerts',
+    icon: BellRing,
     roles: ['PHARMACIST', 'HOSPITAL_ADMIN'],
   },
   { href: '/dashboard/lab', label: 'Lab worklist', icon: FlaskConical, roles: ['LAB_TECHNICIAN'] },

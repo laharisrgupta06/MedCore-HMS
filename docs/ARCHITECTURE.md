@@ -147,6 +147,10 @@ staff agenda, availability, patient portal), all times shown in the hospital tim
 
 `modules/lab`: `LabTestsController` (`/lab-tests`, catalogue with reference ranges) and `LabOrdersController` (`/lab-orders`: order, cancel, sample, processing, result, report-file upload, approve, reject, amend, report PDF, report file). Status moves are conditional `updateMany` calls on the expected status. The range is chosen by `selectRange` in `@medcore/types` (shared with the web's live flag preview) and its bounds and unit are copied onto each result (DEC-040 D8). Values are withheld from everyone but lab technicians until APPROVED. A database trigger locks approved results and orders (only `reportFileId` may change). Corrections are amended orders linked by `amendsLabOrderId`. Approval publishes `lab.report.approved` (delivered in Phase 9). The report PDF is generated on request from the approved data with `PdfService`.
 
+## 6f. Pharmacy and inventory (Phase 7)
+
+`modules/pharmacy`: `BatchesController` (`/medicines/:id/batches`, `/batches/:id/quarantine`, `/batches/:id/adjustments`) and `PharmacyController` (`/pharmacy/prescriptions` queue, verify, dispense, handover; `/pharmacy/alerts`; `/pharmacy/ledger`). Each stock change writes its `stock_movements` row in the same transaction; caches (`StockLevels`) and low-stock state (`LowStock` in the catalogue module, M-07) are refreshed after commit. Dispensing locks the prescription row, allocates with `allocateFifo` (shared with the web preview) and decrements each batch conditionally. `ExpirySweep` (nightly run) is driven by the BullMQ job scheduler `expiry-sweep` on the `pharmacy` queue (`PharmacyJobsModule`, application only) every hour at minute 7; it processes each VERIFIED hospital past 02:00 local time once per day (M-08 unique key), one transaction per hospital, with the base client and explicit `hospitalId`. Events: `prescription.ready`, `stock.low`, `stock.expiring` (delivered in Phase 9).
+
 ## 7. Tenant isolation
 
 Row-per-tenant (shared schema) with three layers (TEN-001..005, DEC-018):

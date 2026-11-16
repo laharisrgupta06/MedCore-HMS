@@ -126,6 +126,7 @@ const MODEL_OF: Record<string, string> = {
   prescriptionItem: 'PrescriptionItem',
   dispense: 'Dispense',
   stockMovement: 'StockMovement',
+  expiryReport: 'ExpiryReport',
   address: 'Address',
   labTest: 'LabTest',
   labTestRange: 'LabTestRange',
@@ -194,6 +195,7 @@ const RELATIONS: Record<string, Record<string, Relation>> = {
     hospital: { model: 'Hospital', local: 'hospitalId', foreign: 'id' },
     medicalRecord: { model: 'MedicalRecord', local: 'medicalRecordId', foreign: 'id' },
     items: { model: 'PrescriptionItem', local: 'id', foreign: 'prescriptionId', many: true },
+    verifiedBy: { model: 'User', local: 'verifiedById', foreign: 'id' },
   },
   PrescriptionItem: {
     prescription: { model: 'Prescription', local: 'prescriptionId', foreign: 'id' },
@@ -203,8 +205,18 @@ const RELATIONS: Record<string, Record<string, Relation>> = {
   Dispense: {
     prescriptionItem: { model: 'PrescriptionItem', local: 'prescriptionItemId', foreign: 'id' },
     batch: { model: 'MedicineBatch', local: 'batchId', foreign: 'id' },
+    dispensedBy: { model: 'User', local: 'dispensedById', foreign: 'id' },
   },
-  MedicineBatch: { medicine: { model: 'Medicine', local: 'medicineId', foreign: 'id' } },
+  MedicineBatch: {
+    medicine: { model: 'Medicine', local: 'medicineId', foreign: 'id' },
+    stockMovements: { model: 'StockMovement', local: 'id', foreign: 'batchId', many: true },
+  },
+  Medicine: { batches: { model: 'MedicineBatch', local: 'id', foreign: 'medicineId', many: true } },
+  StockMovement: {
+    batch: { model: 'MedicineBatch', local: 'batchId', foreign: 'id' },
+    performedBy: { model: 'User', local: 'performedById', foreign: 'id' },
+    dispense: { model: 'Dispense', local: 'dispenseId', foreign: 'id' },
+  },
   LabTest: { ranges: { model: 'LabTestRange', local: 'id', foreign: 'labTestId', many: true } },
   LabOrder: {
     medicalRecord: { model: 'MedicalRecord', local: 'medicalRecordId', foreign: 'id' },
@@ -240,6 +252,8 @@ const UNIQUES: Record<string, string[][]> = {
   FamilyHistory: [['supersedesId']],
   Medicine: [['hospitalId', 'name', 'strength', 'form']],
   MedicineBatch: [['medicineId', 'batchNumber']],
+  StockMovement: [['dispenseId']],
+  ExpiryReport: [['hospitalId', 'runDate']],
   PrescriptionItem: [['prescriptionId', 'medicineId']],
   LabTest: [['hospitalId', 'code']],
   LabOrderItem: [['labOrderId', 'labTestId']],
@@ -304,7 +318,8 @@ const DEFAULTS: Record<string, Row> = {
   Vaccination: { nextDueOn: null },
   FamilyHistory: { relation: null, notes: null },
   FileAttachment: { patientId: null, medicalRecordId: null },
-  Medicine: { genericName: null, isActive: true },
+  Medicine: { genericName: null, isActive: true, lowStockSince: null },
+  StockMovement: { reason: null, dispenseId: null, performedById: null },
   MedicineBatch: { status: 'ACTIVE', supplierId: null },
   Prescription: {
     status: 'ISSUED',
@@ -367,6 +382,52 @@ const HISTORY_DEFAULTS = {
   correctionReason: null,
   recordedAt: new Date(),
 };
+
+/** Applies update data the way Prisma does, including atomic { increment } / { decrement }. */
+function applyData(row: Row, data: Row): void {
+  for (const [k, v] of Object.entries(data)) {
+    if (isPlain(v) && 'increment' in v) row[k] = (row[k] as number) + (v.increment as number);
+    else if (isPlain(v) && 'decrement' in v) row[k] = (row[k] as number) - (v.decrement as number);
+    else row[k] = v;
+  }
+}
+
+function checkError(name: string): Error {
+  return new Error(`new row violates check constraint "${name}"`);
+}
+
+/**
+ * Mirrors M-09 and constraints.sql for the pharmacy tables: the ledger and dispenses are
+ * append-only, ledger rows obey the sign/actor/reason/link CHECKs, batch quantity never below 0.
+ */
+function guardPharmacy(model: string, rows: Row[], op: 'create' | 'update' | 'delete'): void {
+  if ((model === 'StockMovement' || model === 'Dispense') && op !== 'create' && rows.length)
+    throw triggerError(
+      `${op.toUpperCase()} on ${model} is not permitted: this table is append-only`,
+    );
+  for (const r of rows) {
+    if (model === 'MedicineBatch' && (r.quantity as number) < 0)
+      throw checkError('medicine_batches_quantity_chk');
+    if (model === 'Dispense' && !((r.quantity as number) > 0))
+      throw checkError('dispenses_quantity_chk');
+    if (model !== 'StockMovement') continue;
+    const q = r.quantity as number;
+    const reason = typeof r.reason === 'string' && r.reason.trim().length > 0;
+    if (q === 0) throw checkError('stock_movements_nonzero_chk');
+    if (r.performedById == null && !(r.type === 'QUARANTINE' && reason))
+      throw checkError('stock_movements_actor_chk');
+    const sign =
+      (r.type === 'RECEIPT' && q > 0) ||
+      (r.type === 'DISPENSE' && q < 0) ||
+      r.type === 'ADJUSTMENT' ||
+      (r.type === 'QUARANTINE' && q > 0);
+    if (!sign) throw checkError('stock_movements_sign_chk');
+    if ((r.type === 'DISPENSE') !== (r.dispenseId != null))
+      throw checkError('stock_movements_dispense_link_chk');
+    if ((r.type === 'ADJUSTMENT' || r.type === 'QUARANTINE') && !reason)
+      throw checkError('stock_movements_reason_chk');
+  }
+}
 
 function triggerError(message: string): Error {
   return new Error(`${message} (integrity_constraint_violation)`);
@@ -691,6 +752,7 @@ export class FakePrisma {
         case 'create': {
           const row = { ...this.defaults(model), ...(a.data as Row) };
           this.guardLab(model, [row], a.data as Row);
+          guardPharmacy(model, [row], 'create');
           this.checkUnique(model, row);
           rows.push(row);
           return Promise.resolve(shape(row));
@@ -700,15 +762,20 @@ export class FakePrisma {
           if (!r) throw notFound();
           guardClinicalChange(model, [r], a.data as Row);
           this.guardLab(model, [r], a.data as Row);
-          const next = { ...r, ...(a.data as Row) };
+          guardPharmacy(model, [r], 'update');
+          const next = { ...r };
+          applyData(next, a.data as Row);
+          guardPharmacy(model, model === 'StockMovement' ? [] : [next], 'create');
           this.checkUnique(model, next, r);
-          Object.assign(r, a.data as Row, model === 'User' ? { updatedAt: new Date() } : {});
+          applyData(r, a.data as Row);
+          if (model === 'User') r.updatedAt = new Date();
           return Promise.resolve(shape(r));
         }
         case 'delete': {
           const r = found();
           if (!r) throw notFound();
           guardClinicalChange(model, [r]);
+          guardPharmacy(model, [r], 'delete');
           if (this.referenced(model, r)) throw fkViolation();
           rows.splice(rows.indexOf(r), 1);
           return Promise.resolve(shape(r));
@@ -716,6 +783,7 @@ export class FakePrisma {
         case 'deleteMany': {
           const hit = rows.filter((r) => this.match(model, r, where));
           guardClinicalChange(model, hit);
+          guardPharmacy(model, hit, 'delete');
           for (const r of hit) rows.splice(rows.indexOf(r), 1);
           return Promise.resolve({ count: hit.length });
         }
@@ -723,12 +791,20 @@ export class FakePrisma {
           const hit = rows.filter((r) => this.match(model, r, where));
           guardClinicalChange(model, hit, a.data as Row);
           this.guardLab(model, hit, a.data as Row);
-          for (const r of hit) Object.assign(r, a.data as Row);
+          guardPharmacy(model, hit, 'update');
+          const nexts = hit.map((r) => {
+            const n = { ...r };
+            applyData(n, a.data as Row);
+            return n;
+          });
+          guardPharmacy(model, model === 'StockMovement' ? [] : nexts, 'create');
+          hit.forEach((r) => applyData(r, a.data as Row));
           return Promise.resolve({ count: hit.length });
         }
         case 'createMany': {
           for (const d of a.data as Row[]) {
             const row = { ...this.defaults(model), ...d };
+            guardPharmacy(model, [row], 'create');
             this.checkUnique(model, row);
             rows.push(row);
           }
@@ -789,6 +865,7 @@ export class FakePrisma {
   prescriptionItem = this.delegate('PrescriptionItem');
   dispense = this.delegate('Dispense');
   stockMovement = this.delegate('StockMovement');
+  expiryReport = this.delegate('ExpiryReport');
   labOrder = this.delegate('LabOrder');
 
   /** Query extensions, as used by TenantPrismaService. */
