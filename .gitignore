@@ -1,0 +1,49 @@
+# Dependencies
+node_modules/
+.pnpm-store/
+
+# Environment files (never commit secrets; .env.example is tracked)
+.env
+.env.*
+!.env.example
+
+# Build and framework output
+dist/
+build/
+out/
+.next/
+.turbo/
+*.tsbuildinfo
+next-env.d.ts
+
+# Test and coverage output
+coverage/
+playwright-report/
+test-results/
+blob-report/
+.nyc_output/
+
+# Logs
+*.log
+logs/
+npm-debug.log*
+pnpm-debug.log*
+
+# Local tooling and OS files
+.DS_Store
+Thumbs.db
+*.swp
+.idea/
+.vscode/*
+!.vscode/settings.json
+!.vscode/extensions.json
+
+# Claude Code personal settings (project settings.json stays tracked)
+.claude/settings.local.json
+.claude/worktrees/
+
+# Local Docker volumes and uploads
+docker/data/
+uploads/
+*.pem
+*.key
