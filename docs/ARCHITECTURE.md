@@ -155,6 +155,24 @@ staff agenda, availability, patient portal), all times shown in the hospital tim
 
 System quarantines (rows without a performer) are linked to that day's expiry report and accepted by a trigger only as the nightly run writes them (DEC-044 Layer A); separate database accounts follow in Phase 14 (P14-09). Prescriptions carry an append-only history (`prescription_events`); triggers enforce the status moves, and commit-time checks require every status change, verification and dispense to be written together with its event or status in one transaction. Services therefore wrap each transition and its event in one transaction and write the event only when the conditional update changed the row.
 
+## 6h. Billing and tax configuration (Phase 8; M-11a proposed, not applied)
+
+Approved design: DEC-045 to DEC-054. Tax configuration (M-11a, proposed in
+`prisma/proposed/20261117200000_tax_configuration/`, not yet applied) gives each hospital versioned tax
+classifications (`tax_classifications`, `tax_classification_versions`: the version in force on a date is the
+latest start on or before it, and none changes once in force), consultation and lab defaults confirmed by
+the hospital admin, dated GST registrations (one GSTIN per MedCore hospital, exclusion constraint), and
+classifications on lab tests (service) and medicines (goods). The statutory room rule
+(`statutory_room_tax_rules`) is platform reference data, outside tenant scope, changed only by migration;
+rooms record a critical-care unit. "Today" for these rules is always the hospital's own time zone
+(`medcore_hospital_today`). Supply classification is kept separate from GST collection (DEC-047): a taxable
+supply stays taxable when an unregistered or composition hospital collects no GST. Later migrations
+(M-11b to M-14, each approved separately) add invoice lines that snapshot every tax value (DEC-051), document
+number series scoped to the GSTIN and allocated gap-free at finalising (DEC-052), issued-document
+immutability with correction requests (DEC-053), payments and webhooks (one platform provider account,
+hospital always taken from MedCore's own records, FakeProvider by default; DEC-054), reimbursement claims
+and billing settings.
+
 ## 7. Tenant isolation
 
 Row-per-tenant (shared schema) with three layers (TEN-001..005, DEC-018):
@@ -164,6 +182,8 @@ Row-per-tenant (shared schema) with three layers (TEN-001..005, DEC-018):
    `hospitalId` into every where clause and create, and rejects tenant changes (`scopeArgs`). Other
    hospitals' rows do not exist for the caller (404). Super Admins get the unscoped client; the request is
    flagged and audited. Outside an authenticated request the client throws.
+   Models without `hospitalId` are global and unscoped: `Hospital`, `Icd10Code`, `WebhookEvent` and, with
+   M-11a, `StatutoryRoomTaxRule` (platform reference data). New hospital tables are scoped automatically.
 3. **Request layer:** `hospitalId` comes only from the verified access token; `TenantGuard` rejects URLs
    naming another hospital.
 Verified by the tenancy unit tests, the users isolation tests and `test/tenancy.int-spec.ts` (PostgreSQL).

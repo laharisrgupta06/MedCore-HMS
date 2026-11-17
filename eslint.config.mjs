@@ -15,6 +15,8 @@ export default tseslint.config(
       '**/coverage/**',
       '**/next-env.d.ts',
       'apps/api/prisma/migrations/**',
+      // Build-environment validation records of proposed migrations (not project code).
+      'apps/api/prisma/proposed/*/validation/**',
     ],
   },
   js.configs.recommended,

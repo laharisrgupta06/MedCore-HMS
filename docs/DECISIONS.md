@@ -254,3 +254,142 @@ Every significant product, architecture, database, design and process decision. 
 - Application changes: issue, cancel, verify, dispense and hand-over each write their event in the same transaction (cancel, verify and hand-over only when the conditional update changed the row); the PDF is attached with a conditional update and a losing render rolls back and removes its file; the nightly run quarantines first, then writes the report, then the linked ledger rows; refilling an empty batch reactivates it in one update; `GET /prescriptions/:id` returns `history`; the pharmacy prescription screen shows it.
 - Related: DEC-040 D3/D9, DEC-042, DEC-043, PHARM-004/006, RX-002.
 
+
+## Phase 8 — Billing and payments (approved 2026-11-17 19:09)
+
+The owner approved the Phase 8 plan ("MedCore HMS — Phase 8 Billing & Payments Implementation Plan",
+Claude Doc, section 16) on 2026-11-17 19:09 IST, including decisions Q1a–Q1g and Q2–Q19. DEC-045 to
+DEC-054 record them; DEC-055 records the M-11a review. Tax rules below summarise the law as researched for
+the plan (sources listed there); each hospital's accountant must confirm its own configuration (DEC-054).
+
+### DEC-045: Configurable, versioned tax classifications (Q1a)
+- Status: **Approved** (owner, 2026-11-17 19:09).
+- A single hospital-wide tax rate is rejected: one outpatient visit mixes exempt healthcare services
+  (consultation, lab and radiology by a clinical establishment, SAC 9993) with taxable medicines.
+- Each hospital keeps `tax_classifications` (name, goods or service, HSN or SAC code; SAC codes start with
+  99, HSN codes never do). Classifications are never deleted; only the name and active flag change.
+- `tax_classification_versions` hold what applies from a date: treatment EXEMPT, NIL_RATED or TAXABLE,
+  rate (0 unless TAXABLE; TAXABLE above 0 and at most 40), whether prices include tax. The version in force
+  on a date has the latest start on or before it; a rate change is a new version. No version starts before
+  today (hospital time zone); a version can be edited or deleted only before it takes effect.
+- Medicines need their own HSN-based classification (nil-rated supported); no rate is ever assumed. An
+  unclassified medicine can still be dispensed, but its invoice cannot be finalised until it is classified.
+- Rejected alternatives: GST rules hard-coded in MedCore (law changes need releases; MedCore would make tax
+  decisions); an external tax service (network dependency, cost, patient data leaving MedCore).
+- Related: BILL-002, BILL-008; M-11a (DEC-055).
+
+### DEC-046: Defaults, confirmation and the Phase 8 pharmacy assumption (Q1b, Q1e)
+- Status: **Approved** (owner, 2026-11-17 19:09).
+- Hospital defaults exist for consultations and lab tests only (service classifications). Rooms follow the
+  statutory rule (DEC-049); medicines need their own classification; other lines are chosen by staff.
+- New hospitals get suggested defaults, which the hospital admin must confirm before the first invoice
+  (`hospitals.taxSetupConfirmedAt/ById`, same-tenant user).
+- Q1e: all Phase 8 pharmacy lines are outpatient sales (taxable at the medicine's rate). Medicines given to
+  inpatients as part of treatment are exempt, but MedCore has no admissions model; that treatment depends on
+  a future admissions phase.
+
+### DEC-047: Supply classification kept separate from GST collection (Q1c)
+- Status: **Approved** (owner, 2026-11-17 19:09).
+- `hospital_gst_registrations`: dated rows (REGULAR, COMPOSITION, UNREGISTERED); the one in force on a date
+  has the latest start on or before it; no row means unregistered. Never edited, never backdated; a row not
+  yet in force may be deleted to correct a mistake.
+- A line's classification always describes the supply: a medicine stays TAXABLE at its statutory rate even
+  when the hospital cannot collect GST. Only a REGULAR registration in force on the service date collects
+  GST; otherwise tax is 0, the reason (UNREGISTERED or COMPOSITION) is stored, and the rate is kept for
+  reference. Document type follows (tax invoice; invoice-cum-bill of supply under Rule 46A; bill of supply,
+  with the composition declaration where applicable).
+
+### DEC-048: GSTIN validation
+- Status: **Approved** (owner, 2026-11-17 19:09).
+- Offline checks, in the database and the API: 15 characters, state code 01–38, PAN pattern, entity
+  character, "Z", mod-36 check character; the registration's chosen state equals the GSTIN's state code.
+  This proves a number is well formed, not that it is active: the hospital admin attests to the details
+  (`attestedById`, `attestedAt`). No GST-portal lookup (outside service, out of scope).
+
+### DEC-049: Statutory room rule
+- Status: **Approved** (owner, 2026-11-17 19:09).
+- Notification 04/2022-CT(Rate), from 18 July 2022: a room other than ICU, CCU, ICCU or NICU with a charge
+  exceeding ₹5,000 per day per patient is taxed at 5% without input tax credit, on the whole room charge;
+  exactly ₹5,000 stays exempt. The threshold is tested on the per-day charge to the patient before any
+  discount.
+- Stored as platform reference data (`statutory_room_tax_rules`, append-only, seeded by M-11a), changed only
+  by a reviewed migration. Rooms gain `criticalCareUnit` (ICU, CCU, ICCU, NICU); a room of type ICU or with
+  a critical-care unit is exempt at any price.
+
+### DEC-050: One GSTIN per MedCore hospital (Q1g A)
+- Status: **Approved** (owner, 2026-11-17 19:09).
+- Enforced by the exclusion constraint `hospital_gst_registrations_gstin_one_hospital` (same GSTIN, different
+  hospital refused, race-safe). The same GSTIN may recur in one hospital (for example composition to
+  regular). The API answers `409 GSTIN_UNAVAILABLE` with a message that names no hospital and never passes
+  the database error text on (it contains the other hospital's id; SECURITY R-12). Sharing a GSTIN between
+  hospitals (chains) is a later decision.
+
+### DEC-051: Line arithmetic, discount allocation and snapshots (Q1d)
+- Status: **Approved** (owner, 2026-11-17 19:09).
+- Exact decimals, half-up to 0.01 once per step. gross = quantity × unit price; net = gross − discount
+  share. GST not collected: taxable = net, tax 0. Added on top: tax = round(net × r / 100). Price includes
+  tax: taxable = round(net × 100 / (100 + r)), tax = net − taxable. Invoice: subtotal = Σ taxable,
+  tax = Σ tax, discount = Σ shares, total = subtotal + tax; balance = total − succeeded payments.
+- Discounts (accountant only, Q2 B): shared in proportion to gross, remainder to the largest line (earliest on
+  ties), tax recomputed per line; the database checks the shares add up exactly.
+- Every line stores its classification and version, name, HSN or SAC, treatment, rate, price-includes-tax,
+  collection flag and reason, service date, gross, share, taxable value, tax and total (room lines also the
+  rule version, per-day charge and critical-care flag). Issued invoices never change when settings do.
+  Implemented in M-11b.
+
+### DEC-052: Document numbering (Q1f A)
+- Status: **Approved** (owner, 2026-11-17 19:09).
+- Separate series per document type and financial year (1 April to 31 March, hospital time), scoped to the
+  GSTIN (or the hospital when unregistered), because numbers must be unique per GSTIN and a GSTIN can outlive
+  a registration record. Format `PREFIX/YY-YY/NNNNN` (prefix 1–4 of A–Z 0–9), at most 16 characters
+  (Rule 46(b)); 99,999 per series and year, then `SERIES_EXHAUSTED`.
+- Allocated only at finalising, under the series row lock in the finalise transaction (gap-free: no
+  PostgreSQL sequences). Drafts have no number. Uniqueness: (scope, year, prefix) on series; (series,
+  serial), (scope, year, number) and (hospital, year, number) on invoices; numbers built by a trigger; issued
+  numbers immutable and never reused. Read-only documents-issued report for GSTR-1. Implemented in M-11b.
+
+### DEC-053: Issued documents are immutable; correction requests
+- Status: **Approved** (owner, 2026-11-17 19:09).
+- Drafts may be voided by receptionists or accountants with a reason (no number consumed). Finalised, partly
+  paid and paid documents are never cancelled, edited, renumbered or deleted in MedCore, whatever the date;
+  database triggers refuse it.
+- A needed correction or cancellation is blocked with an explanation that the accountant must handle it
+  through the legally appropriate process outside MedCore, and recorded as an append-only, audited
+  correction request; the accountant may add append-only outcome notes (for example an external credit-note
+  reference) that never change the document.
+- Distinguished: ordinary corrections (drafts; late-charge invoices, Q19 A); IRP e-invoice cancellation (not
+  applicable: Phase 8 bills patients, B2C, no IRN); GST credit notes (Section 34; out of scope, Q3 A).
+- Q7 B is limited to late-charge invoices in Phase 8; corrected invoices wait for credit-note support. Known
+  limitation: a balance credited outside MedCore still shows as due (accountant review item).
+
+### DEC-054: Phase 8 scope, workflow decisions and release gate
+- Status: **Approved** (owner, 2026-11-17 19:09).
+- Q2 B accountant-only discounts; Q3 A refunds and credit notes out of scope; Q4 A lines added when
+  services are rendered; Q5 A manual room lines; Q6 A lab price copied when ordered; Q7 B as limited by
+  DEC-053; Q8 A finalised invoices in the patient portal; Q9 A cash partial, online whole balance; Q10 A
+  Razorpay live-test, Stripe through FakeProvider; Q11 A Razorpay UPI and netbanking only; Q12 A receptionists
+  start online checkout; Q13 A accountant cash reversal with reason; Q14 A one platform test account;
+  Q15 A reimbursement tracking, never reduces the balance; Q16 A doctors have no invoice access; Q17 A
+  receipt email carries a portal link; Q18 A staff finalise explicitly; Q19 A separate late-charge invoice.
+- Platform-account isolation: a payment's hospital comes only from MedCore's own record (composite keys);
+  webhooks find payments by stored provider reference; metadata naming another hospital is held; checkout
+  idempotency keys are MedCore payment ids; reconciliation runs per hospital.
+- FakeProvider is the default for development and all automated tests. No external account is set up and no
+  credential requested without telling the owner first; keys go into `.env` by the owner only.
+- Out of scope: refunds, credit notes, e-invoicing, B2B billing, cashless insurance, admissions and inpatient
+  tax treatment, per-hospital provider accounts.
+- **Mandatory production-release gate:** review by the hospital's accountant of tax classifications and HSN
+  codes, numbering format and document types, immutability and correction requests, handling of corrections
+  and credit notes outside MedCore, the externally credited balance limitation, B2C dynamic QR needs, and the
+  outpatient pharmacy assumption (TASKS 8-G1).
+
+### DEC-055: M-11a tax configuration, drafted and validated (not applied)
+- Status: **Approved for drafting and PostgreSQL 16 validation only** (owner, 2026-11-17 19:09). Applying it
+  to the owner's database needs a separate approval. M-11b to M-14 are each presented separately.
+- Kept in `apps/api/prisma/proposed/20261117200000_tax_configuration/` until approved: Prisma reads only
+  `prisma/migrations` and `prisma/schema.prisma`, so the proposal cannot affect the application, migrations,
+  integration tests or drift. The test changes that describe the migrated database (T-MIG-001 counts,
+  T-TEN-001 model count, new T-MIG-TAX-002..008) are kept with it, since they would fail before it is applied.
+- Contents: 4 enums, 5 tables, 3 nullable columns on `lab_tests`, `medicines`, `rooms`, 2 on `hospitals`,
+  7 functions, CHECKs, 1 exclusion constraint, 8 triggers, 1 seeded room-rule row; no existing row changed.
+  Review and macOS commands: [migration-review.md](migration-review.md) section 11.

@@ -2,7 +2,7 @@
 
 Environments: **VM** = Linux build VM (Node 22, no Docker, Prisma engines blocked) · **Mac** = project
 owner's macOS (Node 24, Docker) · **CI** = GitHub Actions (not yet run: nothing pushed). A test is never
-marked passed unless it was executed; the environment is always stated. Last updated 2026-11-16.
+marked passed unless it was executed; the environment is always stated. Last updated 2026-11-17.
 
 ## 1. Strategy
 
@@ -128,6 +128,10 @@ Totals (Phase 5): API unit 1007/1007 and web 42/42, lint, format, typecheck, bui
 Totals (Phase 4, 2026-11-16 22:10): API unit 919/919 and web 38/38 (VM); integration 15/15 in 7 suites and Playwright 30/30, desktop and mobile (Mac, owner report); ICD-10 starter list loaded (78 codes). CI: not run (nothing pushed).
 All integration suites listed above as "Not run" in earlier revisions ran in the 14/14 macOS run (owner report, 17:17). Still open: browser checks of the status page and Swagger UI (Phase 0), CI on GitHub.
 
+| T-MIG-TAX-001 | DEC-045..050, DEC-055 | Proposed M-11a on PostgreSQL 16.15, sent as one multi-statement query, after the ten applied migrations and seeded Phase 2/6/7 rows (two hospitals): existing rows identical by hash; 79 behaviour checks in rolled-back transactions (classifications 14, versions 16, item classifications 12, defaults and confirmation 11, GST registrations 20, room rule 4, existing tables 2); same GSTIN for two hospitals in two concurrent sessions; injected failure leaves no trace; re-run refused without change; `rollback.sql` restores the exact prior schema and data and refuses when configuration exists; counts 51 tables, 50 triggers, 3 exclusions | As specified | 79/79; race refused after wait; all rollback checks pass; migration md5 `2855e9de…` equals the repository copy | Pass | Build env (PG 16) | 2026-11-17 |
+| T-PRISMA-TAX-001 | DEC-055, R-10 | Proposed `schema.prisma` validated with Prisma's schema WebAssembly (engine `c2990dca`, as used by Prisma 6.19.3; CLI blocked); 195 comparisons with the migrated database: columns, types, nullability, defaults, primary keys, unique indexes, foreign keys and actions, enum values | Valid; all match | 51 models, 41 enums; 195/195 | Pass | Build env | 2026-11-17 |
+| T-TEN-001c | TEN-002, DEC-055 | Client generated from the proposed schema: typecheck clean; proposed `tenant-scope.spec.ts` (47 hospital-scoped models including the four tax models; 4 global including `StatutoryRoomTaxRule`); full API unit suite; then VM restored to the current schema | All pass | 1277/1277 with the proposal; 1277/1277 after restoring | Pass | VM | 2026-11-17 |
+
 ## 3. Planned tests (not run)
 
 | Test ID | Req. | Scenario | Expected | Phase | Status |
@@ -137,7 +141,9 @@ All integration suites listed above as "Not run" in earlier revisions ran in the
 | T-MIG-003 | DEC-017 | Role/profile trigger: each of the 9 roles valid and invalid combinations at commit | Only valid combinations commit | 1A | Written, not run |
 | T-MIG-004 | DEC-018 | Child row pointing to a parent in another hospital rejected | FK violation | 1A | Written, not run |
 | T-MIG-005 | DEC-016, EMR-002 | Append-only, status-only, closed-record and approved-lab locks; corrections require reason and same parent | Triggers fire as designed | 1A | Written, not run |
-| T-MIG-006 | BILL-001, TEST-015 | Invoice CHECKs: total = subtotal + tax − discount; line total; item links | Violations rejected | 1A | Written, not run |
+| T-MIG-006 | BILL-001, TEST-015 | Invoice CHECKs: total = subtotal + tax − discount; line total; item links (to be revised with M-11b, which replaces both total CHECKs, DEC-051) | Violations rejected | 1A | Written, not run |
+| T-MIG-TAX-002..008 | DEC-045..050 | `test/tax-configuration.int-spec.ts` (with M-11a): classification immutability and codes; versions in force immutable, future ones editable, no backdating, rate CHECK; cross-hospital and wrong-supply-type classifications refused; defaults (service only, not removable, stay active) and confirmation; GSTIN check character, backdating, edits, Q1g across hospitals and composition-to-regular in one hospital; room rule seeded once and append-only; critical-care rooms. Fresh names and GSTINs each run | As specified | 8 | Written, waits for M-11a on macOS |
+| T-MIG-001 (M-11a) | DEC-055 | Proposed `test/constraints.int-spec.ts`: 51 tables, 50 triggers, 3 exclusions, plus the 14 M-11a objects by name | As specified | 8 | Written, waits for M-11a on macOS |
 | T-AUTH-001 | TEST-013, SEC-004 | Refresh token reused after rotation → 401 and all sessions revoked | Rejected | 1B | Not run |
 | T-AUTH-002..010 | AUTH-001..012 | Register, verify email/phone, login, me, refresh, logout one/all, forgot/reset, OTP attempt limit, auth rate limit 429, bcrypt cost, cookie flags, CSRF, no secrets in logs | As specified | 1B | Not run |
 | T-RBAC-001 | ROLE-011 | Every endpoint × 9 roles matches `permissions-matrix.csv` | Allowed/denied per matrix | 1C | Not run |

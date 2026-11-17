@@ -4,7 +4,7 @@ Owners: **LEAD** (Team Lead/Architect), **DB** (Database Engineer), **BE** (Back
 **QA** (Testing). Until Agent Teams are verified and approved (DEC-022) the main session performs all roles.
 Status: Not Started · In Progress · Blocked · Review · Done. **Done = implemented and required verification
 passed** (environment recorded in [TEST_PLAN.md](TEST_PLAN.md)). Phases follow
-[implementation-roadmap.md](implementation-roadmap.md). Last updated 2026-11-16.
+[implementation-roadmap.md](implementation-roadmap.md). Last updated 2026-11-17.
 
 ## Progress summary
 
@@ -200,6 +200,33 @@ Phase 7 built and checked in the VM 2026-11-17 (after DEC-044): API 1277/1277, w
 
 **Phase 7 verified on macOS 2026-11-17 15:34 (owner report): M-07 to M-10 applied, Prisma Client generated, drift check empty, integration 11/11 suites and 19/19 tests, Playwright 50/50 (desktop and mobile Chromium). Phase 7 Done.** Two fixes during verification: T-MIG-001 object counts updated for the new tables and triggers (`d5bf0a3`); a Playwright pre-check now stops a run when the API is not running (`d28c586`). Carried forward: why the development API had stopped before the 14:57 Playwright run was not identified (no log was captured; it ran normally after a restart); signed-in pharmacy journeys in Playwright need seed data (P14); P14-09 separate database accounts (mandatory).
 
+## Phase 8 — Billing and payments
+
+Plan approved 2026-11-17 19:09 (DEC-045 to DEC-054; plan: Claude Doc "MedCore HMS — Phase 8 Billing &
+Payments Implementation Plan"). Every migration is presented and approved separately before it is applied.
+
+| Task ID | Req. | Task | Status | Tests |
+| --- | --- | --- | --- | --- |
+| 8-A0 | BILL-001..008 | Phase 8 plan and decisions Q1a–Q1g, Q2–Q19 | Done (approved 2026-11-17 19:09) | — |
+| 8-A1 | DEC-045..050, DEC-055 | M-11a `tax_configuration`: classifications and versions, defaults and confirmation, GST registrations (one GSTIN per hospital), statutory room rule, item classifications, critical-care rooms | **Review**: drafted and validated on PostgreSQL 16 (T-MIG-TAX-001); kept in `prisma/proposed/`; awaiting approval to apply on macOS | T-MIG-TAX-001; on apply: T-MIG-TAX-002..008, T-MIG-001, T-TEN-001 |
+| 8-A2 | DEC-051..053 | M-11b `invoice_integrity`: line tax snapshots, totals = sum of lines, document number series and uniqueness, issued-document immutability, draft-only void, correction requests, late-charge invoices | Not Started (separate approval) | — |
+| 8-A3 | BILL-004/005/007, Q13 | M-12 `payment_integrity` | Not Started (separate approval) | — |
+| 8-A4 | BILL-006, Q15 | M-13 `insurance_claim_events` (reimbursement only) | Not Started (separate approval) | — |
+| 8-A5 | BILL-008 | M-14 `billing_settings` | Not Started (separate approval) | — |
+| 8-B1 | DEC-051 | Shared types and money helpers: line tax, room rule, discount allocation, GSTIN validation, number formatting, totals, paise | Not Started | — |
+| 8-B2 | BILL-008 | Tax settings API and screens | Not Started | — |
+| 8-B3 | BILL-001, BILL-003 | Invoices: drafts, late charges, re-resolve, accountant discount, finalise with numbering, draft void, correction requests | Not Started | — |
+| 8-B4 | BILL-002 | Automatic lines from consultation, lab order and dispense, inside the existing transactions | Not Started | — |
+| 8-B5 | BILL-004 | Cash, accountant reversal, row lock | Not Started | — |
+| 8-B6 | BILL-004, DEC-054 | Provider interface and FakeProvider (default) | Not Started | — |
+| 8-B7 | BILL-007 | Webhooks: raw body, signatures, idempotency, per-hospital isolation | Not Started | — |
+| 8-B8 | BILL-004 | Razorpay and Stripe providers (test mode) | Not Started | — |
+| 8-B9 | BILL-005 | Receipts: PDF and email jobs | Not Started | — |
+| 8-B10 | BILL-008 | Reconciliation job, screen, documents-issued report | Not Started | — |
+| 8-B11 | BILL-006 | Insurance claims (reimbursement tracking) | Not Started | — |
+| 8-B12 | FE | Navigation and accountant landing page | Not Started | — |
+| 8-G1 | DEC-054 | **Mandatory production-release gate:** the hospital's accountant reviews tax classifications and HSN codes, numbering format and document types, issued-document immutability and correction requests, handling of corrections and credit notes outside MedCore, the externally credited balance limitation, B2C dynamic QR needs, and the outpatient pharmacy assumption. No hospital uses Phase 8 billing in production before this is recorded | Not Started | — |
+
 ## Phases 2–14 (from the roadmap; detailed breakdown added when each phase starts)
 
 | Task ID | Req. | Task | Owner | Priority | Status |
@@ -210,7 +237,7 @@ Phase 7 built and checked in the VM 2026-11-17 (after DEC-044): API 1277/1277, w
 | P5-01..05 | SCOPE-012, RX-001..008 | Prescriptions, medicine search, PDF with letterhead and signature, verification, ready-for-pickup | BE, FE | High | Done (2026-11-16; verification and ready-for-pickup land with Phase 7 per D9) |
 | P6-01..06 | SCOPE-013, LAB-001..007 | Test catalogue and ranges, orders, sample collection, results, senior approval, amended orders, report PDF | BE, FE, QA | High | Done (2026-11-16 23:15; Mac integration 17/17, Playwright 44/44) |
 | P7-01..06 | SCOPE-014, PHARM-001..006 | Medicines and batches, FIFO dispensing, quarantine, low-stock alerts, nightly expiry job, expired-dispense test | BE, FE, QA | High | Done (2026-11-17 15:34; macOS integration 19/19, Playwright 50/50) |
-| P8-01..07 | SCOPE-015, BILL-001..008 | Invoices and items, totals integrity, Stripe/Razorpay/cash, verified webhooks, receipts, TPA claims, reconciliation | BE, FE, QA | Critical | Not Started |
+| P8-01..07 | SCOPE-015, BILL-001..008 | Invoices and items, totals integrity, Stripe/Razorpay/cash, verified webhooks, receipts, TPA claims, reconciliation | BE, FE, QA | Critical | In Progress (plan approved 2026-11-17 19:09; M-11a in review) |
 | P9-01..05 | SCOPE-016, NOTIF-001..010, TECH-024 | Event fan-out, per-channel queues, Socket.IO gateway, inbox UI, all eight triggers | BE, FE | High | Not Started |
 | P10-01..04 | SCOPE-017, FE-010 | Patient portal: records, reports, invoices and payments, booking | FE, QA | High | Not Started |
 | P11-01..05 | SCOPE-018/019, DASH-001..013 | Analytics endpoints, role dashboards (Recharts), global search | BE, FE | Medium | Not Started |

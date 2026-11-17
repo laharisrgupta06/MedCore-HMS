@@ -191,3 +191,114 @@ pnpm test && pnpm test:int                   # includes T-MIG-008: hospital crea
 
 If the first drift output differs from that single statement, stop and send it; do not deploy.
 
+
+## 11. Migration M-11a: `20261117200000_tax_configuration` (DEC-045 to DEC-050, DEC-055)
+
+Status: **drafted and validated on PostgreSQL 16; not applied; waiting for the owner's separate approval.**
+Files: `apps/api/prisma/proposed/20261117200000_tax_configuration/` (README lists where each file goes).
+
+### What it adds
+
+| Object | Detail |
+| --- | --- |
+| Enums | `TaxSupplyType` (GOODS, SERVICE), `TaxTreatment` (EXEMPT, NIL_RATED, TAXABLE), `GstRegistrationType` (REGULAR, COMPOSITION, UNREGISTERED), `CriticalCareUnit` (ICU, CCU, ICCU, NICU) |
+| `tax_classifications` | Per hospital; unique (id, hospitalId), (hospitalId, name); FKs hospital, (createdById, hospitalId) → users; CHECKs name 1–120 characters, code 4/6/8 digits, SAC codes start with 99 exactly for services |
+| `tax_classification_versions` | Per hospital; unique (id, hospitalId), (classificationId, effectiveFrom); FKs hospital, (classificationId, hospitalId), (createdById, hospitalId); CHECK rate 0 unless TAXABLE (then above 0, at most 40), no tax inside the price unless TAXABLE |
+| `hospital_tax_defaults` | Primary key (hospitalId, kind); kind CONSULTATION or LAB; FKs hospital, (classificationId, hospitalId), (updatedById, hospitalId) |
+| `hospital_gst_registrations` | Per hospital; unique (id, hospitalId), (hospitalId, effectiveFrom); FKs hospital, (attestedById, hospitalId); CHECK details by type with `medcore_gstin_valid` and state code = GSTIN prefix; exclusion constraint: one GSTIN, one hospital |
+| `statutory_room_tax_rules` | Platform data (no hospitalId); unique effectiveFrom; CHECK values; seeded: 18 July 2022, ₹5,000.00, 5%, SAC 9993, tax added on top |
+| New columns | `lab_tests.taxClassificationId`, `medicines.taxClassificationId` (nullable, composite FK to the same hospital's classification), `rooms.criticalCareUnit` (nullable), `hospitals.taxSetupConfirmedAt/ById` (both or neither; same-tenant FK) |
+| Functions | `medcore_hospital_today`, `medcore_gstin_valid`, and five trigger functions |
+| Triggers (8) | `tax_classifications_rules` (no delete; only name and active flag change; a default's classification stays active); `tax_classification_versions_rules` (no start before today; change only before taking effect); `hospital_gst_registrations_rules` (never edited or backdated; delete only before taking effect); `statutory_room_tax_rules_append_only`; `lab_tests_tax_classification` and `hospital_tax_defaults_classification` (active service classification); `medicines_tax_classification` (active goods classification); `hospital_tax_defaults_no_delete` |
+
+No index is added for the two nullable lab test and medicine foreign keys: classification lookups go from
+the item to the classification, and both tables are small per hospital. Revisit with M-11b if invoice
+building needs the reverse lookup.
+
+### Effect on existing data and behaviour
+
+- No existing row changes. The new columns are nullable with no default, so adding them rewrites nothing
+  (catalog-only change, brief lock per table).
+- The three new triggers on `lab_tests` and `medicines` fire only when the classification column is set or
+  changed, so Phase 6 and Phase 7 writes are unaffected (checked: price and reorder-level updates).
+- The tenant-scoped Prisma client scopes the four new hospital tables automatically (they have
+  `hospitalId`); the room rule is global reference data.
+- The whole file is one implicit transaction: any failure leaves no trace.
+
+### Validation (build environment, PostgreSQL 16.15, T-MIG-TAX-001)
+
+- Ten existing migrations applied to a scratch database, then rows of the kinds M-11a touches seeded (two
+  hospitals with admins and staff profiles, a lab test, a medicine, a private room and an ICU room).
+- M-11a applied as one multi-statement query (as Prisma sends it): existing rows identical by hash
+  (excluding the new, empty columns); new columns empty; room rule seeded once.
+- 79 behaviour checks, each in its own rolled-back transaction: classifications 14, versions 16, item
+  classifications 12, defaults and confirmation 11, GST registrations 20, room rule 4, existing tables 2. All
+  pass. Plus one two-session race: the same GSTIN for two hospitals at once; the second waits and is refused.
+- Rollback: injected failure at the end leaves schema and data identical; re-running on a migrated database
+  fails on the first statement and changes nothing; the manual reversal (`rollback.sql`) restores the exact
+  pre-M-11a schema and data and removes the migration record, and refuses to run once any tax
+  configuration exists.
+- Prisma: the proposed `schema.prisma` validates with Prisma's own schema WebAssembly (engine `c2990dca`,
+  Prisma 6.19.3; the CLI cannot run here because `binaries.prisma.sh` is blocked) and has 51 models and 41
+  enums; 195 of 195 comparisons between that schema and the migrated database match (columns, types,
+  nullability, defaults, keys, unique indexes, foreign keys and actions, enum values). The authoritative drift
+  check runs on macOS (below).
+- VM, with a client generated from the proposed schema: typecheck clean; API unit tests 1277/1277 with the
+  updated tenant-scope test (T-TEN-001: 47 scoped models, 4 global); lint and format clean. The VM was then
+  restored to the current schema (1277/1277 again).
+- Object counts after M-11a, measured with T-MIG-001's own queries: 51 tables, 50 triggers, 3 exclusion
+  constraints (before: 46, 42, 2).
+
+### Rollback behaviour
+
+1. **During application:** automatic. One transaction; a failure rolls everything back and Prisma records the
+   attempt as failed in `_prisma_migrations`. Send the error; do not edit the database by hand. Clearing the
+   failed record (`prisma migrate resolve --rolled-back`) is done only after the error is reviewed.
+2. **After a successful application:** Prisma has no down migrations. `rollback.sql` is a reviewed, tested
+   reversal for emergencies, run only with the owner's approval and only while no tax configuration exists
+   (it refuses otherwise). Once billing uses these tables, a mistake is corrected by a new migration, never
+   by reversal.
+3. **Last resort:** restore the backup taken in step 1 below, with approval.
+
+### macOS commands (only after the owner approves applying M-11a)
+
+On approval I will first move the files into place in a local commit (nothing pushed): the migration into
+`prisma/migrations/20261117200000_tax_configuration/`, the proposed `schema.prisma`, and the three test files.
+Then, from the repository root:
+
+```bash
+# 0. The expected commit, a clean tree (apart from your untracked .claude/ and "Claude outputs/"), services up
+git log --oneline -1
+git status --short
+pnpm infra:up && pnpm infra:ps
+
+# 1. Backup of the local database (contains patient data: keep it outside the repository; delete when done)
+docker compose -f docker/compose.dev.yml --env-file .env exec -T postgres \
+  sh -c 'pg_dump -U "$POSTGRES_USER" -d "$POSTGRES_DB" --format=custom' > ~/medcore-before-m11a.dump
+ls -lh ~/medcore-before-m11a.dump
+
+# 2. Read-only: the last applied migration (expect 20261117100000_prescription_events)
+docker compose -f docker/compose.dev.yml --env-file .env exec -T postgres \
+  sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Atc "SELECT migration_name FROM _prisma_migrations WHERE finished_at IS NOT NULL ORDER BY finished_at DESC LIMIT 1"'
+
+# 3. Client from the new schema
+pnpm --filter @medcore/api prisma:generate
+
+# 4. Read-only drift BEFORE applying: only additions, no DROP
+pnpm --filter @medcore/api prisma:drift > /tmp/m11a-drift-before.sql
+grep -c '^CREATE TABLE' /tmp/m11a-drift-before.sql   # expect 5
+grep -c '^CREATE TYPE' /tmp/m11a-drift-before.sql    # expect 4
+grep -c 'DROP' /tmp/m11a-drift-before.sql            # expect 0
+
+# 5. Apply the one pending migration (no shadow database, no reset)
+pnpm --filter @medcore/api prisma:deploy
+
+# 6. Read-only drift AFTER: expect "-- This is an empty migration."
+pnpm --filter @medcore/api prisma:drift
+
+# 7. Tests: unit, integration (12 suites including T-MIG-TAX-002..008), then Playwright with the stack running
+pnpm test && pnpm test:int
+pnpm --filter @medcore/e2e test:e2e
+```
+
+If step 4 shows any `DROP`, or counts other than 5 and 4, stop before step 5 and send the output.
