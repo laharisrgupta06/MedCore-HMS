@@ -116,6 +116,7 @@ security, performance (`EXPLAIN ANALYZE`, DB-019), responsive and accessibility 
 | T-FE-042 | FE, DEC-044 | `pharmacy-ui.test.tsx`: history timeline with actors on the pharmacy prescription screen | As specified | Pass | Pass | VM | 2026-11-17 |
 | T-XMOD-INT-001 | Plan section 14 | `test/cross-module.int-spec.ts`: consultation → prescription → verify → dispense → ready → handed over; the patient sees ISSUED, VERIFIED, DISPENSED, HANDED_OVER; consultation → lab order → approval → patient sees values and PDF | As specified | Pending | Not Run | **Mac** | |
 | T-E2E-007 | FE-002 | `e2e/tests/pharmacy.spec.ts`: three Phase 7 routes require sign-in | As specified | Pending | Not Run | **Mac** | |
+| T-E2E-000 | FE-002 | `e2e/global-setup.ts`: before any test, the web app and `/api/health` through the web proxy must answer 200; otherwise the run stops with both statuses and how to start the stack (added 2026-11-17 after a run where the API was not running and two auth tests failed on missing text) | Stops on a missing stack; passes on a healthy one | Checked against nothing running, a proxy answering 500, and a healthy server | Pass | VM | 2026-11-17 |
 | T-STA-001 | DEP-003 | Prettier, ESLint, TypeScript (all packages) | Clean | Clean | Pass | VM | 2026-11-16 |
 | T-STA-002 | SCOPE-021 | `pnpm build` (types, API, web) | Builds | Builds | Pass | VM | 2026-11-16 |
 | T-STA-003 | DB-001 | `prisma validate` schema revision 2 | Valid | Valid | Pass | VM (offline validator) | 2026-11-16 |
