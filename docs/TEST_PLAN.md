@@ -131,7 +131,7 @@ All integration suites listed above as "Not run" in earlier revisions ran in the
 
 | Test ID | Req. | Scenario | Expected | Phase | Status |
 | --- | --- | --- | --- | --- | --- |
-| T-MIG-001 | DB-020, DEC-019 | `test/constraints.int-spec.ts`: 44 tables, 31 triggers, 2 exclusion constraints, pgcrypto + btree_gist | Applies cleanly; constraints present | 1A | Written, not run (needs migration) |
+| T-MIG-001 | DB-020, DEC-019, DEC-044 | `test/constraints.int-spec.ts`: 46 tables, 42 triggers, 2 exclusion constraints, pgcrypto + btree_gist, and the two Phase 7 tables and 11 triggers by name (44 and 31 through M-06; updated 2026-11-17 after the macOS run failed on the old count, values measured on PostgreSQL 16) | Applies cleanly; constraints present | 1A | Written, not run (needs migration) |
 | T-MIG-002 | APPT-002, APPT-006 | Overlapping doctor appointment rejected by exclusion constraint; EMERGENCY allowed; patient overlap rejected | DB errors as designed | 1A | Written, not run |
 | T-MIG-003 | DEC-017 | Role/profile trigger: each of the 9 roles valid and invalid combinations at commit | Only valid combinations commit | 1A | Written, not run |
 | T-MIG-004 | DEC-018 | Child row pointing to a parent in another hospital rejected | FK violation | 1A | Written, not run |

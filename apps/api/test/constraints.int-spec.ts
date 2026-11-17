@@ -83,7 +83,7 @@ const at = (h: number, m = 0) => new Date(Date.UTC(2031, 0, 15, h, m));
 beforeAll(requireMigration);
 
 describe('T-MIG-001: database objects exist', () => {
-  it('has 44 tables, the triggers, both exclusion constraints and the extensions', async () => {
+  it('has 46 tables, 42 triggers, both exclusion constraints and the extensions', async () => {
     const [tables] = await prisma.$queryRaw<{ c: bigint }[]>`
       SELECT count(*) AS c FROM information_schema.tables
       WHERE table_schema = 'public' AND table_name <> '_prisma_migrations'`;
@@ -94,10 +94,40 @@ describe('T-MIG-001: database objects exist', () => {
       { c: bigint }[]
     >`SELECT count(*) AS c FROM pg_constraint WHERE contype = 'x'`;
     const ext = await prisma.$queryRaw<{ extname: string }[]>`SELECT extname FROM pg_extension`;
-    expect(Number(tables!.c)).toBe(44);
-    expect(Number(triggers!.c)).toBe(31);
+    // 44 tables and 31 triggers through M-06; M-08 and M-10 add one table each, M-09 and M-10 add
+    // 11 triggers (counts measured on PostgreSQL 16 after each migration, T-MIG-PH-002).
+    expect(Number(tables!.c)).toBe(46);
+    expect(Number(triggers!.c)).toBe(42);
     expect(Number(exclusions!.c)).toBe(2);
     expect(ext.map((e) => e.extname)).toEqual(expect.arrayContaining(['pgcrypto', 'btree_gist']));
+    // The Phase 7 objects by name, so a missing one cannot hide behind a correct total.
+    const names = await prisma.$queryRaw<{ n: string }[]>`
+      SELECT table_name AS n FROM information_schema.tables
+       WHERE table_schema = 'public' AND table_name IN ('expiry_reports', 'prescription_events')
+      UNION ALL
+      SELECT tgname FROM pg_trigger WHERE NOT tgisinternal AND tgname IN (
+        'stock_movements_append_only', 'stock_movements_system_quarantine',
+        'dispenses_append_only', 'dispenses_rules', 'dispenses_have_status',
+        'medicine_batches_status', 'medicine_batches_quarantine_has_ledger',
+        'prescriptions_rules', 'prescriptions_have_events',
+        'prescription_events_append_only', 'prescription_events_rules')`;
+    expect(names.map((x) => x.n).sort()).toEqual(
+      [
+        'dispenses_append_only',
+        'dispenses_have_status',
+        'dispenses_rules',
+        'expiry_reports',
+        'medicine_batches_quarantine_has_ledger',
+        'medicine_batches_status',
+        'prescription_events',
+        'prescription_events_append_only',
+        'prescription_events_rules',
+        'prescriptions_have_events',
+        'prescriptions_rules',
+        'stock_movements_append_only',
+        'stock_movements_system_quarantine',
+      ].sort(),
+    );
   });
 });
 
