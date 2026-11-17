@@ -41,9 +41,16 @@ const include = {
   },
   items: { include: { medicine: true, dispenses: true } },
   verifiedBy: { select: { firstName: true, lastName: true } },
+  events: {
+    orderBy: { occurredAt: 'asc' },
+    include: { actor: { select: { firstName: true, lastName: true } } },
+  },
 } as const;
 export { include as prescriptionInclude };
 export type Row = Prisma.PrescriptionGetPayload<{ include: typeof include }>;
+
+/** Another render attached the PDF first; this render's file is discarded. */
+class PdfAlreadyAttached extends Error {}
 
 const norm = (s: string) =>
   s
@@ -105,6 +112,13 @@ export const toView = (p: Row): PrescriptionView => {
       : null,
     cancelledAt: p.cancelledAt?.toISOString() ?? null,
     cancellationReason: p.cancellationReason,
+    history: p.events.map((e) => ({
+      kind: e.kind,
+      status: e.status,
+      occurredAt: e.occurredAt.toISOString(),
+      actor: e.actor ? { firstName: e.actor.firstName, lastName: e.actor.lastName } : null,
+      reason: e.reason,
+    })),
   };
 };
 
@@ -215,6 +229,16 @@ export class PrescriptionsService implements OnModuleInit {
             instructions: i.instructions || null,
           },
         });
+      // M-10: every prescription starts its history with ISSUED, in the same transaction.
+      await tx.prescriptionEvent.create({
+        data: {
+          hospitalId: r.hospitalId,
+          prescriptionId: p.id,
+          kind: 'ISSUED',
+          status: 'ISSUED',
+          actorId: actor.userId,
+        },
+      });
       return p.id;
     });
     await this.events.publish({
@@ -257,6 +281,17 @@ export class PrescriptionsService implements OnModuleInit {
           cancellationReason: dto.reason,
         },
       });
+      if (u.count === 1)
+        await tx.prescriptionEvent.create({
+          data: {
+            hospitalId: p.hospitalId,
+            prescriptionId: id,
+            kind: 'CANCELLED',
+            status: 'CANCELLED',
+            actorId: actor.userId,
+            reason: dto.reason,
+          },
+        });
       return u.count;
     });
     if (!changed)
@@ -468,22 +503,34 @@ export class PrescriptionsService implements OnModuleInit {
     });
     const key = `${job.hospitalId}/prescriptions/${p.id}-${randomUUID()}.pdf`;
     await this.storage.put(key, buf);
-    await this.prisma.$transaction(async (tx) => {
-      const f = await tx.fileAttachment.create({
-        data: {
-          hospitalId: job.hospitalId,
-          patientId: a.patientId,
-          medicalRecordId: p.medicalRecordId,
-          purpose: 'PRESCRIPTION_PDF',
-          storageKey: key,
-          originalName: `prescription-${p.id.slice(0, 8)}.pdf`,
-          mimeType: 'application/pdf',
-          sizeBytes: buf.length,
-          sha256: createHash('sha256').update(buf).digest('hex'),
-          uploadedById: a.doctor.userId,
-        },
+    const attached = await this.prisma
+      .$transaction(async (tx) => {
+        const f = await tx.fileAttachment.create({
+          data: {
+            hospitalId: job.hospitalId,
+            patientId: a.patientId,
+            medicalRecordId: p.medicalRecordId,
+            purpose: 'PRESCRIPTION_PDF',
+            storageKey: key,
+            originalName: `prescription-${p.id.slice(0, 8)}.pdf`,
+            mimeType: 'application/pdf',
+            sizeBytes: buf.length,
+            sha256: createHash('sha256').update(buf).digest('hex'),
+            uploadedById: a.doctor.userId,
+          },
+        });
+        // M-10: the PDF is attached once. If another render attached one first, roll this one back.
+        const u = await tx.prescription.updateMany({
+          where: { id: p.id, hospitalId: job.hospitalId, pdfFileId: null },
+          data: { pdfFileId: f.id },
+        });
+        if (u.count === 0) throw new PdfAlreadyAttached();
+        return true;
+      })
+      .catch((e) => {
+        if (e instanceof PdfAlreadyAttached) return false;
+        throw e;
       });
-      await tx.prescription.update({ where: { id: p.id }, data: { pdfFileId: f.id } });
-    });
+    if (!attached) await this.storage.remove(key);
   }
 }

@@ -52,6 +52,26 @@ export interface PrescriptionItem {
   dispensedQuantity: number;
 }
 
+export const PRESCRIPTION_EVENT_KINDS = [
+  'ISSUED',
+  'VERIFIED',
+  'DISPENSED',
+  'HANDED_OVER',
+  'CANCELLED',
+  'BASELINE',
+] as const;
+export type PrescriptionEventKind = (typeof PRESCRIPTION_EVENT_KINDS)[number];
+
+/** M-10: one append-only step of a prescription's history; BASELINE marks where recording began. */
+export interface PrescriptionEvent {
+  kind: PrescriptionEventKind;
+  /** The prescription's status after this step. */
+  status: PrescriptionStatus;
+  occurredAt: string;
+  actor: { firstName: string; lastName: string } | null;
+  reason: string | null;
+}
+
 export interface Prescription {
   id: string;
   status: PrescriptionStatus;
@@ -73,6 +93,8 @@ export interface Prescription {
   verifiedBy: { firstName: string; lastName: string } | null;
   cancelledAt: string | null;
   cancellationReason: string | null;
+  /** Oldest first. */
+  history: PrescriptionEvent[];
 }
 
 export interface IssuePrescriptionRequest {

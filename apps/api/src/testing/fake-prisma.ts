@@ -7,6 +7,7 @@
  * integration tests (T-MIG-*, T-AUTH-INT-001 on macOS).
  */
 import { randomUUID } from 'node:crypto';
+import { localDate } from '../common/time/zoned';
 import { Prisma, type AuditLog, type Hospital, type Patient, type User } from '@prisma/client';
 
 type Row = Record<string, unknown>;
@@ -37,6 +38,8 @@ function same(a: unknown, b: unknown): boolean {
   if (a instanceof Date && b instanceof Date) return a.getTime() === b.getTime();
   return a === b;
 }
+
+const WRITES = new Set(['create', 'update', 'updateMany', 'delete', 'deleteMany', 'createMany']);
 
 function isPlain(v: unknown): v is Row {
   return typeof v === 'object' && v !== null && !(v instanceof Date) && !Array.isArray(v);
@@ -127,6 +130,7 @@ const MODEL_OF: Record<string, string> = {
   dispense: 'Dispense',
   stockMovement: 'StockMovement',
   expiryReport: 'ExpiryReport',
+  prescriptionEvent: 'PrescriptionEvent',
   address: 'Address',
   labTest: 'LabTest',
   labTestRange: 'LabTestRange',
@@ -196,6 +200,11 @@ const RELATIONS: Record<string, Record<string, Relation>> = {
     medicalRecord: { model: 'MedicalRecord', local: 'medicalRecordId', foreign: 'id' },
     items: { model: 'PrescriptionItem', local: 'id', foreign: 'prescriptionId', many: true },
     verifiedBy: { model: 'User', local: 'verifiedById', foreign: 'id' },
+    events: { model: 'PrescriptionEvent', local: 'id', foreign: 'prescriptionId', many: true },
+  },
+  PrescriptionEvent: {
+    actor: { model: 'User', local: 'actorId', foreign: 'id' },
+    prescription: { model: 'Prescription', local: 'prescriptionId', foreign: 'id' },
   },
   PrescriptionItem: {
     prescription: { model: 'Prescription', local: 'prescriptionId', foreign: 'id' },
@@ -216,6 +225,7 @@ const RELATIONS: Record<string, Record<string, Relation>> = {
     batch: { model: 'MedicineBatch', local: 'batchId', foreign: 'id' },
     performedBy: { model: 'User', local: 'performedById', foreign: 'id' },
     dispense: { model: 'Dispense', local: 'dispenseId', foreign: 'id' },
+    expiryReport: { model: 'ExpiryReport', local: 'expiryReportId', foreign: 'id' },
   },
   LabTest: { ranges: { model: 'LabTestRange', local: 'id', foreign: 'labTestId', many: true } },
   LabOrder: {
@@ -319,7 +329,8 @@ const DEFAULTS: Record<string, Row> = {
   FamilyHistory: { relation: null, notes: null },
   FileAttachment: { patientId: null, medicalRecordId: null },
   Medicine: { genericName: null, isActive: true, lowStockSince: null },
-  StockMovement: { reason: null, dispenseId: null, performedById: null },
+  StockMovement: { reason: null, dispenseId: null, performedById: null, expiryReportId: null },
+  PrescriptionEvent: { actorId: null, reason: null },
   MedicineBatch: { status: 'ACTIVE', supplierId: null },
   Prescription: {
     status: 'ISSUED',
@@ -401,7 +412,11 @@ function checkError(name: string): Error {
  * append-only, ledger rows obey the sign/actor/reason/link CHECKs, batch quantity never below 0.
  */
 function guardPharmacy(model: string, rows: Row[], op: 'create' | 'update' | 'delete'): void {
-  if ((model === 'StockMovement' || model === 'Dispense') && op !== 'create' && rows.length)
+  if (
+    (model === 'StockMovement' || model === 'Dispense' || model === 'PrescriptionEvent') &&
+    op !== 'create' &&
+    rows.length
+  )
     throw triggerError(
       `${op.toUpperCase()} on ${model} is not permitted: this table is append-only`,
     );
@@ -414,8 +429,11 @@ function guardPharmacy(model: string, rows: Row[], op: 'create' | 'update' | 'de
     const q = r.quantity as number;
     const reason = typeof r.reason === 'string' && r.reason.trim().length > 0;
     if (q === 0) throw checkError('stock_movements_nonzero_chk');
-    if (r.performedById == null && !(r.type === 'QUARANTINE' && reason))
-      throw checkError('stock_movements_actor_chk');
+    if (
+      (r.performedById == null) !== (r.expiryReportId != null) ||
+      (r.expiryReportId != null && !(r.type === 'QUARANTINE' && reason))
+    )
+      throw checkError('stock_movements_system_chk');
     const sign =
       (r.type === 'RECEIPT' && q > 0) ||
       (r.type === 'DISPENSE' && q < 0) ||
@@ -613,6 +631,223 @@ export class FakePrisma {
     }
   }
 
+  /**
+   * Mirrors the M-09 and M-10 triggers: batch status rules and system quarantines, the prescription
+   * workflow, prescription events and dispenses. `before` is null for inserts. Commit-time checks are
+   * queued in `deferred` and run when the transaction commits.
+   */
+  private workflow(model: string, before: Row | null, row: Row): void {
+    const t = (m: string) => this.table(m);
+    const same = (a: unknown, b: unknown) =>
+      a instanceof Date && b instanceof Date ? a.getTime() === b.getTime() : a === b;
+    const dateOf = (d: unknown) => (d as Date).toISOString().slice(0, 10);
+    const itemsOf = (rxId: unknown) =>
+      t('PrescriptionItem').filter((i) => i.prescriptionId === rxId);
+    const given = (itemId: unknown) =>
+      t('Dispense')
+        .filter((d) => d.prescriptionItemId === itemId)
+        .reduce((n, d) => n + (d.quantity as number), 0);
+    if (model === 'MedicineBatch') {
+      if (!before && row.status !== 'ACTIVE') throw triggerError('A new batch must be ACTIVE');
+      if (before?.status === 'QUARANTINED' && row.status !== 'QUARANTINED')
+        throw triggerError('A quarantined batch stays quarantined');
+      if (row.status === 'DEPLETED' && row.quantity !== 0)
+        throw triggerError('A depleted batch holds no units');
+      if (
+        before &&
+        before.status !== 'QUARANTINED' &&
+        row.status === 'QUARANTINED' &&
+        (row.quantity as number) > 0
+      )
+        this.deferred.push(() => {
+          if (
+            !t('StockMovement').some(
+              (m) => m.batchId === row.id && m.type === 'QUARANTINE' && this.touched.has(m),
+            )
+          )
+            throw triggerError(
+              'A quarantine needs its QUARANTINE ledger row in the same transaction',
+            );
+        });
+    }
+    if (model === 'StockMovement' && !before && row.expiryReportId != null) {
+      const report = t('ExpiryReport').find(
+        (r) => r.id === row.expiryReportId && r.hospitalId === row.hospitalId,
+      );
+      const hospital = t('Hospital').find((h) => h.id === row.hospitalId);
+      if (!report || !this.touched.has(report))
+        throw triggerError(
+          'A system quarantine must be written with its expiry report, in the same transaction',
+        );
+      if (dateOf(report.runDate) !== localDate(this.clock(), hospital!.timezone as string))
+        throw triggerError(
+          'The expiry report of a system quarantine must be dated today in the hospital time zone',
+        );
+      if (
+        !(report.items as Row[]).some((i) => i.batchId === row.batchId && i.kind === 'QUARANTINED')
+      )
+        throw triggerError('The expiry report does not list this batch as quarantined');
+      const b = t('MedicineBatch').find(
+        (x) => x.id === row.batchId && x.hospitalId === row.hospitalId,
+      );
+      if (
+        !b ||
+        dateOf(b.expiresOn) > dateOf(report.runDate) ||
+        b.status !== 'QUARANTINED' ||
+        !this.touched.has(b) ||
+        row.quantity !== b.quantity
+      )
+        throw triggerError(
+          'A system quarantine must be an expired batch quarantined in this transaction, with its physical quantity',
+        );
+      if (t('StockMovement').some((m) => m.batchId === row.batchId && m.expiryReportId != null))
+        throw unique(['batchId']);
+    }
+    if (model === 'Prescription') {
+      if (!before) {
+        if (
+          row.status !== 'ISSUED' ||
+          row.verifiedAt != null ||
+          row.verifiedById != null ||
+          row.cancelledAt != null ||
+          row.pdfFileId != null
+        )
+          throw triggerError('A new prescription starts ISSUED, unverified, without a PDF');
+        this.deferred.push(() => {
+          if (
+            !t('PrescriptionEvent').some(
+              (e) => e.prescriptionId === row.id && e.kind === 'ISSUED' && this.touched.has(e),
+            )
+          )
+            throw triggerError('A new prescription needs its ISSUED event');
+        });
+        return;
+      }
+      for (const k of [
+        'hospitalId',
+        'medicalRecordId',
+        'notes',
+        'issuedAt',
+        'allergyOverrideReason',
+      ])
+        if (!same(before[k], row[k]))
+          throw triggerError('A prescription is never edited after issue');
+      if (before.pdfFileId != null && row.pdfFileId !== before.pdfFileId)
+        throw triggerError('The prescription PDF is attached once');
+      if (before.verifiedAt != null) {
+        if (!same(row.verifiedAt, before.verifiedAt) || row.verifiedById !== before.verifiedById)
+          throw triggerError('A verification cannot change');
+      } else if (row.verifiedAt != null || row.verifiedById != null) {
+        if (row.verifiedAt == null || row.verifiedById == null || before.status !== 'ISSUED')
+          throw triggerError('Verification needs who and when, while the prescription is ISSUED');
+      }
+      const cancelling = before.status !== 'CANCELLED' && row.status === 'CANCELLED';
+      if (
+        !cancelling &&
+        ['cancelledAt', 'cancelledById', 'cancellationReason'].some((k) => !same(before[k], row[k]))
+      )
+        throw triggerError('Cancellation details are recorded only when cancelling');
+      const newlyVerified = before.verifiedAt == null && row.verifiedAt != null;
+      if (newlyVerified)
+        this.deferred.push(() => {
+          if (
+            !t('PrescriptionEvent').some(
+              (e) => e.prescriptionId === row.id && e.kind === 'VERIFIED' && this.touched.has(e),
+            )
+          )
+            throw triggerError('A verification needs its VERIFIED event');
+        });
+      if (row.status === before.status) return;
+      const moves: Record<string, string[]> = {
+        ISSUED: ['PARTIALLY_DISPENSED', 'READY_FOR_PICKUP', 'CANCELLED'],
+        PARTIALLY_DISPENSED: ['READY_FOR_PICKUP'],
+        READY_FOR_PICKUP: ['DISPENSED'],
+      };
+      if (!(moves[before.status as string] ?? []).includes(row.status as string))
+        throw triggerError(`A prescription cannot move from ${before.status} to ${row.status}`);
+      const items = itemsOf(row.id);
+      const dispensed = items.some((i) => given(i.id) > 0);
+      const incomplete = items.some((i) => (i.quantity as number) > given(i.id));
+      if (row.status === 'CANCELLED' && dispensed)
+        throw triggerError('A prescription with dispensed items cannot be cancelled');
+      if (
+        ['PARTIALLY_DISPENSED', 'READY_FOR_PICKUP'].includes(row.status as string) &&
+        (row.verifiedAt == null || !dispensed)
+      )
+        throw triggerError('Dispensing needs a verified prescription and at least one dispense');
+      if (row.status === 'PARTIALLY_DISPENSED' && !incomplete)
+        throw triggerError(
+          'Every item is complete: the prescription is ready, not partly dispensed',
+        );
+      if (row.status === 'READY_FOR_PICKUP' && incomplete)
+        throw triggerError('Ready for collection needs every item fully dispensed');
+      this.deferred.push(() => {
+        const live = t('Prescription').find((p) => p.id === row.id)!;
+        if (
+          !t('PrescriptionEvent').some(
+            (e) =>
+              e.prescriptionId === row.id &&
+              e.status === live.status &&
+              e.kind !== 'BASELINE' &&
+              this.touched.has(e),
+          )
+        )
+          throw triggerError('A prescription status change needs its history event');
+      });
+    }
+    if (model === 'PrescriptionEvent') {
+      if (before)
+        throw triggerError(
+          'UPDATE on PrescriptionEvent is not permitted: this table is append-only',
+        );
+      if (row.kind === 'BASELINE')
+        throw triggerError('BASELINE events are written only by migration M-10');
+      const p = t('Prescription').find(
+        (x) => x.id === row.prescriptionId && x.hospitalId === row.hospitalId,
+      );
+      if (!p || !this.touched.has(p) || p.status !== row.status)
+        throw triggerError('A prescription event must be written with the change it records');
+      if (row.kind === 'VERIFIED' && (p.verifiedAt == null || p.verifiedById !== row.actorId))
+        throw triggerError('A VERIFIED event must match the recorded verification');
+      if (row.actorId == null) throw checkError('prescription_events_actor_chk');
+      if (row.kind === 'CANCELLED' && !(typeof row.reason === 'string' && row.reason.trim()))
+        throw checkError('prescription_events_reason_chk');
+      if (
+        ['ISSUED', 'VERIFIED', 'HANDED_OVER', 'CANCELLED'].includes(row.kind as string) &&
+        t('PrescriptionEvent').some(
+          (e) => e.prescriptionId === row.prescriptionId && e.kind === row.kind,
+        )
+      )
+        throw unique(['prescriptionId', 'kind']);
+    }
+    if (model === 'Dispense' && !before) {
+      const item = t('PrescriptionItem').find((i) => i.id === row.prescriptionItemId);
+      const p =
+        item &&
+        t('Prescription').find(
+          (x) => x.id === item.prescriptionId && x.hospitalId === row.hospitalId,
+        );
+      if (
+        !p ||
+        !['ISSUED', 'PARTIALLY_DISPENSED'].includes(p.status as string) ||
+        p.verifiedAt == null
+      )
+        throw triggerError('Dispensing needs a verified prescription that is waiting');
+      if ((row.quantity as number) + given(item!.id) > (item!.quantity as number))
+        throw triggerError('More than the prescribed quantity cannot be dispensed');
+      this.deferred.push(() => {
+        const live = t('Prescription').find((x) => x.id === p.id)!;
+        if (
+          !['PARTIALLY_DISPENSED', 'READY_FOR_PICKUP'].includes(live.status as string) ||
+          !this.touched.has(live)
+        )
+          throw triggerError(
+            'A dispense needs its prescription status update in the same transaction',
+          );
+      });
+    }
+  }
+
   /** Mirrors the approved-lab triggers in constraints.sql: approved orders and their results are locked. */
   private guardLab(model: string, rows: Row[], data: Row): void {
     if (model === 'LabResult') {
@@ -671,6 +906,8 @@ export class FakePrisma {
       return { ...base, receivedAt: new Date(), updatedAt: new Date(), ...(DEFAULTS[model] ?? {}) };
     if (model === 'Dispense')
       return { ...base, dispensedAt: new Date(), ...(DEFAULTS[model] ?? {}) };
+    if (model === 'PrescriptionEvent')
+      return { id: base.id, occurredAt: new Date(), ...(DEFAULTS[model] ?? {}) };
     return { ...base, updatedAt: new Date(), ...(DEFAULTS[model] ?? {}) };
   }
 
@@ -754,7 +991,9 @@ export class FakePrisma {
           this.guardLab(model, [row], a.data as Row);
           guardPharmacy(model, [row], 'create');
           this.checkUnique(model, row);
+          this.workflow(model, null, row);
           rows.push(row);
+          this.touched.add(row);
           return Promise.resolve(shape(row));
         }
         case 'update': {
@@ -767,7 +1006,9 @@ export class FakePrisma {
           applyData(next, a.data as Row);
           guardPharmacy(model, model === 'StockMovement' ? [] : [next], 'create');
           this.checkUnique(model, next, r);
+          this.workflow(model, r, next);
           applyData(r, a.data as Row);
+          this.touched.add(r);
           if (model === 'User') r.updatedAt = new Date();
           return Promise.resolve(shape(r));
         }
@@ -798,7 +1039,8 @@ export class FakePrisma {
             return n;
           });
           guardPharmacy(model, model === 'StockMovement' ? [] : nexts, 'create');
-          hit.forEach((r) => applyData(r, a.data as Row));
+          hit.forEach((r, i) => this.workflow(model, r, nexts[i]!));
+          hit.forEach((r) => (applyData(r, a.data as Row), this.touched.add(r)));
           return Promise.resolve({ count: hit.length });
         }
         case 'createMany': {
@@ -806,7 +1048,9 @@ export class FakePrisma {
             const row = { ...this.defaults(model), ...d };
             guardPharmacy(model, [row], 'create');
             this.checkUnique(model, row);
+            this.workflow(model, null, row);
             rows.push(row);
+            this.touched.add(row);
           }
           return Promise.resolve({ count: (a.data as Row[]).length });
         }
@@ -836,10 +1080,13 @@ export class FakePrisma {
     return Object.fromEntries(
       ops.map((op) => [
         op,
-        (args: Args = {}) =>
-          hook
-            ? hook({ model, operation: op, args, query: (x) => this.exec(model, op, x) })
-            : this.exec(model, op, args),
+        (args: Args = {}) => {
+          const run = () =>
+            hook
+              ? hook({ model, operation: op, args, query: (x) => this.exec(model, op, x) })
+              : this.exec(model, op, args);
+          return WRITES.has(op) && this.txDepth === 0 ? this.$transaction(() => run()) : run();
+        },
       ]),
     );
   }
@@ -866,6 +1113,7 @@ export class FakePrisma {
   dispense = this.delegate('Dispense');
   stockMovement = this.delegate('StockMovement');
   expiryReport = this.delegate('ExpiryReport');
+  prescriptionEvent = this.delegate('PrescriptionEvent');
   labOrder = this.delegate('LabOrder');
 
   /** Query extensions, as used by TenantPrismaService. */
@@ -879,20 +1127,63 @@ export class FakePrisma {
     return client;
   }
 
-  /** Rolls back users and patients created inside a failed transaction. */
+  /** Clock used for "today in the hospital time zone" checks (M-09); tests may set it. */
+  clock: () => Date = () => new Date();
+  private txDepth = 0;
+  /** Rows created or changed by the current transaction (PostgreSQL: xmin = current transaction). */
+  private touched = new Set<Row>();
+  /** Checks PostgreSQL runs at commit (DEFERRABLE INITIALLY DEFERRED constraint triggers). */
+  private deferred: (() => void)[] = [];
+
+  private snapshot() {
+    const arrays = [
+      this.hospitals,
+      this.users,
+      this.patients,
+      this.audit,
+      ...this.extra.values(),
+    ] as Row[][];
+    return {
+      tables: new Map(this.extra),
+      arrays: arrays.map((a) => [a, [...a]] as const),
+      values: new Map(arrays.flat().map((r) => [r, { ...r }])),
+    };
+  }
+
+  private restore(snap: ReturnType<FakePrisma['snapshot']>): void {
+    for (const [a, members] of snap.arrays) a.splice(0, a.length, ...members);
+    for (const [row, values] of snap.values) {
+      for (const k of Object.keys(row)) if (!(k in values)) delete row[k];
+      Object.assign(row, values);
+    }
+    this.extra.clear();
+    for (const [k, v] of snap.tables) this.extra.set(k, v);
+  }
+
+  /**
+   * One transaction: a failure anywhere (including the commit-time checks) restores every table
+   * and row value, as PostgreSQL rolls back. Writes outside a transaction run as their own.
+   */
   async $transaction<T>(fn: (tx: this) => Promise<T>): Promise<T> {
-    const users = [...this.users];
-    const patients = [...this.patients];
-    const extra: [string, Row[]][] = [...this.extra.entries()].map(([k, v]) => [k, [...v]]);
+    const snap = this.txDepth === 0 ? this.snapshot() : null;
+    this.txDepth++;
     try {
-      return await fn(this);
+      const result = await fn(this);
+      if (this.txDepth === 1) {
+        const checks = this.deferred;
+        this.deferred = [];
+        for (const check of checks) check();
+      }
+      return result;
     } catch (e) {
-      // Delegates read the arrays through table(), so reassignment is visible.
-      this.users = users;
-      this.patients = patients;
-      this.extra.clear();
-      for (const [k, v] of extra) this.extra.set(k, v);
+      if (snap) {
+        this.restore(snap);
+        this.deferred = [];
+      }
       throw e;
+    } finally {
+      this.txDepth--;
+      if (this.txDepth === 0) this.touched.clear();
     }
   }
 

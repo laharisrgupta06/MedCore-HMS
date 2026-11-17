@@ -12,7 +12,10 @@ import Link from 'next/link';
 import { useState } from 'react';
 import { PageHeader } from '@/components/app/app-shell';
 import { when } from '@/components/emr/shared';
-import { PrescriptionStatusBadge } from '@/components/prescriptions/prescription-card';
+import {
+  PrescriptionStatusBadge,
+  PrescriptionTimeline,
+} from '@/components/prescriptions/prescription-card';
 import { Alert } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { DataTable, Pagination } from '@/components/ui/data-table';
@@ -362,6 +365,11 @@ export function PharmacyPrescriptionView({ id }: { id: string }) {
             </div>
           </Panel>
         )}
+        <Panel title="History">
+          <div className="p-5">
+            <PrescriptionTimeline rx={p} tz={tz} />
+          </div>
+        </Panel>
         {p.status === 'CANCELLED' && (
           <Alert tone="info">
             This prescription was cancelled

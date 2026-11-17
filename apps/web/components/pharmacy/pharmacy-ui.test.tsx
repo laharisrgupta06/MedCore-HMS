@@ -87,6 +87,7 @@ const rx = (over: Partial<Prescription> = {}): Prescription => ({
   verifiedBy: null,
   cancelledAt: null,
   cancellationReason: null,
+  history: [],
   ...over,
 });
 
@@ -176,6 +177,46 @@ describe('PharmacyPrescriptionView', () => {
         method: 'POST',
         body: { items: [{ itemId: 'i1', quantity: 8 }] },
       }),
+    );
+  });
+
+  it('shows the append-only history, including who acted (M-10)', async () => {
+    signIn('PHARMACIST');
+    serve(
+      rx({
+        status: 'READY_FOR_PICKUP',
+        verifiedAt: '2026-11-16T06:00:00.000Z',
+        history: [
+          {
+            kind: 'ISSUED',
+            status: 'ISSUED',
+            occurredAt: '2026-11-16T05:00:00.000Z',
+            actor: { firstName: 'Dee', lastName: 'Rao' },
+            reason: null,
+          },
+          {
+            kind: 'VERIFIED',
+            status: 'ISSUED',
+            occurredAt: '2026-11-16T06:00:00.000Z',
+            actor: { firstName: 'Phil', lastName: 'Ma' },
+            reason: null,
+          },
+          {
+            kind: 'DISPENSED',
+            status: 'READY_FOR_PICKUP',
+            occurredAt: '2026-11-16T06:10:00.000Z',
+            actor: { firstName: 'Phil', lastName: 'Ma' },
+            reason: null,
+          },
+        ],
+      }),
+      [],
+      [],
+    );
+    wrap(<PharmacyPrescriptionView id="rx1" />);
+    const list = await screen.findByRole('list', { name: 'Prescription history' });
+    expect(list.textContent).toMatch(
+      /Issued.*Dee Rao.*Verified by the pharmacy.*Phil Ma.*Dispensed, ready for collection/,
     );
   });
 

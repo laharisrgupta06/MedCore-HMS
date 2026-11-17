@@ -183,7 +183,7 @@ Phase 6 Mac run 2026-11-16 23:07 (owner report): M-06 applied, generate ok, drif
 
 | Task ID | Req. | Task | Status | Tests |
 | --- | --- | --- | --- | --- |
-| 7-A1 | DEC-042 | Migrations M-07 `medicines_low_stock_since`, M-08 `expiry_reports`, M-09 `pharmacy_ledger_integrity`; validated on PostgreSQL 16 (empty database and one with existing stock, 19 rule checks) | Review: awaiting owner approval to apply | T-MIG-PH-001, T-PHARM-INT-001 |
+| 7-A1 | DEC-042, DEC-044 | Migrations M-07 `medicines_low_stock_since`, M-08 `expiry_reports`, M-09 `pharmacy_ledger_integrity` (revised: Layer A), M-10 `prescription_events`; approved 2026-11-17 13:38; validated on PostgreSQL 16 (T-MIG-PH-002) | Approved; to apply on macOS after the owner's read-only status query | T-MIG-PH-001, T-PHARM-INT-001 |
 | 7-B1 | PHARM-001, PHARM-004 | Batches: receive (RECEIPT entry, expired or impossible dates refused), FIFO list with costs for pharmacy and admins, quarantine with reason (quantity unchanged), adjustments with reason never below zero | Done (VM) | T-PHARM-HTTP-001, 005 |
 | 7-B2 | PHARM-002, PHARM-006, TEST-014 | Queue, verify, FIFO dispense with row lock and conditional decrements, partial dispense, READY_FOR_PICKUP, hand-over; cancelled refused | Done (VM) | T-PHARM-HTTP-002..004, T-PHARM-INT-001 |
 | 7-B3 | PHARM-003, NOTIF-008 | Low-stock state strictly below the reorder level, one `stock.low` per crossing, cleared on restock; alerts endpoint; Phase 5 badge rule aligned | Done (VM) | T-PHARM-HTTP-006, T-FE-026 |
@@ -191,10 +191,12 @@ Phase 6 Mac run 2026-11-16 23:07 (owner report): M-06 applied, generate ok, drif
 | 7-B5 | TEN-002/003, TEST-011 | Two-hospital isolation for every pharmacy route and the job | Done (VM) | T-PHARM-HTTP-009, T-PHARM-INT-001, T-RBAC-001g |
 | 7-B6 | DEC-043 | Timed jobs off in integration tests (`SCHEDULED_JOBS`, forced off by the test setup), on for `pnpm dev`; explicit runs for test hospitals only | Done (VM) | T-JOBS-001, T-PHARM-HTTP-012, T-PHARM-INT-001 |
 | 7-B7 | DEC-043 | Stock accounting across quarantine: physical quantity, QUARANTINE figure, ledger balance and available stock verified before and after manual and nightly quarantine and disposal | Done (VM) | T-PHARM-HTTP-010, 011, T-PHARM-INT-001 |
+| 7-B8 | DEC-044, PHARM-006 | Append-only prescription history written with every issue, verification, dispense, hand-over and cancellation; status workflow and dispense rules in the database; evidence-only backfill; history in the API and on the pharmacy screen; PDF attached once | Done (VM) | T-RX-HTTP-006/007, T-PHARM-HTTP-013, T-FAKE-001, T-FE-042, T-PHARM-INT-001 |
+| 7-B9 | DEC-044 | M-09 Layer A: system quarantines accepted only as the nightly run writes them; batch status rules; nightly run reordered (quarantine, report, linked rows) | Done (VM) | T-MIG-PH-002, T-FAKE-001, T-PHARM-INT-001 |
 | 7-C1 | Plan section 14 | Cross-module test: consultation to dispense and hand-over; consultation to lab approval and patient report | Written; Mac run pending | T-XMOD-INT-001 |
 | 7-D1 | FE | Pharmacy queue, prescription screen with verification, FIFO preview and hand-over; Inventory (renamed Medicines) with stock view, receive, quarantine, adjust, ledger; Pharmacy alerts; navigation | Done (VM) | T-FE-036..041, T-E2E-007 |
 
-Phase 7 built and checked in the VM 2026-11-16 (after DEC-043): API 1271/1271, web 54/54, lint, format, typecheck, build. Pending: owner approval of M-07/M-08/M-09, then on macOS `prisma:deploy`, `prisma:generate`, `prisma:drift`, `pnpm test:int`, Playwright.
+Phase 7 built and checked in the VM 2026-11-17 (after DEC-044): API 1277/1277, web 55/55, lint, format, typecheck, build; M-07 to M-10 validated on PostgreSQL 16. Pending: owner approval of M-07/M-08/M-09, then on macOS `prisma:deploy`, `prisma:generate`, `prisma:drift`, `pnpm test:int`, Playwright.
 
 ## Phases 2–14 (from the roadmap; detailed breakdown added when each phase starts)
 
@@ -213,3 +215,4 @@ Phase 7 built and checked in the VM 2026-11-16 (after DEC-043): API 1271/1271, w
 | P12-01..04 | SEC-001..015 | Security review against [SECURITY.md](SECURITY.md); upload scanning; dependency audit; audit viewer | LEAD, QA | High | Not Started |
 | P13-01..03 | TEST-001..004, DEL-009 | Coverage to targets, E2E journeys, coverage report | QA | High | Not Started |
 | P14-01..08 | SCOPE-021..023, DEP-001..006, DEL-001..011 | Production Compose, Dockerfile, Nginx TLS, AWS/Vercel, Sentry, seed data, README, report, video | LEAD | High | Not Started |
+| P14-09 | SEC (DEC-044, R-11) | **Mandatory security requirement:** separate database accounts for migrations (owner), the application and background jobs. The application account is not owner or superuser and cannot insert `expiry_reports` or system quarantine rows; the job worker uses its own connection setting; the M-09 trigger additionally checks the job account; development, CI and deployment documented. Phase 14 cannot be marked Done without it | LEAD | Critical | Not Started |

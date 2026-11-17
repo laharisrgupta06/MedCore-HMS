@@ -187,6 +187,15 @@ enum DoseFrequency {
   SOS
 }
 
+enum PrescriptionEventKind {
+  ISSUED
+  VERIFIED
+  DISPENSED
+  HANDED_OVER
+  CANCELLED
+  BASELINE
+}
+
 enum PrescriptionStatus {
   ISSUED
   /// Prepared and waiting for collection (PRD 7.8 "Prescription ready at pharmacy").
@@ -371,6 +380,7 @@ model Hospital {
   vaccinations        Vaccination[]
   familyHistory       FamilyHistory[]
   files               FileAttachment[]
+  prescriptionEvents  PrescriptionEvent[]
   expiryReports       ExpiryReport[]
   medicines           Medicine[]
   suppliers           Supplier[]
@@ -448,6 +458,7 @@ model User {
   paymentsReceived           Payment[]            @relation("PaymentReceivedBy")
   paymentsReconciled         Payment[]            @relation("PaymentReconciledBy")
   prescriptionsVerified      Prescription[]       @relation("PrescriptionVerifiedBy")
+  prescriptionEvents         PrescriptionEvent[]  @relation("PrescriptionEventActor")
   prescriptionsCancelled     Prescription[]       @relation("PrescriptionCancelledBy")
   notifications              Notification[]       @relation("NotificationRecipient")
   notificationsSameTenant    Notification[]       @relation("NotificationRecipientSameTenant")
@@ -1115,21 +1126,24 @@ model MedicineBatch {
 
 /// Signed quantity change ledger for every batch.
 model StockMovement {
-  id            String            @id @default(uuid()) @db.Uuid
-  hospitalId    String            @db.Uuid
-  batchId       String            @db.Uuid
-  type          StockMovementType
-  quantity      Int
-  reason        String?
-  dispenseId    String?           @unique @db.Uuid
-  /// Null only for automatic QUARANTINE rows written by the nightly expiry run (M-09 CHECK).
-  performedById String?           @db.Uuid
-  createdAt     DateTime          @default(now()) @db.Timestamptz(3)
+  id             String            @id @default(uuid()) @db.Uuid
+  hospitalId     String            @db.Uuid
+  batchId        String            @db.Uuid
+  type           StockMovementType
+  quantity       Int
+  reason         String?
+  dispenseId     String?           @unique @db.Uuid
+  /// Null only for system QUARANTINE rows of the nightly expiry run, which link expiryReportId (M-09).
+  performedById  String?           @db.Uuid
+  /// The nightly report a system quarantine belongs to (M-09 trigger checks it was written with it).
+  expiryReportId String?           @db.Uuid
+  createdAt      DateTime          @default(now()) @db.Timestamptz(3)
 
-  hospital    Hospital      @relation(fields: [hospitalId], references: [id], onDelete: Restrict)
-  batch       MedicineBatch @relation(fields: [batchId, hospitalId], references: [id, hospitalId], onDelete: Restrict)
-  dispense    Dispense?     @relation(fields: [dispenseId, hospitalId], references: [id, hospitalId], onDelete: Restrict)
-  performedBy User?         @relation(fields: [performedById, hospitalId], references: [id, hospitalId], onDelete: Restrict)
+  hospital     Hospital      @relation(fields: [hospitalId], references: [id], onDelete: Restrict)
+  batch        MedicineBatch @relation(fields: [batchId, hospitalId], references: [id, hospitalId], onDelete: Restrict)
+  dispense     Dispense?     @relation(fields: [dispenseId, hospitalId], references: [id, hospitalId], onDelete: Restrict)
+  performedBy  User?         @relation(fields: [performedById, hospitalId], references: [id, hospitalId], onDelete: Restrict)
+  expiryReport ExpiryReport? @relation(fields: [expiryReportId, hospitalId], references: [id, hospitalId], onDelete: Restrict)
 
   @@unique([dispenseId, hospitalId])
   @@index([batchId, createdAt])
@@ -1155,10 +1169,11 @@ model Prescription {
   /// Why the doctor prescribed despite a recorded allergy (DEC-040 D4); shown to the pharmacist.
   allergyOverrideReason String?
 
-  hospital      Hospital           @relation(fields: [hospitalId], references: [id], onDelete: Restrict)
-  medicalRecord MedicalRecord      @relation(fields: [medicalRecordId, hospitalId], references: [id, hospitalId], onDelete: Restrict)
-  pdfFile       FileAttachment?    @relation("PrescriptionPdf", fields: [pdfFileId, hospitalId], references: [id, hospitalId], onDelete: Restrict)
+  hospital      Hospital            @relation(fields: [hospitalId], references: [id], onDelete: Restrict)
+  medicalRecord MedicalRecord       @relation(fields: [medicalRecordId, hospitalId], references: [id, hospitalId], onDelete: Restrict)
+  pdfFile       FileAttachment?     @relation("PrescriptionPdf", fields: [pdfFileId, hospitalId], references: [id, hospitalId], onDelete: Restrict)
   items         PrescriptionItem[]
+  events        PrescriptionEvent[]
 
   verifiedBy  User? @relation("PrescriptionVerifiedBy", fields: [verifiedById, hospitalId], references: [id, hospitalId], onDelete: Restrict)
   cancelledBy User? @relation("PrescriptionCancelledBy", fields: [cancelledById, hospitalId], references: [id, hospitalId], onDelete: Restrict)
@@ -1172,6 +1187,27 @@ model Prescription {
 
 /// The prescription to medicine many-to-many, carrying per-item dosage (PRD section 05).
 /// Form comes from the Medicine (3NF). Dispensed quantity is the sum of its Dispense rows.
+/// M-10: append-only history of a prescription (DEC-044). `status` is the status after the event.
+/// Only BASELINE (the start of recorded history for older rows) has no actor.
+model PrescriptionEvent {
+  id             String                @id @default(uuid()) @db.Uuid
+  hospitalId     String                @db.Uuid
+  prescriptionId String                @db.Uuid
+  kind           PrescriptionEventKind
+  status         PrescriptionStatus
+  actorId        String?               @db.Uuid
+  reason         String?
+  occurredAt     DateTime              @default(now()) @db.Timestamptz(3)
+
+  hospital     Hospital     @relation(fields: [hospitalId], references: [id], onDelete: Restrict)
+  prescription Prescription @relation(fields: [prescriptionId, hospitalId], references: [id, hospitalId], onDelete: Restrict)
+  actor        User?        @relation("PrescriptionEventActor", fields: [actorId, hospitalId], references: [id, hospitalId], onDelete: Restrict)
+
+  @@unique([id, hospitalId])
+  @@index([prescriptionId, occurredAt])
+  @@map("prescription_events")
+}
+
 model PrescriptionItem {
   id             String        @id @default(uuid()) @db.Uuid
   hospitalId     String        @db.Uuid
@@ -1205,7 +1241,8 @@ model ExpiryReport {
   items      Json
   createdAt  DateTime @default(now()) @db.Timestamptz(3)
 
-  hospital Hospital @relation(fields: [hospitalId], references: [id], onDelete: Restrict)
+  hospital       Hospital        @relation(fields: [hospitalId], references: [id], onDelete: Restrict)
+  stockMovements StockMovement[]
 
   @@unique([id, hospitalId])
   @@unique([hospitalId, runDate])

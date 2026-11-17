@@ -13,12 +13,12 @@ Claude (main session acting as Team Lead).
 
 | Area | Status |
 | --- | --- |
-| Phase | **5: Done** (2026-11-16 22:42, M-05 applied). **6: Done** (2026-11-16 23:15; M-06 applied; DEC-041 queue fix verified on macOS). **7: Review** (built in the VM; business rules approved 23:17 as DEC-042; M-07, M-08 and the new M-09 await owner approval before applying; DEC-043 job switch and accounting tests done). Branch `feat/phase-1-auth`; nothing pushed |
+| Phase | **5: Done** (2026-11-16 22:42, M-05 applied). **6: Done** (2026-11-16 23:15; M-06 applied; DEC-041 queue fix verified on macOS). **7: Review** (built in the VM; M-07, M-08, M-09 (Layer A) and M-10 approved 2026-11-17 13:38 and validated on PostgreSQL 16, not yet applied on macOS; P14-09 separate database accounts is mandatory). Branch `feat/phase-1-auth`; nothing pushed |
 | Phase 0 | Done and verified (VM + macOS). Open: CI never run on GitHub; browser checks of status page and Swagger UI |
 | Database | Schema revision 2 + DEC-031 declarations. Initial migration `20261116085814_init` **applied on macOS** by the owner; drift (4 SQL-only keys) fixed in schema.prisma (DEC-031), drift now empty. All unit + 4 integration suites pass on macOS (14:53). Migration 2 `20261116092500_hospital_id_db_default` (DEC-032, approved) created, not yet applied. No other migrations |
 | Backend | Foundation + Phase 1B auth (register, email/phone OTP, login, refresh rotation, logout one/all, forgot/reset, me, CSRF, auth rate limit, RBAC guard, audit of auth events, create-super-admin CLI). Phase 1C: tenant context + scoped Prisma client, permissions matrix, audit interceptor, users endpoints. Verified only with in-memory Prisma/Redis. Phase 2 org modules. **Phase 3** `modules/appointments`: schedules, exceptions, cached slots, locked booking, lifecycle, emergency, reminders (DEC-038), `GET /doctors/me` |
 | Frontend | **Phase 1D built**: tokens in Tailwind 4 `@theme`, base components (button, field, alert, logo), public home, status, privacy, terms, 404, favicon; sign-in, register, verify email, forgot/reset; in-memory session store with silent refresh, cross-tab lock and logout sync; protected staff/patient shells; account page (profile, phone verification, sign out everywhere). E2E written, not yet run; Phase 2 org screens; **Phase 3**: staff day agenda with status actions, reception booking (incl. emergency), availability management, patient portal booking and list. All appointment times in hospital time |
-| Tests | API unit 1271 (1072-case matrix) + web 54 (VM, Phase 7). Last macOS run (Phase 6): integration 17/17 (23:15, after DEC-041), Playwright 44/44 (23:07). Details: [TEST_PLAN.md](TEST_PLAN.md) |
+| Tests | API unit 1277 (1072-case matrix) + web 55 (VM, Phase 7). Last macOS run (Phase 6): integration 17/17 (23:15, after DEC-041), Playwright 44/44 (23:07). Details: [TEST_PLAN.md](TEST_PLAN.md) |
 | Working mode | Single session, permanently (owner, 15:28). `.claude/agents/*` and `team-kickoff.md` are unused and untracked |
 
 ## Git
@@ -50,7 +50,7 @@ Abandoned by the owner on 2026-11-16 13:46 (DEC-022 superseded in practice). Sin
 
 ## Next actions
 
-1. Owner: approve M-07, M-08, M-09; then on macOS `prisma:deploy`, `prisma:generate`, `prisma:drift`, `pnpm test:int` (T-PHARM-INT-001, T-XMOD-INT-001), Playwright.
+1. Owner: run the read-only prescription status query and share the result; then on macOS `prisma:deploy` (M-07..M-10), `prisma:generate`, `prisma:drift`, `pnpm test:int`, Playwright.
 2. Then Phase 8 (billing).
 3. Carried forward: seed data (P14); legal review of Privacy/Terms; Swagger UI check; key rotation (R-04).
 

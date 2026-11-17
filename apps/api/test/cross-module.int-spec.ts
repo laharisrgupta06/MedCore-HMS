@@ -238,6 +238,14 @@ describe('Cross-module integration: consultation to pharmacy and laboratory', ()
     await doc
       .patch(`/api/prescriptions/${rx.id}/cancel`, { reason: 'Too late to cancel' })
       .expect(409);
+    // M-10: the patient sees the whole history, one step per event.
+    const history = (await me.get(`/api/prescriptions/${rx.id}`).expect(200)).body.data.history;
+    expect(history.map((e: { kind: string }) => e.kind)).toEqual([
+      'ISSUED',
+      'VERIFIED',
+      'DISPENSED',
+      'HANDED_OVER',
+    ]);
 
     // Flow 2: lab order → approval → patient (Phase 6).
     const test = (

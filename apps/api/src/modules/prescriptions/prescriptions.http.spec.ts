@@ -7,6 +7,7 @@ import { StorageService } from '../../infra/storage/storage.service';
 import { createAuthTestApp, type AuthTestApp } from '../../testing/auth-test-app';
 import { MedicinesModule, StockLevels } from '../medicines/medicines.module';
 import { PrescriptionsModule } from './prescriptions.module';
+import { PrescriptionsService } from './prescriptions.service';
 
 const CSRF = 'a'.repeat(43);
 const PNG = Buffer.from(
@@ -463,5 +464,60 @@ describe('Phase 5: medicine catalogue and prescriptions (in-memory Prisma)', () 
       (await doc.get(`/api/prescriptions/${two.id}`).expect(200)).body.data.items[0]
         .dispensedQuantity,
     ).toBe(5);
+    // M-10 history: issue and cancel each wrote one event, by the doctor; the refused cancel wrote none.
+    const h1 = (await doc.get(`/api/prescriptions/${one.id}`).expect(200)).body.data.history;
+    expect(h1.map((e: { kind: string; status: string }) => [e.kind, e.status])).toEqual([
+      ['ISSUED', 'ISSUED'],
+      ['CANCELLED', 'CANCELLED'],
+    ]);
+    expect(h1[1]).toMatchObject({ actor: { firstName: 'Dee' }, reason: 'Wrong strength chosen' });
+    const h2 = (await doc.get(`/api/prescriptions/${two.id}`).expect(200)).body.data.history;
+    expect(h2.map((e: { kind: string }) => e.kind)).toEqual(['ISSUED']);
+    expect(
+      t.prisma.rows('PrescriptionEvent').filter((e) => e.prescriptionId === two.id),
+    ).toHaveLength(1);
+  });
+
+  it('M-10: the PDF is attached once; a render that loses a race rolls back and removes its file', async () => {
+    const m = await medicine('Crocin');
+    const doc = await as(doctorUser);
+    const rx = (
+      await doc
+        .post('/api/prescriptions', { medicalRecordId: recordId, items: [item(m.id)] })
+        .expect(201)
+    ).body.data;
+    const row = t.prisma.rows('Prescription').find((p) => p.id === rx.id)!;
+    const first = row.pdfFileId;
+    expect(first).not.toBeNull();
+    const service = app.get(PrescriptionsService);
+    const job = { kind: 'prescription' as const, id: rx.id, hospitalId: h.id };
+    // A retry after success does nothing.
+    await service.renderPdf(job);
+    expect(row.pdfFileId).toBe(first);
+    // A render that read the prescription before the PDF was attached (the race): its write matches
+    // nothing, the transaction rolls back, and its stored file is removed.
+    const files = t.prisma.rows('FileAttachment').length;
+    const findFirst = t.prisma.prescription.findFirst!;
+    const spy = jest
+      .spyOn(t.prisma.prescription, 'findFirst')
+      .mockImplementationOnce(async (a) => ({
+        ...((await findFirst(a)) as object),
+        pdfFileId: null,
+      }));
+    const storage = app.get(StorageService);
+    const removed = jest.spyOn(storage, 'remove');
+    await service.renderPdf(job);
+    spy.mockRestore();
+    expect(row.pdfFileId).toBe(first);
+    expect(t.prisma.rows('FileAttachment')).toHaveLength(files);
+    expect(removed).toHaveBeenCalledTimes(1);
+    await expect(storage.get(removed.mock.calls[0]![0])).rejects.toThrow();
+    // The database rule behind it: an attached PDF cannot be replaced.
+    await expect(
+      t.prisma.prescription.update!({
+        where: { id: rx.id },
+        data: { pdfFileId: crypto.randomUUID() },
+      }),
+    ).rejects.toThrow(/attached once/);
   });
 });

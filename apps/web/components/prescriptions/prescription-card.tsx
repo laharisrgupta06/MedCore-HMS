@@ -1,6 +1,11 @@
 'use client';
 
-import { FREQUENCY_LABEL, type Prescription, type PrescriptionStatus } from '@medcore/types';
+import {
+  FREQUENCY_LABEL,
+  type Prescription,
+  type PrescriptionEventKind,
+  type PrescriptionStatus,
+} from '@medcore/types';
 import { useQueryClient } from '@tanstack/react-query';
 import { CircleSlash, Clock, Download, PackageCheck, Pill, ShieldAlert } from 'lucide-react';
 import { useState } from 'react';
@@ -23,6 +28,39 @@ const STATUS: Record<
   DISPENSED: { label: 'Dispensed', tone: 'success', icon: PackageCheck },
   CANCELLED: { label: 'Cancelled', tone: 'neutral', icon: CircleSlash },
 };
+
+const EVENT_LABEL: Record<PrescriptionEventKind, string> = {
+  ISSUED: 'Issued',
+  VERIFIED: 'Verified by the pharmacy',
+  DISPENSED: 'Dispensed',
+  HANDED_OVER: 'Handed over',
+  CANCELLED: 'Cancelled',
+  BASELINE: 'History recorded from here',
+};
+
+/** M-10: the prescription's append-only history, oldest first. */
+export function PrescriptionTimeline({ rx, tz }: { rx: Prescription; tz: string }) {
+  if (rx.history.length === 0) return null;
+  return (
+    <ol aria-label="Prescription history" className="space-y-2 border-l border-border pl-4">
+      {rx.history.map((e, i) => (
+        <li key={i} className="text-body-sm">
+          <span className="font-medium">{EVENT_LABEL[e.kind]}</span>
+          {e.kind === 'DISPENSED' && (
+            <span className="text-ink-secondary">
+              {e.status === 'READY_FOR_PICKUP' ? ', ready for collection' : ', partly'}
+            </span>
+          )}
+          <span className="block text-caption text-ink-muted">
+            {when(e.occurredAt, tz)}
+            {e.actor ? ` · ${e.actor.firstName} ${e.actor.lastName}` : ''}
+            {e.reason ? ` · ${e.reason}` : ''}
+          </span>
+        </li>
+      ))}
+    </ol>
+  );
+}
 
 export function PrescriptionStatusBadge({ status }: { status: PrescriptionStatus }) {
   const s = STATUS[status];

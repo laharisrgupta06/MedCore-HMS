@@ -155,14 +155,24 @@ export class BatchesService {
     const hospitalId = actor.hospitalId!;
     const before = await this.load(hospitalId, id);
     const b = await this.db.client.$transaction(async (tx) => {
-      const u = await tx.medicineBatch.updateMany({
-        where: {
-          id,
-          hospitalId,
-          ...(dto.quantity < 0 ? { quantity: { gte: -dto.quantity } } : {}),
-        },
-        data: { quantity: { increment: dto.quantity } },
-      });
+      // Refilling an empty (DEPLETED) batch reactivates it in the same statement: M-09 refuses a
+      // DEPLETED batch that holds units.
+      let u =
+        dto.quantity > 0
+          ? await tx.medicineBatch.updateMany({
+              where: { id, hospitalId, status: 'DEPLETED' },
+              data: { quantity: { increment: dto.quantity }, status: 'ACTIVE' },
+            })
+          : { count: 0 };
+      if (u.count === 0)
+        u = await tx.medicineBatch.updateMany({
+          where: {
+            id,
+            hospitalId,
+            ...(dto.quantity < 0 ? { quantity: { gte: -dto.quantity } } : {}),
+          },
+          data: { quantity: { increment: dto.quantity } },
+        });
       if (u.count === 0) {
         const cur = await tx.medicineBatch.findFirstOrThrow({ where: { id, hospitalId } });
         throw new BadRequestException({
@@ -181,14 +191,10 @@ export class BatchesService {
           performedById: actor.userId,
         },
       });
-      // Emptied active batches become DEPLETED; refilled ones become ACTIVE again.
+      // An active batch adjusted to zero becomes DEPLETED.
       await tx.medicineBatch.updateMany({
         where: { id, hospitalId, status: 'ACTIVE', quantity: 0 },
         data: { status: 'DEPLETED' },
-      });
-      await tx.medicineBatch.updateMany({
-        where: { id, hospitalId, status: 'DEPLETED', quantity: { gt: 0 } },
-        data: { status: 'ACTIVE' },
       });
       return tx.medicineBatch.findFirstOrThrow({ where: { id, hospitalId } });
     });

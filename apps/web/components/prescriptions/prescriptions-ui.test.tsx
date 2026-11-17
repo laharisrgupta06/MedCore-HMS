@@ -84,6 +84,7 @@ const rx = (over: Partial<Prescription> = {}): Prescription => ({
   verifiedBy: null,
   cancelledAt: null,
   cancellationReason: null,
+  history: [],
   ...over,
 });
 

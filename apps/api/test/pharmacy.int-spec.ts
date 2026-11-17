@@ -233,24 +233,32 @@ describe('Phase 7 integration: pharmacy on PostgreSQL', () => {
       },
     });
 
+    // Issuing is Phase 5's job; written directly here, with its ISSUED event in the same
+    // transaction as M-10 requires.
     const prescription = async (medicineId: string, quantity: number) => {
-      const p = await prisma.prescription.create({
-        data: {
-          hospitalId: A.id,
-          medicalRecordId: record.id,
-          items: {
-            create: [
-              {
-                medicineId,
-                dosage: '500 mg',
-                frequency: 'TDS',
-                durationDays: 5,
-                quantity,
-              },
-            ],
+      const p = await prisma.$transaction(async (tx) => {
+        const created = await tx.prescription.create({
+          data: {
+            hospitalId: A.id,
+            medicalRecordId: record.id,
+            items: {
+              create: [
+                { medicineId, dosage: '500 mg', frequency: 'TDS', durationDays: 5, quantity },
+              ],
+            },
           },
-        },
-        include: { items: true },
+          include: { items: true },
+        });
+        await tx.prescriptionEvent.create({
+          data: {
+            hospitalId: A.id,
+            prescriptionId: created.id,
+            kind: 'ISSUED',
+            status: 'ISSUED',
+            actorId: doctor.userId,
+          },
+        });
+        return created;
       });
       return { id: p.id, itemId: p.items[0]!.id };
     };
@@ -264,6 +272,7 @@ describe('Phase 7 integration: pharmacy on PostgreSQL', () => {
         .expect(201)
     ).body.data;
     expect(res.status).toBe('READY_FOR_PICKUP');
+    const refusedNow = (q: Promise<unknown>) => expect(q).rejects.toThrow();
     const qty = async (id: string) =>
       (await prisma.medicineBatch.findUniqueOrThrow({ where: { id } })).quantity;
     expect([await qty(soon.id), await qty(later.id), await qty(old.id)]).toEqual([0, 26, 9]);
@@ -271,6 +280,40 @@ describe('Phase 7 integration: pharmacy on PostgreSQL', () => {
       'DEPLETED',
     );
     await a.patch(`/api/pharmacy/prescriptions/${rx.id}/handover`).expect(200);
+    // M-10 history, from the database: one event per step, in order, each with its user.
+    const events = await prisma.prescriptionEvent.findMany({
+      where: { prescriptionId: rx.id },
+      orderBy: { occurredAt: 'asc' },
+    });
+    expect(events.map((e) => [e.kind, e.status])).toEqual([
+      ['ISSUED', 'ISSUED'],
+      ['VERIFIED', 'ISSUED'],
+      ['DISPENSED', 'READY_FOR_PICKUP'],
+      ['HANDED_OVER', 'DISPENSED'],
+    ]);
+    expect(events.slice(1).every((e) => e.actorId === phA.id)).toBe(true);
+    // The database refuses an edit, a deletion, an orphan event, and a status change without its event.
+    await refusedNow(
+      prisma.$executeRaw`UPDATE prescription_events SET reason = 'x' WHERE "prescriptionId" = ${rx.id}::uuid`,
+    );
+    await refusedNow(
+      prisma.$executeRaw`DELETE FROM prescription_events WHERE "prescriptionId" = ${rx.id}::uuid`,
+    );
+    await refusedNow(
+      prisma.prescriptionEvent.create({
+        data: {
+          hospitalId: A.id,
+          prescriptionId: rx.id,
+          kind: 'CANCELLED',
+          status: 'CANCELLED',
+          actorId: doctor.userId,
+          reason: 'x',
+        },
+      }),
+    );
+    await refusedNow(
+      prisma.prescription.update({ where: { id: rx.id }, data: { status: 'READY_FOR_PICKUP' } }),
+    );
     expect(
       await prisma.auditLog.count({ where: { action: 'prescription.dispense', entityId: rx.id } }),
     ).toBe(1);
@@ -440,6 +483,43 @@ describe('Phase 7 integration: pharmacy on PostgreSQL', () => {
     await sweep.runHospital(B.id, TZ);
     const oldNow = await prisma.medicineBatch.findUniqueOrThrow({ where: { id: old.id } });
     expect(oldNow).toMatchObject({ status: 'QUARANTINED', quantity: 9 });
+    // M-09 Layer A: the system row is linked to that run's report; a later transaction cannot add one.
+    expect(
+      await prisma.stockMovement.findFirst({ where: { batchId: old.id, type: 'QUARANTINE' } }),
+    ).toMatchObject({
+      expiryReportId: repA!.id,
+      performedById: null,
+    });
+    await refusedNow(
+      prisma.stockMovement.create({
+        data: {
+          hospitalId: A.id,
+          batchId: later.id,
+          type: 'QUARANTINE',
+          quantity: 26,
+          reason: 'Expired',
+          expiryReportId: repA!.id,
+        },
+      }),
+    );
+    await refusedNow(
+      prisma.medicineBatch.create({
+        data: {
+          hospitalId: A.id,
+          medicineId: crocin.id,
+          batchNumber: 'NQ',
+          manufacturedOn: D('2026-01-01'),
+          expiresOn: D('2030-01-01'),
+          quantity: 1,
+          unitCost: 1,
+          mrp: 1,
+          status: 'QUARANTINED',
+        },
+      }),
+    );
+    await refusedNow(
+      prisma.medicineBatch.update({ where: { id: old.id }, data: { status: 'ACTIVE' } }),
+    );
     // Quarantine neither reduced nor double-counted anything: same physical units and balances,
     // same available stock; the 9 expired units are recorded once as set aside (LATER, OLD, SOON).
     expect(await account()).toEqual({ ...beforeRun, quarantined: [0, 9, 0] });

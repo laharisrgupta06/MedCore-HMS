@@ -75,11 +75,25 @@ export class DispensingService {
 
   async verify(actor: AuthPrincipal, id: string): Promise<PrescriptionView> {
     const hospitalId = actor.hospitalId!;
-    const u = await this.db.client.prescription.updateMany({
-      where: { id, hospitalId, status: 'ISSUED', verifiedAt: null },
-      data: { verifiedAt: new Date(), verifiedById: actor.userId },
+    // M-10: the verification and its VERIFIED event commit together (or not at all).
+    const changed = await this.db.client.$transaction(async (tx) => {
+      const u = await tx.prescription.updateMany({
+        where: { id, hospitalId, status: 'ISSUED', verifiedAt: null },
+        data: { verifiedAt: new Date(), verifiedById: actor.userId },
+      });
+      if (u.count === 1)
+        await tx.prescriptionEvent.create({
+          data: {
+            hospitalId,
+            prescriptionId: id,
+            kind: 'VERIFIED',
+            status: 'ISSUED',
+            actorId: actor.userId,
+          },
+        });
+      return u.count;
     });
-    if (u.count === 0)
+    if (changed === 0)
       await this.refuse(
         hospitalId,
         id,
@@ -214,6 +228,16 @@ export class DispensingService {
       );
       const next: PrescriptionStatus = complete ? 'READY_FOR_PICKUP' : 'PARTIALLY_DISPENSED';
       await tx.prescription.updateMany({ where: { id, hospitalId }, data: { status: next } });
+      // M-10: one DISPENSED event per dispensing action, recording the status it led to.
+      await tx.prescriptionEvent.create({
+        data: {
+          hospitalId,
+          prescriptionId: id,
+          kind: 'DISPENSED',
+          status: next,
+          actorId: actor.userId,
+        },
+      });
       return { status: next, medicineIds: [...touched] };
     });
     await this.stock.invalidate(medicineIds);
@@ -225,11 +249,24 @@ export class DispensingService {
 
   async handover(actor: AuthPrincipal, id: string): Promise<PrescriptionView> {
     const hospitalId = actor.hospitalId!;
-    const u = await this.db.client.prescription.updateMany({
-      where: { id, hospitalId, status: 'READY_FOR_PICKUP' },
-      data: { status: 'DISPENSED' },
+    const changed = await this.db.client.$transaction(async (tx) => {
+      const u = await tx.prescription.updateMany({
+        where: { id, hospitalId, status: 'READY_FOR_PICKUP' },
+        data: { status: 'DISPENSED' },
+      });
+      if (u.count === 1)
+        await tx.prescriptionEvent.create({
+          data: {
+            hospitalId,
+            prescriptionId: id,
+            kind: 'HANDED_OVER',
+            status: 'DISPENSED',
+            actorId: actor.userId,
+          },
+        });
+      return u.count;
     });
-    if (u.count === 0)
+    if (changed === 0)
       await this.refuse(
         hospitalId,
         id,

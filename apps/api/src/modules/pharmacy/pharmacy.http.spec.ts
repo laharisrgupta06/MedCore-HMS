@@ -351,6 +351,17 @@ describe('Phase 7: pharmacy and inventory', () => {
         .status,
     ).toBe('DISPENSED');
     await ph.patch(`/api/pharmacy/prescriptions/${rx.id}/handover`).expect(409);
+    // M-10 history: one event per step, by the pharmacist, recording the status it led to; the refused
+    // attempts above wrote none.
+    const history = (await (await as(patientUser)).get(`/api/prescriptions/${rx.id}`).expect(200))
+      .body.data.history as { kind: string; status: string; actor: { firstName: string } }[];
+    expect(history.map((e) => [e.kind, e.status])).toEqual([
+      ['VERIFIED', 'ISSUED'],
+      ['DISPENSED', 'PARTIALLY_DISPENSED'],
+      ['DISPENSED', 'READY_FOR_PICKUP'],
+      ['HANDED_OVER', 'DISPENSED'],
+    ]);
+    expect(history.every((e) => e.actor.firstName === pharmacist.firstName)).toBe(true);
     for (const b of [expired, quarantined, soon, later])
       push('StockMovement', {
         batchId: b,
@@ -470,6 +481,24 @@ describe('Phase 7: pharmacy and inventory', () => {
           .expect(201)
       ).body.data.status,
     ).toBe('DEPLETED');
+    // Refilling it reactivates it in the same update (M-09: a depleted batch holds no units).
+    expect(
+      (
+        await ph
+          .post(`/api/batches/${b2}/adjustments`, { quantity: 2, reason: 'Found in store' })
+          .expect(201)
+      ).body.data,
+    ).toMatchObject({ status: 'ACTIVE', quantity: 2 });
+    // The API never accepts the fields that mark a system row.
+    await ph
+      .patch(`/api/batches/${b2}/quarantine`, { reason: 'Damaged', performedById: null })
+      .expect(400);
+    await ph
+      .patch(`/api/batches/${b2}/quarantine`, {
+        reason: 'Damaged',
+        expiryReportId: crypto.randomUUID(),
+      })
+      .expect(400);
     // Ledger rows and dispenses cannot be changed or removed (M-09 triggers, emulated).
     await expect(
       t.prisma.stockMovement.updateMany!({ where: { batchId: b }, data: { quantity: 1 } }),
@@ -543,6 +572,8 @@ describe('Phase 7: pharmacy and inventory', () => {
     const sweep = app.get(ExpirySweep);
 
     expect((await sweep.runDue(before)).map((o) => o.outcome)).toEqual(['not-due', 'not-due']);
+    // The database dates system quarantines by its own clock (M-09); this test's clock is `after`.
+    t.prisma.clock = () => after;
     const ran = await sweep.runDue(after);
     expect(ran).toEqual([
       { hospitalId: h.id, outcome: 'ran' },
@@ -563,6 +594,12 @@ describe('Phase 7: pharmacy and inventory', () => {
       expect.objectContaining({ batchId: expOld, quantity: 5, performedById: null }),
     ]);
     const report = rows('ExpiryReport').find((r) => r.hospitalId === h.id)!;
+    // M-09: every system row is linked to that day's report.
+    expect(
+      rows('StockMovement')
+        .filter((x) => x.type === 'QUARANTINE' && x.hospitalId === h.id)
+        .every((x) => x.expiryReportId === report.id),
+    ).toBe(true);
     const items = report.items as { batchId: string; kind: string }[];
     expect(items.map((i) => [i.batchId, i.kind])).toEqual([
       [expToday, 'QUARANTINED'],
@@ -848,6 +885,7 @@ describe('Phase 7: pharmacy and inventory', () => {
       const before = snapshot();
       // Expired by date, so already unavailable before the run.
       expect(before).toEqual({ physical: 10, balance: [0, 0], available: 6 });
+      t.prisma.clock = () => zonedToUtc(day, 150, TZ);
       await app.get(ExpirySweep).runHospital(h.id, TZ, zonedToUtc(day, 150, TZ));
       expect(batchRow(exp)).toMatchObject({ status: 'QUARANTINED', quantity: 4 });
       expect(

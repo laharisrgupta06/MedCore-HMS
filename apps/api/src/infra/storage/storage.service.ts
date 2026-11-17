@@ -1,4 +1,4 @@
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { dirname, isAbsolute, resolve, sep } from 'node:path';
 import { Global, Injectable, Module } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
@@ -27,6 +27,11 @@ export class StorageService {
     const p = this.path(key);
     await mkdir(dirname(p), { recursive: true });
     await writeFile(p, data, { flag: 'wx' });
+  }
+
+  /** Removes a stored file; a missing file is not an error. */
+  async remove(key: string): Promise<void> {
+    await rm(this.path(key), { force: true });
   }
 
   get(key: string): Promise<Buffer> {

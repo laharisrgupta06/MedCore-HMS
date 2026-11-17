@@ -75,7 +75,9 @@ export class ExpirySweep {
       .$transaction(async (tx) => {
         const items: ExpiryReportItem[] = [];
         const medicineIds = new Set<string>();
-        // A batch expiring today is already expired (approved plan, section 6).
+        const quarantined: { batchId: string; quantity: number; expiresOn: string }[] = [];
+        // 1. Quarantine expired batches (a batch expiring today is already expired). The conditional
+        //    update takes each batch's row lock, so the quantity read after it is current.
         const expired = await tx.medicineBatch.findMany({
           where: { hospitalId, status: 'ACTIVE', expiresOn: { lte: dateValue(today) } },
           include: { medicine: true },
@@ -89,16 +91,10 @@ export class ExpirySweep {
           if (u.count === 0) continue;
           const cur = await tx.medicineBatch.findFirstOrThrow({ where: { id: b.id, hospitalId } });
           if (cur.status !== 'QUARANTINED' || cur.quantity === 0) continue;
-          // The quantity is unchanged (owner decision 23:17); the row records the units set aside.
-          await tx.stockMovement.create({
-            data: {
-              hospitalId,
-              batchId: b.id,
-              type: 'QUARANTINE',
-              quantity: cur.quantity,
-              reason: `Expired on ${dateText(b.expiresOn)}; quarantined by the nightly expiry run`,
-              performedById: null,
-            },
+          quarantined.push({
+            batchId: b.id,
+            quantity: cur.quantity,
+            expiresOn: dateText(b.expiresOn),
           });
           items.push({
             batchId: b.id,
@@ -111,6 +107,7 @@ export class ExpirySweep {
             kind: 'QUARANTINED',
           });
         }
+        // 2. Active stock expiring within 30 days.
         const expiring = await tx.medicineBatch.findMany({
           where: {
             hospitalId,
@@ -132,7 +129,7 @@ export class ExpirySweep {
             quantity: b.quantity,
             kind: 'EXPIRING',
           });
-        // Unique per hospital and day: a concurrent run fails here and rolls back entirely.
+        // 3. The day's report. Unique per hospital and day: a concurrent run fails here and rolls back.
         const report = await tx.expiryReport.create({
           data: {
             hospitalId,
@@ -140,6 +137,20 @@ export class ExpirySweep {
             items: items as unknown as Prisma.InputJsonValue,
           },
         });
+        // 4. The ledger rows, linked to the report (M-09 Layer A checks each one). The quantity is
+        //    unchanged (owner decision 2026-11-16 23:17); the row records the units set aside.
+        for (const q of quarantined)
+          await tx.stockMovement.create({
+            data: {
+              hospitalId,
+              batchId: q.batchId,
+              type: 'QUARANTINE',
+              quantity: q.quantity,
+              reason: `Expired on ${q.expiresOn}; quarantined by the nightly expiry run`,
+              performedById: null,
+              expiryReportId: report.id,
+            },
+          });
         return { report, medicineIds: [...medicineIds] };
       })
       .catch((e) => {
