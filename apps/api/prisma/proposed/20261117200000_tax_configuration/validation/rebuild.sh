@@ -1,5 +1,5 @@
 #!/bin/bash
-# Rebuild scratch DB $1 from the ten existing migrations plus seed rows.
+# Rebuild scratch DB $1 from the eight applied migrations plus seed rows.
 set -e
 DB=${1:-m11a}
 M=/mnt/user-data/uploads/MedCore-HMS/apps/api/prisma/migrations

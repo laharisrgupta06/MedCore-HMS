@@ -1,7 +1,7 @@
 # MedCore HMS — Project Memory
 
 **Read this first when resuming.** Facts only; details live in the linked documents. Last updated:
-2026-11-17 (IST), Phase 7 Done, Phase 8 plan approved, M-11a in review.
+2026-11-19 (IST), Phase 7 Done, Phase 8 in progress, M-11a moved into the project and waiting for approval to apply.
 
 ## Project
 
@@ -13,7 +13,7 @@ Claude (main session acting as Team Lead).
 
 | Area | Status |
 | --- | --- |
-| Phase | **5: Done** (2026-11-16 22:42, M-05 applied). **6: Done** (2026-11-16 23:15; M-06 applied; DEC-041 queue fix verified on macOS). **7: Done** (2026-11-17 15:34; M-07..M-10 applied on macOS, drift empty, integration 19/19, Playwright 50/50). **8: In Progress** (plan approved 2026-11-17 19:09, DEC-045..054; M-11a tax configuration drafted and validated on PostgreSQL 16, kept in `apps/api/prisma/proposed/`, **not applied**, waiting for approval, DEC-055). P14-09 separate database accounts is mandatory. Branch `feat/phase-1-auth`; nothing pushed |
+| Phase | **5: Done** (2026-11-16 22:42, M-05 applied). **6: Done** (2026-11-16 23:15; M-06 applied; DEC-041 queue fix verified on macOS). **7: Done** (2026-11-17 15:34; M-07..M-10 applied on macOS, drift empty, integration 19/19, Playwright 50/50). **8: In Progress** (plan approved 2026-11-17 19:09, DEC-045..054; M-11a tax configuration (revision 4, DEC-055..059) validated on PostgreSQL 16 and moved into `prisma/migrations` (local commit 2026-11-19), **not applied on macOS**, waiting for approval). P14-09 separate database accounts is mandatory. Branch `feat/phase-1-auth`; nothing pushed |
 | Phase 0 | Done and verified (VM + macOS). Open: CI never run on GitHub; browser checks of status page and Swagger UI |
 | Database | Schema revision 2 + DEC-031 declarations. Initial migration `20261116085814_init` **applied on macOS** by the owner; drift (4 SQL-only keys) fixed in schema.prisma (DEC-031), drift now empty. All unit + 4 integration suites pass on macOS (14:53). Migration 2 `20261116092500_hospital_id_db_default` (DEC-032, approved) created, not yet applied. No other migrations |
 | Backend | Foundation + Phase 1B auth (register, email/phone OTP, login, refresh rotation, logout one/all, forgot/reset, me, CSRF, auth rate limit, RBAC guard, audit of auth events, create-super-admin CLI). Phase 1C: tenant context + scoped Prisma client, permissions matrix, audit interceptor, users endpoints. Verified only with in-memory Prisma/Redis. Phase 2 org modules. **Phase 3** `modules/appointments`: schedules, exceptions, cached slots, locked booking, lifecycle, emergency, reminders (DEC-038), `GET /doctors/me` |
@@ -50,8 +50,8 @@ Abandoned by the owner on 2026-11-16 13:46 (DEC-022 superseded in practice). Sin
 
 ## Next actions
 
-1. Phase 8: owner approval to apply M-11a (commands: [migration-review.md](migration-review.md) section 11). Then M-11b, M-12, M-13, M-14, each drafted, validated and approved separately before any billing application code (TASKS 8-A2..8-B12). Accountant review is a mandatory production-release gate (8-G1).
-   Proposed migrations live in `apps/api/prisma/proposed/<name>/` with their test changes until approved; Prisma never reads that folder.
+1. Phase 8: owner approval to apply M-11a on macOS (commands: [migration-review.md](migration-review.md) section 11). Until then `migrate deploy` shows it pending and M-11a integration tests fail. Then M-11b, M-12, M-13, M-14, each drafted, validated and approved separately (TASKS 8-A2..8-A5), with the billing code (8-B1..8-B12). Accountant review is a mandatory production-release gate (8-G1).
+   Proposed migrations live in `apps/api/prisma/proposed/<name>/` with their test changes until moved into the project; Prisma never reads that folder.
 2. Carried forward from Phase 7: development API stop before the 14:57 Playwright run not diagnosed (capture the log if it recurs); P14-09 separate database accounts (mandatory).
 3. Carried forward: seed data (P14); legal review of Privacy/Terms; Swagger UI check; key rotation (R-04).
 

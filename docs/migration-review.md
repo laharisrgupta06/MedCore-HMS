@@ -194,8 +194,10 @@ If the first drift output differs from that single statement, stop and send it; 
 
 ## 11. Migration M-11a: `20261117200000_tax_configuration` (DEC-045 to DEC-050, DEC-055)
 
-Status: **drafted and validated on PostgreSQL 16; not applied; waiting for the owner's separate approval.**
-Files: `apps/api/prisma/proposed/20261117200000_tax_configuration/` (README lists where each file goes).
+Status: **revision 4, validated on PostgreSQL 16 and moved into the project (local commit 2026-11-19, not
+pushed); not applied to the owner's database; waiting for the owner's separate approval.**
+Files: `apps/api/prisma/migrations/20261117200000_tax_configuration/migration.sql`; review and validation
+record in `apps/api/prisma/proposed/20261117200000_tax_configuration/` (README lists every file).
 
 ### What it adds
 
@@ -207,9 +209,9 @@ Files: `apps/api/prisma/proposed/20261117200000_tax_configuration/` (README list
 | `hospital_tax_defaults` | Primary key (hospitalId, kind); kind CONSULTATION or LAB; FKs hospital, (classificationId, hospitalId), (updatedById, hospitalId) |
 | `hospital_gst_registrations` | Per hospital; unique (id, hospitalId), (hospitalId, effectiveFrom); FKs hospital, (attestedById, hospitalId); CHECK details by type with `medcore_gstin_valid` and state code = GSTIN prefix; exclusion constraint: one GSTIN, one hospital |
 | `statutory_room_tax_rules` | Platform data (no hospitalId); unique effectiveFrom; CHECK values; seeded: 18 July 2022, ₹5,000.00, 5%, SAC 9993, tax added on top |
-| New columns | `lab_tests.taxClassificationId`, `medicines.taxClassificationId` (nullable, composite FK to the same hospital's classification), `rooms.criticalCareUnit` (nullable), `hospitals.taxSetupConfirmedAt/ById` (both or neither; same-tenant FK) |
-| Functions | `medcore_hospital_today`, `medcore_gstin_valid`, and five trigger functions |
-| Triggers (8) | `tax_classifications_rules` (no delete; only name and active flag change; a default's classification stays active); `tax_classification_versions_rules` (no start before today; change only before taking effect); `hospital_gst_registrations_rules` (never edited or backdated; delete only before taking effect); `statutory_room_tax_rules_append_only`; `lab_tests_tax_classification` and `hospital_tax_defaults_classification` (active service classification); `medicines_tax_classification` (active goods classification); `hospital_tax_defaults_no_delete` |
+| New columns | `lab_tests.taxClassificationId`, `medicines.taxClassificationId` (nullable, composite FK to the same hospital's classification), `rooms.criticalCareUnit` (nullable), `hospitals.taxSetupConfirmedAt/ById` (both or neither; same-tenant FK), `hospitals.taxTimezoneLockedAt` (nullable; stamped by the first tax date, DEC-057) |
+| Functions (9) | `medcore_tax_clock` (the database clock, `clock_timestamp()`), `medcore_tax_date` (the hospital's tax date: its local date ten minutes ahead of the clock; the first call stamps the time zone lock), `medcore_gstin_valid`, and six trigger functions |
+| Triggers (11) | `tax_classifications_rules` (no delete; only name and active flag change; a default's classification stays active); `tax_classification_versions_rules`, checked again at commit by the deferred `tax_classification_versions_rules_at_commit` (a new version needs an active classification, DEC-059; no start before the tax date; once a version is in force the next starts after the tax date, DEC-056; changed or deleted only before it starts; locks the hospital row, then the classification row, DEC-058); `hospital_gst_registrations_rules`, checked again at commit by the deferred `hospital_gst_registrations_rules_at_commit` (never edited; no start before the tax date; same-day rule; deleted only before it starts; locks the hospital row); `hospitals_tax_timezone` (time zone and lock stamp fixed once stamped, DEC-057); `statutory_room_tax_rules_append_only`; `lab_tests_tax_classification` and `hospital_tax_defaults_classification` (active service classification); `medicines_tax_classification` (active goods classification); these three lock the hospital row and then write the classification row unchanged, so an assignment and a deactivation cannot interleave (DEC-058); `hospital_tax_defaults_no_delete` |
 
 No index is added for the two nullable lab test and medicine foreign keys: classification lookups go from
 the item to the classification, and both tables are small per hospital. Revisit with M-11b if invoice
@@ -225,29 +227,74 @@ building needs the reverse lookup.
   `hospitalId`); the room rule is global reference data.
 - The whole file is one implicit transaction: any failure leaves no trace.
 
-### Validation (build environment, PostgreSQL 16.15, T-MIG-TAX-001)
+### Validation (PostgreSQL 16.15, revision 4, 2026-11-19; T-MIG-TAX-001, T-MIG-TAX-TIME-001, T-MIG-TAX-CLS-001)
 
-- Ten existing migrations applied to a scratch database, then rows of the kinds M-11a touches seeded (two
-  hospitals with admins and staff profiles, a lab test, a medicine, a private room and an ICU room).
+Full record: `validation/results-rev4.txt` in the proposal folder (migration md5 `fa23da93…`, SHA-256
+`6dd4848f…`; `rollback.sql` and `schema.prisma` unchanged since revision 3). `results-rev3.txt` is kept as the
+revision 3 record.
+
+- The eight migrations in `prisma/migrations` applied to a scratch database, then rows of the kinds M-11a
+  touches seeded (two hospitals with admins and staff profiles, a lab test, a medicine, a private room and an
+  ICU room).
 - M-11a applied as one multi-statement query (as Prisma sends it): existing rows identical by hash
   (excluding the new, empty columns); new columns empty; room rule seeded once.
-- 79 behaviour checks, each in its own rolled-back transaction: classifications 14, versions 16, item
-  classifications 12, defaults and confirmation 11, GST registrations 20, room rule 4, existing tables 2. All
-  pass. Plus one two-session race: the same GSTIN for two hospitals at once; the second waits and is refused.
-- Rollback: injected failure at the end leaves schema and data identical; re-running on a migrated database
-  fails on the first statement and changes nothing; the manual reversal (`rollback.sql`) restores the exact
-  pre-M-11a schema and data and removes the migration record, and refuses to run once any tax
-  configuration exists.
+- 120 behaviour checks, each in its own rolled-back transaction with a simulated clock where needed:
+  classifications 16, versions 21 (including the five DEC-059 rules), tax date and midnight 13, production
+  clock 2, defaults and confirmation 11, GST registrations 29 (including the same GSTIN refused for another
+  hospital), time zone lock 11, item classifications 9, rooms and room rule 6, existing tables 2. All pass.
+- 19 classification race tests (`classification_race_tests.sh`, revision 4): assignment and new version
+  against deactivation, both orders, at all three isolation levels; lab test and medicine assignment; lock
+  order; no blocking of plain reads or foreign-key inserts; rehearsal of T-MIG-TAX-013; a control with
+  revision 3's assignment check reproduces the race (both commit) at READ COMMITTED and REPEATABLE READ.
+- 3 tests under a real `COMMIT` (commit-time checks); 6 two-session races between a time zone change and the
+  first version or registration at READ COMMITTED, REPEATABLE READ and SERIALIZABLE; 11 timing and lock
+  tests (`timing_tests.sh`, see below) and the `FOR SHARE NOWAIT` rehearsal of T-MIG-TAX-011; timing test 8
+  and the rehearsal are also run against a control copy with the writer locks removed, which shows the gap.
+  The two-session race for one GSTIN in two hospitals was run in revision 1; the exclusion constraint it
+  exercises has not changed since.
+- GSTIN: 32 checks against python-stdnum 2.2 and real issued GSTINs (`validation/gstin_reference.md`).
+- Rollback: 7 checks. Injected failure at the end leaves schema and data identical; re-running on a migrated
+  database fails on the first statement and changes nothing; the manual reversal (`rollback.sql`) restores the
+  exact pre-M-11a schema and data and removes the migration record; it refuses, changing nothing, while any tax
+  configuration exists, while any statutory rule other than the seeded one exists, or when the seeded row has
+  been altered; a time zone lock left by since-deleted future rows does not block it.
 - Prisma: the proposed `schema.prisma` validates with Prisma's own schema WebAssembly (engine `c2990dca`,
   Prisma 6.19.3; the CLI cannot run here because `binaries.prisma.sh` is blocked) and has 51 models and 41
-  enums; 195 of 195 comparisons between that schema and the migrated database match (columns, types,
-  nullability, defaults, keys, unique indexes, foreign keys and actions, enum values). The authoritative drift
-  check runs on macOS (below).
-- VM, with a client generated from the proposed schema: typecheck clean; API unit tests 1277/1277 with the
-  updated tenant-scope test (T-TEN-001: 47 scoped models, 4 global); lint and format clean. The VM was then
-  restored to the current schema (1277/1277 again).
-- Object counts after M-11a, measured with T-MIG-001's own queries: 51 tables, 50 triggers, 3 exclusion
-  constraints (before: 46, 42, 2).
+  enums; 198 of 198 comparisons between that schema and the migrated database match (columns, types,
+  nullability, defaults, keys, unique indexes, foreign keys and their delete and update actions, enum values).
+  The authoritative drift check runs on macOS (below).
+- VM (2026-11-19), with M-11a revision 4 moved into place in the VM copy only (migration, proposed schema
+  and the four test files) and a client generated from the proposed schema: typecheck, lint and format
+  clean; API unit tests 1278/1278 (the extra test is the drift check on the new migration; T-TEN-001: 47
+  scoped models, 4 global; T-TEN-001d: 51 models). The VM was then restored to the current schema (1277/1277).
+- Object counts after M-11a, measured with T-MIG-001's own queries: 51 tables, 53 triggers, 3 exclusion
+  constraints (before: 46, 42, 2). The 17 named M-11a objects (5 tables, 11 triggers, 1 exclusion constraint)
+  are all present. Revision 4 creates the same 116 objects as revision 3.
+- Not run here: the proposed integration tests (T-MIG-001, T-MIG-TAX-002..013, T-TEN-001d against a real
+  database) and the drift check, which run on macOS after applying (below); the two-session race for one
+  GSTIN in two hospitals (revision 1 only, see above); the reverse-order deadlock case in R-16.
+
+### Revisions 2 and 3 (owner reviews 2026-11-18)
+
+Revision 2: tax date with a ten-minute margin and commit-time rechecks; same-day rule (DEC-056); time zone
+lock (DEC-057); rollback guard checks the seeded room rule is unchanged; GSTIN verified independently
+(DEC-048). Revision 3: writer row locks, hospital row first (DEC-058). Revision 4: assignments serialise
+with deactivation (DEC-058); new versions need an active classification (DEC-059).
+
+### What the time checks guarantee, and what they do not
+
+| Question | Answer (demonstrated in `validation/timing_tests.sh`) |
+| --- | --- |
+| Can a transaction pass its commit-time check and commit more than ten minutes later? | Yes. Deferred triggers run before the commit record is flushed and before any synchronous-replication wait; neither has a time limit. |
+| What happens if the database stalls during commit? | The writer has passed every check and waits; its change is invisible until the stall ends, then visible at once. A reader without locks meanwhile sees the old data; a reader taking `FOR SHARE` waits and then sees the final data. |
+| Does `SET CONSTRAINTS ALL IMMEDIATE` bypass the protection? | Yes, genuinely: it runs the commit-time check at that moment, and the transaction may commit any time later. |
+| What timeout controls exist? | PostgreSQL 16: `statement_timeout`, `idle_in_transaction_session_timeout` (demonstrated), `lock_timeout`, plus Prisma transaction timeouts. No limit on total transaction time until PostgreSQL 17 (`transaction_timeout`). None bounds a commit stalled in storage or replication. |
+| Can it be made stronger without unacceptable complexity? | Yes, by row locks (revision 3): consistency between issued lines and committed tax data no longer depends on timing. The midnight boundary itself remains best effort. |
+
+Guarantee, stated precisely: an issued invoice line always matches the tax data committed at the moment
+its own transaction obtained its locks (provided M-11b takes them, 8-A2, and nobody bypasses triggers as a
+superuser, R-11). Whether an edit that lands within minutes of midnight is accepted is a ten-minute safety
+margin under normal operation, **not an absolute guarantee**.
 
 ### Rollback behaviour
 
@@ -255,16 +302,16 @@ building needs the reverse lookup.
    attempt as failed in `_prisma_migrations`. Send the error; do not edit the database by hand. Clearing the
    failed record (`prisma migrate resolve --rolled-back`) is done only after the error is reviewed.
 2. **After a successful application:** Prisma has no down migrations. `rollback.sql` is a reviewed, tested
-   reversal for emergencies, run only with the owner's approval and only while no tax configuration exists
-   (it refuses otherwise). Once billing uses these tables, a mistake is corrected by a new migration, never
-   by reversal.
+   reversal for emergencies, run only with the owner's approval and only while no tax configuration and no
+   later statutory rule exists and the seeded room rule is unchanged (it refuses otherwise). Once billing
+   uses these tables, a mistake is corrected by a new migration, never by reversal.
 3. **Last resort:** restore the backup taken in step 1 below, with approval.
 
 ### macOS commands (only after the owner approves applying M-11a)
 
-On approval I will first move the files into place in a local commit (nothing pushed): the migration into
-`prisma/migrations/20261117200000_tax_configuration/`, the proposed `schema.prisma`, and the three test files.
-Then, from the repository root:
+The files are already in place (local commit of 2026-11-19, nothing pushed): the migration in
+`prisma/migrations/20261117200000_tax_configuration/`, the new `schema.prisma`, and the four test files.
+From the repository root:
 
 ```bash
 # 0. The expected commit, a clean tree (apart from your untracked .claude/ and "Claude outputs/"), services up
@@ -296,7 +343,7 @@ pnpm --filter @medcore/api prisma:deploy
 # 6. Read-only drift AFTER: expect "-- This is an empty migration."
 pnpm --filter @medcore/api prisma:drift
 
-# 7. Tests: unit, integration (12 suites including T-MIG-TAX-002..008), then Playwright with the stack running
+# 7. Tests: unit, integration (12 suites including T-MIG-TAX-002..013), then Playwright with the stack running
 pnpm test && pnpm test:int
 pnpm --filter @medcore/e2e test:e2e
 ```

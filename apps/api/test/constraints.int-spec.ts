@@ -83,7 +83,7 @@ const at = (h: number, m = 0) => new Date(Date.UTC(2031, 0, 15, h, m));
 beforeAll(requireMigration);
 
 describe('T-MIG-001: database objects exist', () => {
-  it('has 46 tables, 42 triggers, both exclusion constraints and the extensions', async () => {
+  it('has 51 tables, 53 triggers, three exclusion constraints and the extensions', async () => {
     const [tables] = await prisma.$queryRaw<{ c: bigint }[]>`
       SELECT count(*) AS c FROM information_schema.tables
       WHERE table_schema = 'public' AND table_name <> '_prisma_migrations'`;
@@ -95,10 +95,11 @@ describe('T-MIG-001: database objects exist', () => {
     >`SELECT count(*) AS c FROM pg_constraint WHERE contype = 'x'`;
     const ext = await prisma.$queryRaw<{ extname: string }[]>`SELECT extname FROM pg_extension`;
     // 44 tables and 31 triggers through M-06; M-08 and M-10 add one table each, M-09 and M-10 add
-    // 11 triggers (counts measured on PostgreSQL 16 after each migration, T-MIG-PH-002).
-    expect(Number(tables!.c)).toBe(46);
-    expect(Number(triggers!.c)).toBe(42);
-    expect(Number(exclusions!.c)).toBe(2);
+    // 11 triggers (counts measured on PostgreSQL 16 after each migration, T-MIG-PH-002). M-11a adds
+    // 5 tables, 11 triggers and 1 exclusion constraint (measured on PostgreSQL 16, T-MIG-TAX-001).
+    expect(Number(tables!.c)).toBe(51);
+    expect(Number(triggers!.c)).toBe(53);
+    expect(Number(exclusions!.c)).toBe(3);
     expect(ext.map((e) => e.extname)).toEqual(expect.arrayContaining(['pgcrypto', 'btree_gist']));
     // The Phase 7 objects by name, so a missing one cannot hide behind a correct total.
     const names = await prisma.$queryRaw<{ n: string }[]>`
@@ -126,6 +127,40 @@ describe('T-MIG-001: database objects exist', () => {
         'prescriptions_rules',
         'stock_movements_append_only',
         'stock_movements_system_quarantine',
+      ].sort(),
+    );
+    // The M-11a tax configuration objects by name (T-MIG-TAX-001).
+    const taxNames = await prisma.$queryRaw<{ n: string }[]>`
+      SELECT table_name AS n FROM information_schema.tables
+       WHERE table_schema = 'public' AND table_name IN ('tax_classifications', 'tax_classification_versions',
+         'hospital_tax_defaults', 'hospital_gst_registrations', 'statutory_room_tax_rules')
+      UNION ALL
+      SELECT tgname FROM pg_trigger WHERE NOT tgisinternal AND tgname IN (
+        'tax_classifications_rules', 'tax_classification_versions_rules', 'hospital_gst_registrations_rules',
+        'tax_classification_versions_rules_at_commit', 'hospital_gst_registrations_rules_at_commit', 'hospitals_tax_timezone',
+        'statutory_room_tax_rules_append_only', 'lab_tests_tax_classification', 'medicines_tax_classification',
+        'hospital_tax_defaults_classification', 'hospital_tax_defaults_no_delete')
+      UNION ALL
+      SELECT conname FROM pg_constraint WHERE contype = 'x' AND conname = 'hospital_gst_registrations_gstin_one_hospital'`;
+    expect(taxNames.map((x) => x.n).sort()).toEqual(
+      [
+        'hospital_gst_registrations',
+        'hospital_gst_registrations_gstin_one_hospital',
+        'hospital_gst_registrations_rules',
+        'hospital_gst_registrations_rules_at_commit',
+        'hospital_tax_defaults',
+        'hospital_tax_defaults_classification',
+        'hospital_tax_defaults_no_delete',
+        'hospitals_tax_timezone',
+        'lab_tests_tax_classification',
+        'medicines_tax_classification',
+        'statutory_room_tax_rules',
+        'statutory_room_tax_rules_append_only',
+        'tax_classification_versions',
+        'tax_classification_versions_rules',
+        'tax_classification_versions_rules_at_commit',
+        'tax_classifications',
+        'tax_classifications_rules',
       ].sort(),
     );
   });

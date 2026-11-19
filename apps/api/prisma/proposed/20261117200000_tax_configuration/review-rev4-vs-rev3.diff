@@ -1,0 +1,473 @@
+# M-11a revision 3 -> revision 4. rollback.sql, schema.prisma, schema.diff and the other test files are unchanged.
+--- a/migration.sql (revision 3)
++++ b/migration.sql (revision 4)
+@@ -17,6 +17,11 @@
+ -- time checks alone cannot guarantee this: a commit can become visible long after its last check
+ -- (storage or synchronous-replication stalls), and SET CONSTRAINTS ALL IMMEDIATE moves the
+ -- commit-time check earlier. See docs/migration-review.md section 11 for the guarantees.
++--
++-- Revision 4 (owner review 2026-11-19 15:55): assigning a classification (lab test, medicine,
++-- hospital default) now takes the hospital row and then writes the classification row (a write that
++-- changes no value), so it cannot interleave with a deactivation of that classification at any
++-- isolation level; and a new version cannot be added to an inactive classification. No new objects.
+ 
+ CREATE TYPE "TaxSupplyType" AS ENUM ('GOODS', 'SERVICE');
+ CREATE TYPE "TaxTreatment" AS ENUM ('EXEMPT', 'NIL_RATED', 'TAXABLE');
+@@ -316,11 +321,13 @@
+ -- locks the hospital row and then the classification row (FOR NO KEY UPDATE, which does not block
+ -- foreign-key checks) until commit, so a reader that takes FOR SHARE on those rows in the same order
+ -- waits for this transaction to finish. Every writer takes the hospital row first, so a transaction
+--- that mixes version and registration writes cannot deadlock with such a reader.
++-- that mixes version and registration writes cannot deadlock with such a reader. A new version needs
++-- an active classification (revision 4); recorded versions stay valid after a deactivation.
+ CREATE FUNCTION medcore_tax_classification_version_rules() RETURNS trigger LANGUAGE plpgsql AS $$
+ DECLARE
+   r record;
+   d date;
++  active boolean;
+ BEGIN
+   IF TG_OP = 'DELETE' THEN
+     d := medcore_tax_date(OLD."hospitalId");
+@@ -341,9 +348,16 @@
+     PERFORM 1 FROM hospitals
+      WHERE id = CASE WHEN TG_OP = 'DELETE' THEN OLD."hospitalId" ELSE NEW."hospitalId" END
+        FOR NO KEY UPDATE;
+-    PERFORM 1 FROM tax_classifications
++    SELECT "isActive" INTO active FROM tax_classifications
+      WHERE id = CASE WHEN TG_OP = 'DELETE' THEN OLD."classificationId" ELSE NEW."classificationId" END
+        FOR NO KEY UPDATE;
++    -- Read under the lock: a deactivation committed meanwhile is seen (READ COMMITTED) or makes this
++    -- statement fail with a serialization error (REPEATABLE READ, SERIALIZABLE). Versions already
++    -- recorded stay valid when a classification is deactivated; only new ones are refused.
++    IF TG_OP = 'INSERT' AND active IS FALSE THEN
++      RAISE EXCEPTION 'A new tax classification version cannot be added to an inactive classification'
++        USING ERRCODE = 'integrity_constraint_violation';
++    END IF;
+   END IF;
+   IF TG_OP IN ('UPDATE', 'DELETE') AND OLD."effectiveFrom" <= d THEN
+     RAISE EXCEPTION 'A tax classification version in force from % cannot change (tax date %); add a new version instead', OLD."effectiveFrom", d
+@@ -435,6 +449,13 @@
+ 
+ -- A referenced classification must be active and of the right supply type. Arguments: the expected
+ -- supply type and the name of the referencing column. Fires only when that column is set or changed.
++-- Revision 4: it locks the hospital row (hospital first, as every tax writer does, DEC-058) and then
++-- writes the classification row without changing it. That write conflicts with a concurrent
++-- deactivation of the classification: under READ COMMITTED the later of the two waits and then sees
++-- the other's committed result (the deactivation trigger then finds the new default; this check then
++-- finds the classification inactive); under REPEATABLE READ and SERIALIZABLE the later one fails with
++-- a serialization error. A lock alone would not do: a committed lock is invisible to a REPEATABLE READ
++-- transaction whose snapshot is older.
+ CREATE FUNCTION medcore_tax_classification_ref_chk() RETURNS trigger LANGUAGE plpgsql AS $$
+ DECLARE
+   expected "TaxSupplyType" := TG_ARGV[0]::"TaxSupplyType";
+@@ -444,8 +465,10 @@
+   IF ref IS NULL OR (TG_OP = 'UPDATE' AND ref IS NOT DISTINCT FROM (to_jsonb(OLD) ->> TG_ARGV[1])::uuid) THEN
+     RETURN NEW;
+   END IF;
+-  SELECT "supplyType", "isActive" INTO c FROM tax_classifications
+-   WHERE id = ref AND "hospitalId" = NEW."hospitalId";
++  PERFORM 1 FROM hospitals WHERE id = NEW."hospitalId" FOR NO KEY UPDATE;
++  UPDATE tax_classifications SET "isActive" = "isActive"
++   WHERE id = ref AND "hospitalId" = NEW."hospitalId"
++   RETURNING "supplyType", "isActive" INTO c;
+   IF NOT FOUND THEN
+     RETURN NEW;  -- the composite foreign key reports it
+   END IF;
+--- a/tests/tax-configuration.int-spec.ts (revision 3)
++++ b/tests/tax-configuration.int-spec.ts (revision 4)
+@@ -2,7 +2,7 @@
+ import { PrismaClient } from '@prisma/client';
+ 
+ /**
+- * M-11a tax configuration rules on real PostgreSQL (T-MIG-TAX-002..011, DEC-045 to DEC-050).
++ * M-11a tax configuration rules on real PostgreSQL (T-MIG-TAX-002..013, DEC-045 to DEC-050).
+  * Requires migration 20261117200000_tax_configuration. Creates rows prefixed "int-" in the local
+  * database. Tax classifications and GST registrations can never be deleted (by design), so every
+  * run uses fresh names and a freshly generated GSTIN.
+@@ -562,3 +562,106 @@
+     ).resolves.toHaveLength(1);
+   });
+ });
++
++describe('T-MIG-TAX-012: an inactive classification gets no new versions (revision 4)', () => {
++  it('refuses a new version, keeps recorded ones, and still allows a future one to be withdrawn', async () => {
++    const { h, admin } = await hospitalWithAdmin();
++    const c = await classification(h.id, admin.id, 'GOODS');
++    const version = (effectiveFrom: Date, ratePercent: string) =>
++      prisma.taxClassificationVersion.create({
++        data: {
++          hospitalId: h.id,
++          classificationId: c.id,
++          createdById: admin.id,
++          treatment: 'TAXABLE',
++          ratePercent,
++          priceIncludesTax: true,
++          effectiveFrom,
++        },
++      });
++    await version(await day(0), '5.00');
++    const future = await version(await day(5), '12.00');
++    await prisma.taxClassification.update({ where: { id: c.id }, data: { isActive: false } });
++    await expect(version(await day(9), '18.00')).rejects.toThrow(
++      /cannot be added to an inactive classification/,
++    );
++    expect(await prisma.taxClassificationVersion.count({ where: { classificationId: c.id } })).toBe(
++      2,
++    );
++    await expect(
++      prisma.taxClassificationVersion.delete({ where: { id: future.id } }),
++    ).resolves.toBeDefined();
++  });
++});
++
++describe('T-MIG-TAX-013: assigning a classification serialises with its deactivation (revision 4)', () => {
++  // A second connection plays the concurrent session. NOWAIT and lock_timeout keep the checks
++  // independent of timing.
++  const other = new PrismaClient();
++  afterAll(() => other.$disconnect());
++
++  it('an open default assignment holds the hospital row and the classification row', async () => {
++    const { h, admin } = await hospitalWithAdmin();
++    const service = await classification(h.id, admin.id, 'SERVICE');
++    await prisma.$transaction(async (tx) => {
++      await tx.hospitalTaxDefault.create({
++        data: {
++          hospitalId: h.id,
++          kind: 'CONSULTATION',
++          classificationId: service.id,
++          updatedById: admin.id,
++        },
++      });
++      await expect(
++        other.$queryRaw`SELECT 1 FROM hospitals WHERE id = ${h.id}::uuid FOR SHARE NOWAIT`,
++      ).rejects.toThrow(/could not obtain lock/);
++      // The concurrent deactivation has to wait; it gives up after a short lock timeout.
++      await expect(
++        other.$transaction(async (o) => {
++          await o.$executeRawUnsafe("SET LOCAL lock_timeout = '300ms'");
++          await o.taxClassification.update({
++            where: { id: service.id },
++            data: { isActive: false },
++          });
++        }),
++      ).rejects.toThrow(/lock timeout/);
++    });
++    // Once the assignment has committed, the deactivation sees it and is refused.
++    await expect(
++      other.taxClassification.update({ where: { id: service.id }, data: { isActive: false } }),
++    ).rejects.toThrow(/used as a hospital default/);
++    const after = await prisma.taxClassification.findUniqueOrThrow({ where: { id: service.id } });
++    expect(after.isActive).toBe(true);
++  });
++
++  it('an assignment made while a deactivation is open waits and is then refused', async () => {
++    const { h, admin } = await hospitalWithAdmin();
++    const service = await classification(h.id, admin.id, 'SERVICE');
++    await prisma.$transaction(async (tx) => {
++      await tx.taxClassification.update({ where: { id: service.id }, data: { isActive: false } });
++      await expect(
++        other.$transaction(async (o) => {
++          await o.$executeRawUnsafe("SET LOCAL lock_timeout = '300ms'");
++          await o.hospitalTaxDefault.create({
++            data: {
++              hospitalId: h.id,
++              kind: 'LAB',
++              classificationId: service.id,
++              updatedById: admin.id,
++            },
++          });
++        }),
++      ).rejects.toThrow(/lock timeout/);
++    });
++    await expect(
++      other.hospitalTaxDefault.create({
++        data: {
++          hospitalId: h.id,
++          kind: 'LAB',
++          classificationId: service.id,
++          updatedById: admin.id,
++        },
++      }),
++    ).rejects.toThrow(/inactive tax classification cannot be assigned/);
++  });
++});
+--- a/validation/behaviour_tests.py (revision 3)
++++ b/validation/behaviour_tests.py (revision 4)
+@@ -59,6 +59,7 @@
+             f'\'{typ}\',{q(gstin)},{q(name)},{q(state)},{start},\'{user}\')')
+ 
+ 
++DEACT_G = f"UPDATE tax_classifications SET \"isActive\"=false WHERE id='{GDS}'"
+ BASE = [cls(SVC, A, UA, "Healthcare services", "SERVICE", "9993"),
+         cls(GDS, A, UA, "Medicaments", "GOODS", "3004")]
+ V1 = "33333333-0000-0000-0000-000000000001"
+@@ -280,6 +281,25 @@
+     # --- Statutory room rule
+     ("room rule: seeded row is the 18 July 2022 rule",
+      ["DO $$ BEGIN IF (SELECT count(*) FROM statutory_room_tax_rules WHERE \"effectiveFrom\"='2022-07-18' AND \"thresholdPerDay\"=5000.00 AND \"ratePercent\"=5.00 AND \"sacCode\"='9993' AND NOT \"priceIncludesTax\") <> 1 THEN RAISE EXCEPTION 'seed missing'; END IF; END $$"], "ok"),
++    # --- Revision 4: inactive classifications get no new versions; recorded versions stay valid
++    ("version: new version on an inactive classification refused",
++     BASE + [DEACT_G, ver(V1, GDS, "TAXABLE", 5, "true", TODAY + " + 1")], "cannot be added to an inactive classification"),
++    ("version: deactivation allowed with versions recorded; both stay",
++     BASE + [ver(V1, GDS, "TAXABLE", 5, "true", TODAY), ver(V2, GDS, "TAXABLE", 12, "true", TODAY + " + 5"), DEACT_G,
++             f"DO $$ BEGIN IF (SELECT count(*) FROM tax_classification_versions WHERE \"classificationId\"='{GDS}') <> 2 THEN RAISE EXCEPTION 'versions lost'; END IF; END $$"], "ok"),
++    ("version: future version of a deactivated classification can still be withdrawn",
++     BASE + [ver(V2, GDS, "TAXABLE", 12, "true", TODAY + " + 5"), DEACT_G, f"DELETE FROM tax_classification_versions WHERE id='{V2}'"], "ok"),
++    ("version: future version of a deactivated classification can still be corrected",
++     BASE + [ver(V2, GDS, "TAXABLE", 12, "true", TODAY + " + 5"), DEACT_G, f"UPDATE tax_classification_versions SET \"ratePercent\"=18 WHERE id='{V2}'"], "ok"),
++    ("version: in-force version of a deactivated classification still cannot change",
++     BASE + [ver(V1, GDS, "TAXABLE", 5, "true", TODAY), DEACT_G, f"UPDATE tax_classification_versions SET \"ratePercent\"=18 WHERE id='{V1}'"], "cannot change"),
++    ("version: reactivated classification accepts new versions",
++     BASE + [DEACT_G, f"UPDATE tax_classifications SET \"isActive\"=true WHERE id='{GDS}'", ver(V1, GDS, "TAXABLE", 5, "true", TODAY + " + 1")], "ok"),
++    ("classification: assignment changes no classification value",
++     BASE + [f"CREATE TEMP TABLE before_c AS SELECT * FROM tax_classifications WHERE id='{SVC}'",
++             f"UPDATE lab_tests SET \"taxClassificationId\"='{SVC}' WHERE id='{LAB}'",
++             f"INSERT INTO hospital_tax_defaults VALUES ('{A}','LAB','{SVC}','{UA}',now())",
++             f"DO $$ BEGIN IF (SELECT to_jsonb(c) FROM tax_classifications c WHERE id='{SVC}') IS DISTINCT FROM (SELECT to_jsonb(b) FROM before_c b) THEN RAISE EXCEPTION 'classification changed'; END IF; END $$"], "ok"),
+     ("room rule: cannot be edited", ["UPDATE statutory_room_tax_rules SET \"thresholdPerDay\"=7500"], "append-only"),
+     ("room rule: cannot be deleted", ["DELETE FROM statutory_room_tax_rules"], "append-only"),
+     ("room rule: bad SAC refused", ["INSERT INTO statutory_room_tax_rules (\"effectiveFrom\",\"thresholdPerDay\",\"ratePercent\",\"sacCode\",\"legalReference\") VALUES ('2030-01-01',5000,5,'3004','x')"], "statutory_room_tax_rules_values_chk"),
+--- a/validation/classification_race_tests.sh (new)
++++ b/validation/classification_race_tests.sh (revision 4)
+@@ -0,0 +1,117 @@
++#!/bin/bash
++# M-11a revision 4: two-session races between assigning a classification, adding a version, and
++# deactivating that classification, at READ COMMITTED, REPEATABLE READ and SERIALIZABLE; lock order;
++# and a control (revision 3 assignment check, which read without locking) that shows the gap.
++# Scratch PostgreSQL 16 only. Real clock; versions start 30 days ahead, so the time of day is irrelevant.
++H=/home/claude/m11a
++A=aaaaaaaa-0000-0000-0000-000000000001; UA=aaaaaaaa-0000-0000-0000-0000000000a1
++LAB=aaaaaaaa-0000-0000-0000-00000000c001; MED=aaaaaaaa-0000-0000-0000-00000000d001
++C=11111111-0000-0000-0000-0000000000c1; G=11111111-0000-0000-0000-0000000000c2
++q() { (cd /tmp; sudo -u postgres psql -X -q -d "$DB" "$@" 2>&1); }
++pass() { echo "PASS $1"; }; fail() { echo "FAIL $1"; }
++fresh() { # $1 migration file
++  $H/rebuild.sh "$DB" && (cd /tmp; sudo -u postgres psql -v ON_ERROR_STOP=1 -q -d "$DB" -c "$(cat "$1")") && \
++  q -c "INSERT INTO tax_classifications (id,\"hospitalId\",name,\"supplyType\",\"hsnSac\",\"createdById\",\"updatedAt\") VALUES
++          ('$C','$A','Health care','SERVICE','9993','$UA',now()), ('$G','$A','Medicaments','GOODS','3004','$UA',now())" >/dev/null; }
++# $1 isolation, $2 first session (held open 3 s), $3 second session (starts after 1 s)
++race() {
++  ( (echo "BEGIN ISOLATION LEVEL $1; $2"; sleep 3; echo "COMMIT;") | (cd /tmp; sudo -u postgres psql -X -q -d "$DB") > /tmp/cr1.out 2>&1 ) &
++  sleep 1
++  (echo "BEGIN ISOLATION LEVEL $1; $3 COMMIT;" | (cd /tmp; sudo -u postgres psql -X -q -d "$DB") > /tmp/cr2.out 2>&1)
++  wait
++  S1=$(grep -m1 -o 'ERROR:.*' /tmp/cr1.out || echo committed); S2=$(grep -m1 -o 'ERROR:.*' /tmp/cr2.out || echo committed)
++  echo "     session 1: $S1"; echo "     session 2: $S2"
++}
++active() { q -Atc "SELECT \"isActive\" FROM tax_classifications WHERE id='$1'"; }
++count() { q -Atc "SELECT count(*) FROM $1"; }
++ASSIGN="INSERT INTO hospital_tax_defaults VALUES ('$A','CONSULTATION','$C','$UA',now());"
++DEACT="UPDATE tax_classifications SET \"isActive\" = false WHERE id='$C';"
++VERSION="INSERT INTO tax_classification_versions (id,\"hospitalId\",\"classificationId\",treatment,\"ratePercent\",\"priceIncludesTax\",\"effectiveFrom\",\"createdById\") VALUES (gen_random_uuid(),'$A','$C','EXEMPT',0,false,current_date + 30,'$UA');"
++MIG=$H/migration.sql
++DB=m11a_crace
++
++n=0
++for ISO in "READ COMMITTED" "REPEATABLE READ" "SERIALIZABLE"; do
++  echo "== $ISO: default assigned first, deactivation while it is open"
++  fresh $MIG; race "$ISO" "$ASSIGN" "$DEACT"
++  [ "$S1" = committed ] && [ "$S2" != committed ] && [ "$(active $C)" = t ] && [ "$(count hospital_tax_defaults)" = 1 ] \
++    && pass "$ISO: deactivation refused or serialized; the default keeps an active classification" || fail "$ISO: default then deactivate"
++  echo "== $ISO: deactivation first, default assigned while it is open"
++  fresh $MIG; race "$ISO" "$DEACT" "$ASSIGN"
++  [ "$S1" = committed ] && [ "$S2" != committed ] && [ "$(active $C)" = f ] && [ "$(count hospital_tax_defaults)" = 0 ] \
++    && pass "$ISO: assignment refused or serialized; no default points at the inactive classification" || fail "$ISO: deactivate then default"
++  echo "== $ISO: version added first, deactivation while it is open"
++  fresh $MIG; race "$ISO" "$VERSION" "$DEACT"
++  [ "$S1" = committed ] && [ "$S2" = committed ] && [ "$(active $C)" = f ] && [ "$(count tax_classification_versions)" = 1 ] \
++    && pass "$ISO: deactivation waits and succeeds; the version recorded while active stays" || fail "$ISO: version then deactivate"
++  echo "== $ISO: deactivation first, version added while it is open"
++  fresh $MIG; race "$ISO" "$DEACT" "$VERSION"
++  [ "$S1" = committed ] && [ "$S2" != committed ] && [ "$(count tax_classification_versions)" = 0 ] \
++    && pass "$ISO: the new version is refused or serialized; none on the inactive classification" || fail "$ISO: deactivate then version"
++done
++
++echo "== READ COMMITTED: deactivation first, lab test and medicine assigned while it is open"
++fresh $MIG
++race "READ COMMITTED" "$DEACT UPDATE tax_classifications SET \"isActive\" = false WHERE id='$G';" \
++  "UPDATE lab_tests SET \"taxClassificationId\"='$C' WHERE id='$LAB';"
++L=$S2
++( (echo "BEGIN; UPDATE tax_classifications SET \"isActive\" = true WHERE id IN ('$C','$G');"; sleep 0; echo "COMMIT;") | (cd /tmp; sudo -u postgres psql -X -q -d "$DB") >/dev/null 2>&1 )
++race "READ COMMITTED" "UPDATE tax_classifications SET \"isActive\" = false WHERE id='$G';" \
++  "UPDATE medicines SET \"taxClassificationId\"='$G' WHERE id='$MED';"
++[ "$L" != committed ] && [ "$S2" != committed ] && [ "$(q -Atc "SELECT count(*) FROM lab_tests WHERE \"taxClassificationId\" IS NOT NULL")$(q -Atc "SELECT count(*) FROM medicines WHERE \"taxClassificationId\" IS NOT NULL")" = 00 ] \
++  && pass "lab test and medicine assignments also wait and are refused" || fail "lab test / medicine assignment"
++
++echo "== Lock order: one transaction assigns a default and then adds a version, against a locking reader"
++fresh $MIG
++( (echo "BEGIN; $ASSIGN"; sleep 2; echo "$VERSION COMMIT;") | (cd /tmp; sudo -u postgres psql -X -q -d "$DB") > /tmp/cr1.out 2>&1 ) &
++sleep 1
++q -Atc "BEGIN; SELECT 1 FROM hospitals WHERE id='$A' FOR SHARE; SELECT 1 FROM tax_classifications WHERE id='$C' FOR SHARE; SELECT count(*) FROM tax_classification_versions; COMMIT;" > /tmp/cr2.out
++wait
++if grep -q ERROR /tmp/cr1.out /tmp/cr2.out; then fail "lock order: $(grep -h -m1 ERROR /tmp/cr1.out /tmp/cr2.out)"
++else grep -qx 1 /tmp/cr2.out && pass "no deadlock; the reader waited and saw the committed version" || fail "lock order: reader saw $(tr '\n' ' ' < /tmp/cr2.out)"; fi
++
++echo "== An open assignment does not block plain reads or foreign-key inserts for the hospital"
++fresh $MIG
++( (echo "BEGIN; $ASSIGN"; sleep 3; echo "COMMIT;") | (cd /tmp; sudo -u postgres psql -X -q -d "$DB") >/dev/null 2>&1 ) &
++sleep 1; T0=$(date +%s.%N)
++R=$(q -Atc "SELECT \"isActive\" FROM tax_classifications WHERE id='$C'")
++D=$(q -c "INSERT INTO departments (id,\"hospitalId\",name,\"updatedAt\") VALUES (gen_random_uuid(),'$A','Cardiology',now())")
++W=$(echo "$(date +%s.%N) - $T0" | bc | cut -c1-4); wait
++[ "$R" = t ] && [ -z "$D" ] && [ "$(echo "$W < 1" | bc)" = 1 ] && pass "plain read and department insert done in ${W}s" || fail "blocked: read=$R insert=${D:-ok} after ${W}s"
++
++echo "== Control: revision 3's assignment check (read without locking), READ COMMITTED and REPEATABLE READ"
++python3 - "$MIG" > /tmp/migration.rev3check.sql <<'PY'
++import sys
++s = open(sys.argv[1]).read()
++new = '''  PERFORM 1 FROM hospitals WHERE id = NEW."hospitalId" FOR NO KEY UPDATE;
++  UPDATE tax_classifications SET "isActive" = "isActive"
++   WHERE id = ref AND "hospitalId" = NEW."hospitalId"
++   RETURNING "supplyType", "isActive" INTO c;
++'''
++old = '''  SELECT "supplyType", "isActive" INTO c FROM tax_classifications
++   WHERE id = ref AND "hospitalId" = NEW."hospitalId";
++'''
++assert s.count(new) == 1
++sys.stdout.write(s.replace(new, old))
++PY
++for ISO in "READ COMMITTED" "REPEATABLE READ"; do
++  fresh /tmp/migration.rev3check.sql; race "$ISO" "$ASSIGN" "$DEACT"
++  [ "$S1" = committed ] && [ "$S2" = committed ] && [ "$(active $C)" = f ] && [ "$(count hospital_tax_defaults)" = 1 ] \
++    && pass "control $ISO: without the fix both commit and a default points at an inactive classification" || fail "control $ISO"
++done
++
++echo "== Rehearsal of T-MIG-TAX-013 (NOWAIT and lock_timeout from a second session), revision 4 and control"
++for M in "$MIG" /tmp/migration.rev3check.sql; do
++  fresh "$M"
++  ( (echo "BEGIN; $ASSIGN"; sleep 3; echo "COMMIT;") | (cd /tmp; sudo -u postgres psql -X -q -d "$DB") >/dev/null 2>&1 ) &
++  sleep 1
++  N=$(q -Atc "SELECT 1 FROM hospitals WHERE id='$A' FOR SHARE NOWAIT" | grep -c "could not obtain lock")
++  T=$(q -c "BEGIN; SET LOCAL lock_timeout = '300ms'; $DEACT ROLLBACK;" | grep -c "lock timeout")
++  wait
++  AFTER=$(q -c "$DEACT" | grep -o "used as a hospital default")
++  if [ "$M" = "$MIG" ]; then
++    [ "$N$T" = 11 ] && [ -n "$AFTER" ] && pass "T-MIG-TAX-013 rehearsal: hospital row locked, deactivation waits, then refused" || fail "T-MIG-TAX-013 rehearsal (nowait=$N timeout=$T after=$AFTER)"
++  else
++    [ "$N$T" = 00 ] && pass "T-MIG-TAX-013 rehearsal on the control: no lock held, so the test would fail without the fix" || fail "control rehearsal (nowait=$N timeout=$T)"
++  fi
++done
+--- a/validation/run_all.sh (revision 3)
++++ b/validation/run_all.sh (revision 4)
+@@ -1,10 +1,10 @@
+ #!/bin/bash
+-# Full M-11a validation run; writes results-rev3.txt. Concurrency races use the real clock: run before 23:50 IST.
+-cd /home/claude/m11a; L=/home/claude/m11a/results-rev3.txt; : > $L
++# Full M-11a validation run; writes results-rev4.txt. Concurrency races use the real clock: run before 23:50 IST.
++cd /home/claude/m11a; L=/home/claude/m11a/results-rev4.txt; : > $L
+ log() { echo "$@" | tee -a $L; }
+ run() { log ""; log "######## $1"; shift; "$@" 2>&1 | tee -a $L > /dev/null; }
+ P=/mnt/user-data/uploads/MedCore-HMS/apps/api/prisma/migrations
+-log "M-11a revision 3 validation, PostgreSQL $(cd /tmp; sudo -u postgres psql -Atc 'SHOW server_version' -d postgres | cut -d' ' -f1)"
++log "M-11a revision 4 validation, PostgreSQL $(cd /tmp; sudo -u postgres psql -Atc 'SHOW server_version' -d postgres | cut -d' ' -f1)"
+ log "started $(TZ=Asia/Kolkata date '+%Y-%m-%d %H:%M:%S IST'); migration.sql md5 $(md5sum migration.sql | cut -d' ' -f1); rollback.sql md5 $(md5sum rollback.sql | cut -d' ' -f1); schema.prisma md5 $(md5sum prisma/schema.prisma | cut -d' ' -f1)"
+ run "concurrency_tests.sh (real clock)" ./concurrency_tests.sh
+ log ""; log "######## existing rows and migration application (fresh scratch database m11a)"
+@@ -20,8 +20,9 @@
+ run "commit_tests.sh" ./commit_tests.sh
+ run "rollback_checks.sh" ./rollback_checks.sh
+ run "timing_tests.sh (commit stall, SET CONSTRAINTS bypass, timeouts, lock order)" ./timing_tests.sh
+-run "lock_nowait_tests.sh (SQL rehearsal of T-MIG-TAX-011) - revision 3" ./lock_nowait_tests.sh
++run "lock_nowait_tests.sh (SQL rehearsal of T-MIG-TAX-011) - final migration" ./lock_nowait_tests.sh
+ run "lock_nowait_tests.sh - control: writer locks removed" ./lock_nowait_tests.sh /tmp/migration.nolock.sql
++run "classification_race_tests.sh (assignment, version and deactivation races; revision 4)" ./classification_race_tests.sh
+ log ""; log "######## summary"
+ log "PASS lines: $(grep -c '^PASS' $L); FAIL lines: $(grep -c '^FAIL' $L)"
+ log "behaviour $(grep -E '^[0-9]+/[0-9]+ passed' $L); conformance $(grep 'checks match' $L); GSTIN $(grep 'checks passed' $L)"
+--- a/validation/timing_tests.sh (revision 3)
++++ b/validation/timing_tests.sh (revision 4)
+@@ -115,7 +115,17 @@
+ python3 - "$H/migration.sql" > /tmp/migration.nolock.sql <<'PY'
+ import re, sys
+ s = open(sys.argv[1]).read()
+-s2, n = re.subn(r"  IF TG_WHEN = 'BEFORE' THEN\n(    --[^\n]*\n)?    PERFORM 1 FROM (tax_classifications|hospitals)\n.*?FOR NO KEY UPDATE;\n  END IF;\n", "", s, flags=re.S)
++# Each writer-lock block is "  IF TG_WHEN = 'BEFORE' THEN ... FOR NO KEY UPDATE ...  END IF;" at two-space
++# indent; revision 4's block also holds the active-classification check, removed with it (revision 2).
++blocks = re.compile(r"  IF TG_WHEN = 'BEFORE' THEN\n(?:(?:    [^\n]*)?\n)*?  END IF;\n")
++n = 0
++def drop(m):
++    global n
++    if "FOR NO KEY UPDATE" in m.group(0):
++        n += 1
++        return ""
++    return m.group(0)
++s2 = blocks.sub(drop, s)
+ assert n == 2, n
+ sys.stdout.write(s2)
+ PY
+--- a/README.md (revision 3)
++++ b/README.md (revision 4)
+@@ -1,6 +1,6 @@
+ # Proposed migration M-11a: tax configuration (not applied)
+ 
+-Status: **revision 3, drafted and validated on PostgreSQL 16 only. Not in `prisma/migrations`, not applied to any
++Status: **revision 4, drafted and validated on PostgreSQL 16 only. Not in `prisma/migrations`, not applied to any
+ owner database.** Approved for drafting and validation by the owner on 2026-11-17 19:09 (DEC-055);
+ applying it needs a separate approval.
+ 
+@@ -8,18 +8,18 @@
+ nothing in this folder affects the application, `prisma migrate`, the integration tests or the drift check
+ until it is moved into place.
+ 
+-| File                                  | Becomes, on approval                                                                                                                                                                                                                                      |
+-| ------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+-| `migration.sql`                       | `apps/api/prisma/migrations/20261117200000_tax_configuration/migration.sql`                                                                                                                                                                               |
+-| `schema.prisma`                       | `apps/api/prisma/schema.prisma` (the change is shown in `schema.diff`)                                                                                                                                                                                    |
+-| `tests/constraints.int-spec.ts`       | `apps/api/test/constraints.int-spec.ts` (counts 51 tables, 53 triggers, 3 exclusions, plus M-11a names; diff in `tests/constraints.int-spec.diff`)                                                                                                        |
+-| `tests/tax-configuration.int-spec.ts` | `apps/api/test/tax-configuration.int-spec.ts` (new)                                                                                                                                                                                                       |
+-| `tests/tenant-scope.spec.ts`          | `apps/api/src/common/tenancy/tenant-scope.spec.ts` (47 scoped models, 4 global; diff in `tests/tenant-scope.spec.diff`)                                                                                                                                   |
+-| `tests/schema-tenancy.spec.ts`        | `apps/api/src/infra/prisma/schema-tenancy.spec.ts` (51 models; `StatutoryRoomTaxRule` documented as global; diff in `tests/schema-tenancy.spec.diff`)                                                                                                     |
+-| `rollback.sql`                        | Stays here. Manual reversal for review only; never run without approval                                                                                                                                                                                   |
+-| `validation/`                         | Stays here. Record of the PostgreSQL 16 validation (`results-rev3.txt`, `gstin_reference.md`)                                                                                                                                                             |
+-| `docs.patch`                          | Proposed changes to `docs/` for revisions 2 and 3 (DEC-056..058, TASKS, SECURITY R-15, TEST_PLAN, migration-review section 11). Not applied                                                                                                               |
+-| `review-rev3-vs-fc76ded.diff`         | Stays here. Review snapshot (2026-11-18 23:18 IST) of this folder against commit `fc76ded` (revision 1). Taken before the 2026-11-19 documentation corrections, so its copy of `docs.patch` and this README is older; every other file is unchanged since |
++| File                                  | Becomes, on approval                                                                                                                                                                                                                                                                                    |
++| ------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
++| `migration.sql`                       | `apps/api/prisma/migrations/20261117200000_tax_configuration/migration.sql`                                                                                                                                                                                                                             |
++| `schema.prisma`                       | `apps/api/prisma/schema.prisma` (the change is shown in `schema.diff`)                                                                                                                                                                                                                                  |
++| `tests/constraints.int-spec.ts`       | `apps/api/test/constraints.int-spec.ts` (counts 51 tables, 53 triggers, 3 exclusions, plus M-11a names; diff in `tests/constraints.int-spec.diff`)                                                                                                                                                      |
++| `tests/tax-configuration.int-spec.ts` | `apps/api/test/tax-configuration.int-spec.ts` (new)                                                                                                                                                                                                                                                     |
++| `tests/tenant-scope.spec.ts`          | `apps/api/src/common/tenancy/tenant-scope.spec.ts` (47 scoped models, 4 global; diff in `tests/tenant-scope.spec.diff`)                                                                                                                                                                                 |
++| `tests/schema-tenancy.spec.ts`        | `apps/api/src/infra/prisma/schema-tenancy.spec.ts` (51 models; `StatutoryRoomTaxRule` documented as global; diff in `tests/schema-tenancy.spec.diff`)                                                                                                                                                   |
++| `rollback.sql`                        | Stays here. Manual reversal for review only; never run without approval                                                                                                                                                                                                                                 |
++| `validation/`                         | Stays here. Record of the PostgreSQL 16 validation (`results-rev4.txt`, `gstin_reference.md`)                                                                                                                                                                                                           |
++| `docs.patch`                          | Proposed changes to `docs/` for revisions 2 and 3 (DEC-056..058, TASKS, SECURITY R-15, TEST_PLAN, migration-review section 11). Not applied. Does not yet cover revision 4                                                                                                                              |
++| `review-rev3-vs-fc76ded.diff`         | Stays here. Review snapshot (2026-11-18 23:18 IST) of this folder against commit `fc76ded` (revision 1). Revision 3 only: taken before revision 4 and the 2026-11-19 documentation corrections, so it no longer matches `migration.sql`, the tests, the validation scripts, `docs.patch` or this README |
+ 
+ The test changes are kept here because they describe the database after M-11a: moved early, they would
+ fail on a database without it.
+--- a/validation/README.md (revision 3)
++++ b/validation/README.md (revision 4)
+@@ -2,15 +2,21 @@
+ 
+ These scripts were used to validate M-11a in the build environment before approval. Paths refer to
+ that workspace (`/home/claude/m11a`, staged migrations under `/mnt/user-data/uploads`); they are kept
+-as a record of exactly what was run, not as project tooling.
++as a record of exactly what was run, not as project tooling. The last full run (revision 4) is in
++`results-rev4.txt`; `results-rev3.txt` is kept as the revision 3 record.
+ 
+-| Script                                  | What it checks                                                                                                                                                                                                                                       |
+-| --------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+-| `rebuild.sh`                            | Fresh scratch database from the ten applied migrations plus `seed.sql` (two hospitals, admins, a lab test, a medicine, two rooms)                                                                                                                    |
+-| `behaviour_tests.py`                    | 113 rule checks (revision 2), each in its own rolled-back transaction with a simulated clock (`medcore_tax_clock()` replaced inside that transaction only)                                                                                           |
+-| `commit_tests.sh`                       | Commit-time checks under a real `COMMIT`, on a throwaway database whose clock function is permanently simulated                                                                                                                                      |
+-| `concurrency_tests.sh`                  | Six two-session races between a time-zone change and the first tax version or registration (READ COMMITTED, REPEATABLE READ, SERIALIZABLE); real clock, run before 23:50 IST                                                                         |
+-| `gstin_verification.py`                 | `medcore_gstin_valid()` against python-stdnum 2.2 and real GSTINs from published documents; mutation and random comparisons                                                                                                                          |
+-| `rollback_checks.sh`                    | Atomicity (injected failure), re-apply refusal, manual reversal, reversal guard (configuration, later statutory rules, altered seed, lock-only)                                                                                                      |
+-| `conform.js`                            | 198 comparisons (revision 2) between the proposed Prisma schema (via Prisma's own schema WebAssembly, engine c2990dca) and the migrated database: columns, types, nullability, defaults, keys, unique indexes, foreign keys and actions, enum values |
+-| `dataq.sql`, `dataq_old.sql`, `dump.sh` | Row hashes and schema dumps used for before/after comparisons                                                                                                                                                                                        |
++| Script                                  | What it checks                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
++| --------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
++| `run_all.sh`                            | Runs everything below in order and writes `results-rev4.txt` (the record of the last full run)                                                                                                                                                                                                                                                                                                                                                                                                                |
++| `rebuild.sh`                            | Fresh scratch database from the eight migrations in `prisma/migrations` plus `seed.sql` (two hospitals, admins, a lab test, a medicine, two rooms)                                                                                                                                                                                                                                                                                                                                                            |
++| `behaviour_tests.py`                    | 120 rule checks (7 added in revision 4), each in its own rolled-back transaction with a simulated clock (`medcore_tax_clock()` replaced inside that transaction only)                                                                                                                                                                                                                                                                                                                                         |
++| `commit_tests.sh`                       | Commit-time checks under a real `COMMIT`, on a throwaway database whose clock function is permanently simulated                                                                                                                                                                                                                                                                                                                                                                                               |
++| `concurrency_tests.sh`                  | Six two-session races between a time-zone change and the first tax version or registration (READ COMMITTED, REPEATABLE READ, SERIALIZABLE); real clock, run before 23:50 IST                                                                                                                                                                                                                                                                                                                                  |
++| `timing_tests.sh` (rev 3)               | What the time checks do not guarantee and what the row locks do: a commit stalled in a synchronous-replication wait after its commit-time check; the `SET CONSTRAINTS ALL IMMEDIATE` bypass; locking readers still see only final values; `idle_in_transaction_session_timeout`; no `transaction_timeout` on PostgreSQL 16; FK inserts not blocked; lock order without deadlock; a control without the writer locks. Test 1 changes `synchronous_standby_names` on the scratch cluster and always restores it |
++| `lock_nowait_tests.sh` (rev 3)          | SQL rehearsal of T-MIG-TAX-011 (`FOR SHARE NOWAIT` from a second session), against revision 3 and against the control                                                                                                                                                                                                                                                                                                                                                                                         |
++| `classification_race_tests.sh` (rev 4)  | Two-session races between assigning a classification (hospital default, lab test, medicine), adding a version and deactivating that classification, at READ COMMITTED, REPEATABLE READ and SERIALIZABLE; lock order against a locking reader; plain reads and FK inserts not blocked; SQL rehearsal of T-MIG-TAX-013; a control with revision 3's unlocked assignment check that reproduces the race                                                                                                          |
++| `gstin_verification.py`                 | `medcore_gstin_valid()` against python-stdnum 2.2 and real GSTINs from published documents; mutation and random comparisons. Output: `gstin_verification-output.txt`                                                                                                                                                                                                                                                                                                                                          |
++| `gstin_reference.md`                    | Accepted and refused GSTIN formats, sources and every test vector                                                                                                                                                                                                                                                                                                                                                                                                                                             |
++| `rollback_checks.sh`                    | Atomicity (injected failure), re-apply refusal, manual reversal, reversal guard (configuration, later statutory rules, altered seed, lock-only)                                                                                                                                                                                                                                                                                                                                                               |
++| `conform.js`                            | 198 comparisons between the proposed Prisma schema (via Prisma's own schema WebAssembly, engine c2990dca) and the migrated database: columns, types, nullability, defaults, keys, unique indexes, foreign keys and actions, enum values                                                                                                                                                                                                                                                                       |
++| `dataq.sql`, `dataq_old.sql`, `dump.sh` | Row hashes and schema dumps used for before/after comparisons                                                                                                                                                                                                                                                                                                                                                                                                                                                 |

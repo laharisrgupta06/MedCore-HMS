@@ -155,18 +155,26 @@ staff agenda, availability, patient portal), all times shown in the hospital tim
 
 System quarantines (rows without a performer) are linked to that day's expiry report and accepted by a trigger only as the nightly run writes them (DEC-044 Layer A); separate database accounts follow in Phase 14 (P14-09). Prescriptions carry an append-only history (`prescription_events`); triggers enforce the status moves, and commit-time checks require every status change, verification and dispense to be written together with its event or status in one transaction. Services therefore wrap each transition and its event in one transaction and write the event only when the conditional update changed the row.
 
-## 6h. Billing and tax configuration (Phase 8; M-11a proposed, not applied)
+## 6h. Billing and tax configuration (Phase 8; M-11a in `prisma/migrations`, not yet applied)
 
-Approved design: DEC-045 to DEC-054. Tax configuration (M-11a, proposed in
-`prisma/proposed/20261117200000_tax_configuration/`, not yet applied) gives each hospital versioned tax
+Approved design: DEC-045 to DEC-054 and DEC-056 to DEC-059. Tax configuration (M-11a revision 4, in
+`prisma/migrations/20261117200000_tax_configuration/`, not yet applied on macOS) gives each hospital versioned tax
 classifications (`tax_classifications`, `tax_classification_versions`: the version in force on a date is the
 latest start on or before it, and none changes once in force), consultation and lab defaults confirmed by
 the hospital admin, dated GST registrations (one GSTIN per MedCore hospital, exclusion constraint), and
 classifications on lab tests (service) and medicines (goods). The statutory room rule
 (`statutory_room_tax_rules`) is platform reference data, outside tenant scope, changed only by migration;
-rooms record a critical-care unit. "Today" for these rules is always the hospital's own time zone
-(`medcore_hospital_today`). Supply classification is kept separate from GST collection (DEC-047): a taxable
-supply stays taxable when an unregistered or composition hospital collects no GST. Later migrations
+rooms record a critical-care unit. Effective dates are judged against the hospital's tax date
+(`medcore_tax_date`: its local date ten minutes ahead of the database clock), when each statement runs and
+again at commit; once a version or registration is in force the next must start after the tax date
+(DEC-056); the hospital's time zone is locked once its first tax date is computed (DEC-057). Writers of
+versions and registrations lock the hospital row, then the classification row, until they commit, so
+M-11b's invoice lines, which take shared locks in the same order, always match committed tax data; the
+ten-minute margin around midnight is a safety margin, not a guarantee (DEC-058). Assigning a
+classification serialises with deactivating it; a deactivated classification keeps its recorded versions
+but gets no new ones (DEC-059). Supply classification is
+kept separate from GST collection (DEC-047): a taxable supply stays taxable when an unregistered or
+composition hospital collects no GST. Later migrations
 (M-11b to M-14, each approved separately) add invoice lines that snapshot every tax value (DEC-051), document
 number series scoped to the GSTIN and allocated gap-free at finalising (DEC-052), issued-document
 immutability with correction requests (DEC-053), payments and webhooks (one platform provider account,

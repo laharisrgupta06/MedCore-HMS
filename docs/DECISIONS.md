@@ -268,6 +268,7 @@ the plan (sources listed there); each hospital's accountant must confirm its own
   (consultation, lab and radiology by a clinical establishment, SAC 9993) with taxable medicines.
 - Each hospital keeps `tax_classifications` (name, goods or service, HSN or SAC code; SAC codes start with
   99, HSN codes never do). Classifications are never deleted; only the name and active flag change.
+  What deactivation means for versions: DEC-059.
 - `tax_classification_versions` hold what applies from a date: treatment EXEMPT, NIL_RATED or TAXABLE,
   rate (0 unless TAXABLE; TAXABLE above 0 and at most 40), whether prices include tax. The version in force
   on a date has the latest start on or before it; a rate change is a new version. No version starts before
@@ -305,6 +306,12 @@ the plan (sources listed there); each hospital's accountant must confirm its own
   character, "Z", mod-36 check character; the registration's chosen state equals the GSTIN's state code.
   This proves a number is well formed, not that it is active: the hospital admin attests to the details
   (`attestedById`, `attestedAt`). No GST-portal lookup (outside service, out of scope).
+- Revision 2 (owner review 2026-11-18): accepted format is a normal or composition taxpayer registration,
+  `^[0-9]{2}[A-Z]{3}[ABCFGHJLPT][A-Z][0-9]{4}[A-Z][1-9A-Z]Z[0-9A-Z]$`, PAN serial not 0000, state 01 to 38,
+  Luhn mod 36. Refused by design: tax deductor and tax collector registrations, UIN, non-resident and OIDAR
+  formats, PAN holder type K, lower case (the API upper-cases input before saving). Verified against real
+  issued GSTINs and an independent implementation (python-stdnum 2.2): sources, accepted and refused
+  formats and every test vector are recorded in the proposal's `validation/gstin_reference.md`.
 
 ### DEC-049: Statutory room rule
 - Status: **Approved** (owner, 2026-11-17 19:09).
@@ -383,13 +390,100 @@ the plan (sources listed there); each hospital's accountant must confirm its own
   and credit notes outside MedCore, the externally credited balance limitation, B2C dynamic QR needs, and the
   outpatient pharmacy assumption (TASKS 8-G1).
 
-### DEC-055: M-11a tax configuration, drafted and validated (not applied)
-- Status: **Approved for drafting and PostgreSQL 16 validation only** (owner, 2026-11-17 19:09). Applying it
-  to the owner's database needs a separate approval. M-11b to M-14 are each presented separately.
-- Kept in `apps/api/prisma/proposed/20261117200000_tax_configuration/` until approved: Prisma reads only
-  `prisma/migrations` and `prisma/schema.prisma`, so the proposal cannot affect the application, migrations,
-  integration tests or drift. The test changes that describe the migrated database (T-MIG-001 counts,
-  T-TEN-001 model count, new T-MIG-TAX-002..008) are kept with it, since they would fail before it is applied.
-- Contents: 4 enums, 5 tables, 3 nullable columns on `lab_tests`, `medicines`, `rooms`, 2 on `hospitals`,
-  7 functions, CHECKs, 1 exclusion constraint, 8 triggers, 1 seeded room-rule row; no existing row changed.
+### DEC-055: M-11a tax configuration, validated and moved into the project (not yet applied)
+- Status: **Approved for drafting and PostgreSQL 16 validation** (owner, 2026-11-17 19:09) and **for moving
+  into the project** (owner, 2026-11-19 17:30). Applying it to the owner's database needs a separate
+  approval. M-11b to M-14 are each presented separately.
+- Moved into the project on 2026-11-19 (local commit, not pushed): the migration into
+  `prisma/migrations/20261117200000_tax_configuration/`, the proposed schema into `prisma/schema.prisma`, and
+  the test changes that describe the migrated database (T-MIG-001 counts, T-TEN-001 scoped-model count, the
+  schema-tenancy model count and global list (T-TEN-001d), new T-MIG-TAX-002..013). Until it is applied on
+  macOS, `prisma migrate deploy` lists it as pending and the integration tests that need it fail; unit tests
+  pass. `apps/api/prisma/proposed/20261117200000_tax_configuration/` stays as the review and validation
+  record (rollback script, validation scripts and results).
+- Contents (revision 3): 4 enums, 5 tables, 3 nullable columns on `lab_tests`, `medicines`, `rooms`,
+  3 on `hospitals` (`taxSetupConfirmedAt`, `taxSetupConfirmedById`, `taxTimezoneLockedAt`), 9 functions,
+  CHECKs, 1 exclusion constraint, 11 triggers (2 of them deferred constraint triggers), 1 seeded room-rule
+  row; no existing row changed. Database totals after it: 51 tables, 53 triggers, 3 exclusion constraints.
+- Revision 2 (owner review 2026-11-18 22:24): rollback guard also requires the seeded room rule to be
+  unchanged; effective dates use the hospital's tax date (DEC-058) and are checked again at commit; the
+  same-day rule (DEC-056); the hospital time zone is locked once tax data exists (DEC-057); GSTIN check
+  verified independently (DEC-048).
+- Revision 3 (owner review 2026-11-18 22:47): writers of effective-dated rows hold row locks until they
+  commit, hospital row first, and the limits of the time checks are documented (DEC-058).
+- Revision 4 (owner review 2026-11-19 15:55): assigning a classification (lab test, medicine, hospital
+  default) serialises with deactivating it at every isolation level (DEC-058); a new version needs an
+  active classification (DEC-059). Function bodies only: no object added or removed, so the contents and
+  totals above, the Prisma schema and `rollback.sql` are unchanged.
   Review and macOS commands: [migration-review.md](migration-review.md) section 11.
+
+### DEC-056: Same-day rule for effective-dated tax data
+- Status: **Approved** (owner, 2026-11-18 22:47).
+- The first classification version of a classification, and the first GST registration of a hospital,
+  may start on the hospital's current tax date (today). Once a version or registration is in force,
+  every later one must start after the tax date (tomorrow or later). This keeps an invoice issued earlier
+  today from ever falling under different tax data than one issued later today.
+- Enforced by the M-11a triggers (statement time and again at commit); behaviour tests and T-MIG-TAX-003,
+  T-MIG-TAX-006 cover both cases.
+
+### DEC-057: Hospital time zone is locked once tax data exists
+- Status: **Approved** (owner, 2026-11-18 22:47).
+- The first tax date computed for a hospital stamps `hospitals.taxTimezoneLockedAt`; from then on the
+  database refuses any change to `timezone` or to the stamp (trigger `hospitals_tax_timezone`).
+- API (8-B2): an attempt to change a locked time zone returns **HTTP 409 `TIMEZONE_LOCKED`**, checked
+  before the update and also mapped from the database error, with a message naming no other record.
+- UI (8-B2): hospital settings show the time zone as locked (read-only field with the reason), never an
+  editable control that then fails.
+- Corrections: only by a reviewed migration (presented and approved like any other), never through normal
+  application operations.
+
+### DEC-058: Commit-time checks, the freeze margin and the row-lock protocol
+- Status: **Approved** (owner, 2026-11-18 23:25, with M-11a revision 3).
+- Effective dates are judged against the hospital's *tax date*: its local date ten minutes ahead of the
+  database clock (`clock_timestamp()`). Checks run when each statement runs and again at commit (deferred
+  constraint triggers).
+- What this does **not** guarantee: a transaction can pass its commit-time check and become visible later
+  without limit (storage stall, synchronous-replication wait, demonstrated in `validation/timing_tests.sh`);
+  `SET CONSTRAINTS ALL IMMEDIATE` (or `SET CONSTRAINTS ... IMMEDIATE`) moves the commit-time check earlier,
+  which any client may do; a database superuser can disable triggers (R-11). So the ten-minute margin is a
+  safety margin for normal operation, **not an absolute guarantee** about midnight.
+- What does hold, independent of timing: every writer of a version or registration locks the hospital
+  row, and a version writer then also locks the classification row (`FOR NO KEY UPDATE`, which does not
+  block foreign-key checks), until it commits. The fixed order (hospital, then classification) means a
+  transaction that writes both kinds cannot deadlock with a reader. Side effect, accepted because tax
+  configuration changes are rare: tax configuration writes for one hospital run one at a time, and an
+  update of that hospital's row (for example its settings) waits until such a writer commits. A reader
+  that takes `FOR SHARE` in the same order (hospital row, then classification row) waits for any such
+  writer and then sees its final committed values. M-11b's line trigger must take these locks before
+  resolving and validating line snapshots (TASKS 8-A2), so an issued line always matches the final
+  committed tax data even when the time checks were bypassed or a commit was stalled.
+- Operational controls (P14-09): `idle_in_transaction_session_timeout` and `statement_timeout` for the
+  application role, Prisma interactive-transaction timeouts, `transaction_timeout` once on PostgreSQL 17,
+  no synchronous replication without review.
+- Revision 4 (approved with DEC-059, owner 2026-11-19 16:53): assigning a classification to a lab test,
+  medicine or hospital default also locks the hospital row first and then writes the classification row
+  without changing it. A lock alone is not enough: under REPEATABLE READ a deactivation whose snapshot
+  predates the assignment's commit would not see the new default. The write makes PostgreSQL serialise the
+  two: under READ COMMITTED the later one waits and then sees the other's result (refused); under
+  REPEATABLE READ and SERIALIZABLE the later one fails with a serialization error, which the API must
+  retry or report (8-B2). Revision 3 let both commit at READ COMMITTED and REPEATABLE READ, leaving a
+  default on an inactive classification (reproduced in `validation/classification_race_tests.sh`).
+- Limitation: renaming or deactivating a classification locks that row before any trigger runs, so the
+  database cannot take the hospital row first for that statement. A transaction that updates a
+  classification and then writes a version, registration or assignment for the same hospital takes the
+  locks in the reverse order and can deadlock with a concurrent locking reader; PostgreSQL then cancels
+  one of them (no hang). Not tested. The tax settings API locks the hospital row at the start of every
+  tax-settings transaction (8-B2); R-16.
+
+### DEC-059: Classification lifecycle: deactivation and versions
+- Status: **Approved** (owner, 2026-11-19 16:53, with M-11a revision 4).
+- Versions already recorded stay valid when their classification is deactivated; deactivation is allowed
+  while versions exist.
+- A new version cannot be created while the classification is inactive.
+- A future version (one not yet in force) can still be corrected or withdrawn after deactivation.
+- A version in force stays immutable, whether the classification is active or not (DEC-045).
+- Reactivating a classification permits new versions again.
+- Enforced by `tax_classification_versions_rules`, which reads the active flag under the classification
+  row lock, so a concurrent deactivation is either seen or causes a serialization error. Tests: behaviour
+  checks (one per rule), `classification_race_tests.sh` (versions against deactivation at three isolation
+  levels), T-MIG-TAX-012.

@@ -1,0 +1,46 @@
+== 1. Real GSTINs from published documents (expected valid in both)
+PASS 37AAHAA4036G1ZY  AIIMS Mangalagiri  [AIIMS Mangalagiri GST registration certificate, aiimsmangalagiri.edu.in]  SQL=True stdnum=True
+PASS 24AADCB2295A1Z7  Baroda Medicare Pvt Ltd (Sunshine Global Hospital)  [Gujarat AAR 106/2020, gstcouncil.gov.in]  SQL=True stdnum=True
+PASS 24AAQFM2633M1ZY  M/s MJ Solanki  [Telangana AAR 04/2024 (AIIMS Bibinagar), taxmanagementindia.com / livelaw.in]  SQL=True stdnum=True
+PASS 07ADKPJ3897P1ZM  M/s Kore Security Services  [Telangana AAR 04/2024 (AIIMS Bibinagar)]  SQL=True stdnum=True
+PASS 36AAVFP9999G1ZZ  M/s P. Suresh & Associates  [Telangana AAR 04/2024 (AIIMS Bibinagar)]  SQL=True stdnum=True
+PASS 08AAAGA0038H1ZY  AIIMS Jodhpur  [public GST record, knowyourgst.com]  SQL=True stdnum=True
+PASS 03AAAGA2223A1ZN  AIIMS Bathinda  [public GST record, knowyourgst.com]  SQL=True stdnum=True
+PASS 36AAAGA2453A1Z6  AIIMS Bibinagar  [public GST record, piceapp.com (shown in lower case)]  SQL=True stdnum=True
+PASS 18AAAGA2376L1ZB  AIIMS Guwahati  [public GST record, piceapp.com (shown in lower case)]  SQL=True stdnum=True
+PASS 33AAACA5443N3ZN  Apollo Hospitals Enterprise Ltd, Tamil Nadu  [public GST record, piceapp.com]  SQL=True stdnum=True
+PASS 07AAACA5443N1ZK  Apollo Hospitals Enterprise Ltd, Delhi  [public GST record, piceapp.com]  SQL=True stdnum=True
+PASS 19AAACA5443N1ZF  Apollo Hospitals Enterprise Ltd, West Bengal  [public GST record, piceapp.com]  SQL=True stdnum=True
+PASS 07AAATG2183J1ZO  Gujarmal Modi Hospital  [public GST record, knowyourgst.com]  SQL=True stdnum=True
+PASS 27AAPFU0939F1ZV  stdnum documented valid number  [python-stdnum doctest]  SQL=True stdnum=True
+
+== 2. stdnum's documented invalid numbers (expected invalid in both)
+PASS 27AAPFU0939F1ZO  (check character)  SQL=False stdnum=False
+PASS 27AAPFU0939F1AA  (14th character not Z)  SQL=False stdnum=False
+PASS 27AAPFU0939F1Z  (length 14)  SQL=False stdnum=False
+PASS 369296450896540  (format)  SQL=False stdnum=False
+
+== 3. Real registrations of other types (refused by design: not a supplier registration)
+PASS 08JDHA08253A1D4  AIIMS Jodhpur, tax deductor (TAN-based)  SQL=False stdnum=False
+PASS 20RCHA03549A1DF  AIIMS Deoghar, tax deductor  SQL=False stdnum=False
+PASS 07DELS71442A1DD  AIIMS New Delhi, tax deductor  SQL=False stdnum=False
+PASS 07DELG00001B1DM  G.B. Pant Hospital, tax deductor  SQL=False stdnum=False
+PASS 37HYDR05893G1DJ  Government General Hospital Ongole, tax deductor  SQL=False stdnum=False
+PASS 19CALA25755C1D3  AIIMS Kalyani, tax deductor  SQL=False stdnum=False
+PASS 22AACAA7875J1DV  AIIMS Raipur, tax deductor (PAN-based, D in place of Z)  SQL=False stdnum=False
+PASS 07DELD20333F1D7  Dr B.R.A. Institute Rotary Cancer Hospital, tax deductor  SQL=False stdnum=False
+
+== 4. Every single substitution and adjacent transposition of the real valid GSTINs
+PASS 7511 mutants: SQL and stdnum agree on 7511
+     mutants accepted: SQL 0, stdnum 0 (single substitutions of the check-protected part are always caught by Luhn mod 36)
+PASS no single-character substitution of a real GSTIN is accepted (0 found)
+
+== 5. 20,000 random well-formed candidates with a random check character
+PASS 20000 candidates: SQL and stdnum agree on 20000; 564 valid (about 1 in 36 expected: 555)
+
+== 6. Deliberate differences from stdnum
+PASS 38AAPFU0939F1ZS state 38 (Ladakh, assigned after stdnum's table): SQL=True stdnum=False
+PASS 27AAPKU0939F1ZK PAN holder K (not in the Income Tax Department list): SQL=False stdnum=True
+PASS 37aahaa4036g1zy lower case: SQL=False (the API must upper-case input first); stdnum=True (normalises)
+
+32/32 checks passed

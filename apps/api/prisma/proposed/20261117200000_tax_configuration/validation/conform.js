@@ -18,7 +18,7 @@ const NEW_MODELS = [
   'StatutoryRoomTaxRule',
 ];
 const NEW_FIELDS = {
-  Hospital: ['taxSetupConfirmedAt', 'taxSetupConfirmedById'],
+  Hospital: ['taxSetupConfirmedAt', 'taxSetupConfirmedById', 'taxTimezoneLockedAt'],
   LabTest: ['taxClassificationId'],
   Medicine: ['taxClassificationId'],
   Room: ['criticalCareUnit'],

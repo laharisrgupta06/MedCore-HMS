@@ -1,6 +1,6 @@
---- /tmp/ts.orig	2026-11-17 13:54:02.892003549 +0000
-+++ prisma/proposed/20261117200000_tax_configuration/tests/tenant-scope.spec.ts	2026-11-17 13:54:02.890003549 +0000
-@@ -5,12 +5,16 @@
+--- src/common/tenancy/tenant-scope.spec.ts	2026-11-17 13:56:21.659003615 +0000
++++ ../../apps/api/prisma/proposed/20261117200000_tax_configuration/tests/tenant-scope.spec.ts	2026-11-18 17:07:38.993157115 +0000
+@@ -5,12 +5,21 @@
  const OTHER = '22222222-2222-4222-8222-222222222222';
  
  describe('tenant scoping of Prisma operations (TEN-002/003)', () => {
@@ -13,7 +13,12 @@
      expect(TENANT_MODELS.has('PrescriptionEvent')).toBe(true);
 -    for (const global of ['Hospital', 'Icd10Code', 'WebhookEvent']) {
 +    // M-11a: tax configuration is hospital data; the statutory room rule is platform reference data.
-+    for (const scoped of ['TaxClassification', 'TaxClassificationVersion', 'HospitalTaxDefault', 'HospitalGstRegistration']) {
++    for (const scoped of [
++      'TaxClassification',
++      'TaxClassificationVersion',
++      'HospitalTaxDefault',
++      'HospitalGstRegistration',
++    ]) {
 +      expect(TENANT_MODELS.has(scoped)).toBe(true);
 +    }
 +    for (const global of ['Hospital', 'Icd10Code', 'WebhookEvent', 'StatutoryRoomTaxRule']) {

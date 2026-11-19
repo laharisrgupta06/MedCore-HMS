@@ -2,7 +2,7 @@ import { randomBytes } from 'node:crypto';
 import { PrismaClient } from '@prisma/client';
 
 /**
- * M-11a tax configuration rules on real PostgreSQL (T-MIG-TAX-002..008, DEC-045 to DEC-050).
+ * M-11a tax configuration rules on real PostgreSQL (T-MIG-TAX-002..013, DEC-045 to DEC-050).
  * Requires migration 20261117200000_tax_configuration. Creates rows prefixed "int-" in the local
  * database. Tax classifications and GST registrations can never be deleted (by design), so every
  * run uses fresh names and a freshly generated GSTIN.
@@ -65,10 +65,13 @@ async function hospitalWithAdmin() {
   return { h, admin };
 }
 
-/** Today and other days in the hospital's time zone (new hospitals default to Asia/Kolkata). */
+/**
+ * The hospital's tax date (its local date ten minutes from now, as medcore_tax_date computes it) plus
+ * an offset. New hospitals default to Asia/Kolkata.
+ */
 async function day(offset: number): Promise<Date> {
   const [r] = await prisma.$queryRaw<{ d: Date }[]>`
-    SELECT ((now() AT TIME ZONE 'Asia/Kolkata')::date + ${offset}::integer) AS d`;
+    SELECT (((clock_timestamp() + interval '10 minutes') AT TIME ZONE 'Asia/Kolkata')::date + ${offset}::integer) AS d`;
   return r!.d;
 }
 
@@ -143,9 +146,9 @@ describe('T-MIG-TAX-003: classification versions', () => {
         where: { id: v.id },
         data: { ratePercent: '12.00' },
       }),
-    ).rejects.toThrow(/has taken effect cannot change/);
+    ).rejects.toThrow(/cannot change \(tax date/);
     await expect(prisma.taxClassificationVersion.delete({ where: { id: v.id } })).rejects.toThrow(
-      /has taken effect cannot change/,
+      /cannot change \(tax date/,
     );
   });
 
@@ -181,7 +184,7 @@ describe('T-MIG-TAX-003: classification versions', () => {
           effectiveFrom: await day(-1),
         },
       }),
-    ).rejects.toThrow(/cannot start before today/);
+    ).rejects.toThrow(/cannot start before/);
     await expect(
       prisma.taxClassificationVersion.create({
         data: {
@@ -396,5 +399,269 @@ describe('T-MIG-TAX-008: critical-care rooms', () => {
     await expect(
       prisma.room.update({ where: { id: room.id }, data: { dailyCharge: 9500 } }),
     ).resolves.toBeDefined();
+  });
+});
+
+describe('T-MIG-TAX-009: the time zone is fixed once tax dates exist (revision 2)', () => {
+  it('can change before, is stamped by the first version, and is then refused', async () => {
+    const { h, admin } = await hospitalWithAdmin();
+    await expect(
+      prisma.hospital.update({ where: { id: h.id }, data: { timezone: 'Asia/Dubai' } }),
+    ).resolves.toMatchObject({ timezone: 'Asia/Dubai', taxTimezoneLockedAt: null });
+    await prisma.hospital.update({ where: { id: h.id }, data: { timezone: 'Asia/Kolkata' } });
+    const c = await classification(h.id, admin.id, 'GOODS');
+    await prisma.taxClassificationVersion.create({
+      data: {
+        hospitalId: h.id,
+        classificationId: c.id,
+        createdById: admin.id,
+        treatment: 'TAXABLE',
+        ratePercent: '5.00',
+        priceIncludesTax: true,
+        effectiveFrom: await day(0),
+      },
+    });
+    const locked = await prisma.hospital.findUniqueOrThrow({ where: { id: h.id } });
+    expect(locked.taxTimezoneLockedAt).toBeInstanceOf(Date);
+    await expect(
+      prisma.hospital.update({ where: { id: h.id }, data: { timezone: 'America/Los_Angeles' } }),
+    ).rejects.toThrow(
+      /time zone of a hospital with tax versions or GST registrations cannot change/,
+    );
+    await expect(
+      prisma.hospital.update({ where: { id: h.id }, data: { taxTimezoneLockedAt: null } }),
+    ).rejects.toThrow(/cannot change/);
+    await expect(
+      prisma.hospital.update({ where: { id: h.id }, data: { phone: '+910000000001' } }),
+    ).resolves.toBeDefined();
+  });
+});
+
+describe('T-MIG-TAX-010: effective dates are checked again at commit (revision 2)', () => {
+  it('refuses an edit made before midnight whose commit lands after it', async () => {
+    const { h, admin } = await hospitalWithAdmin();
+    const c = await classification(h.id, admin.id, 'GOODS');
+    const v = await prisma.taxClassificationVersion.create({
+      data: {
+        hospitalId: h.id,
+        classificationId: c.id,
+        createdById: admin.id,
+        treatment: 'TAXABLE',
+        ratePercent: '12.00',
+        priceIncludesTax: true,
+        effectiveFrom: await day(2),
+      },
+    });
+    const start = v.effectiveFrom.toISOString().slice(0, 10);
+    // Inside one transaction that always rolls back: swap the tax clock for a simulated one, edit the
+    // version at 23:45 the evening before it starts (accepted), move the clock past midnight and run
+    // the commit-time checks. The swap is undone with the transaction.
+    const run = prisma.$transaction(async (tx) => {
+      await tx.$executeRawUnsafe(
+        "CREATE OR REPLACE FUNCTION medcore_tax_clock() RETURNS timestamptz LANGUAGE sql VOLATILE AS $$ SELECT current_setting('medcore_test.clock')::timestamptz $$",
+      );
+      await tx.$executeRawUnsafe(
+        `SELECT set_config('medcore_test.clock', (DATE '${start}' - 1 + TIME '23:45')::text || '+05:30', true)`,
+      );
+      await tx.taxClassificationVersion.update({
+        where: { id: v.id },
+        data: { ratePercent: '5.00' },
+      });
+      await tx.$executeRawUnsafe(
+        `SELECT set_config('medcore_test.clock', (DATE '${start}' + TIME '00:01')::text || '+05:30', true)`,
+      );
+      await tx.$executeRawUnsafe('SET CONSTRAINTS ALL IMMEDIATE');
+      throw new Error('commit-time check did not fire');
+    });
+    await expect(run).rejects.toThrow(/cannot change \(tax date/);
+    const after = await prisma.taxClassificationVersion.findUniqueOrThrow({ where: { id: v.id } });
+    expect(after.ratePercent.toFixed(2)).toBe('12.00');
+    const [clockFn] = await prisma.$queryRaw<{ src: string }[]>`
+      SELECT prosrc AS src FROM pg_proc WHERE proname = 'medcore_tax_clock'`;
+    expect(clockFn!.src).toContain('clock_timestamp()');
+  });
+});
+
+describe('T-MIG-TAX-011: writers hold row locks until they commit (revision 3)', () => {
+  // A second connection plays the reader. NOWAIT makes the checks independent of timing: a locked row
+  // fails at once with "could not obtain lock" instead of waiting.
+  const reader = new PrismaClient();
+  afterAll(() => reader.$disconnect());
+
+  it('a version writer locks its hospital and classification rows: locking readers wait, plain reads see the old value', async () => {
+    const { h, admin } = await hospitalWithAdmin();
+    const c = await classification(h.id, admin.id, 'GOODS');
+    const v = await prisma.taxClassificationVersion.create({
+      data: {
+        hospitalId: h.id,
+        classificationId: c.id,
+        createdById: admin.id,
+        treatment: 'TAXABLE',
+        ratePercent: '12.00',
+        priceIncludesTax: true,
+        effectiveFrom: await day(5),
+      },
+    });
+    const seen = await prisma.$transaction(async (tx) => {
+      await tx.taxClassificationVersion.update({
+        where: { id: v.id },
+        data: { ratePercent: '5.00' },
+      });
+      const locked = reader.$queryRaw`SELECT 1 FROM tax_classifications WHERE id = ${c.id}::uuid FOR SHARE NOWAIT`;
+      await expect(locked).rejects.toThrow(/could not obtain lock/);
+      // Every writer takes the hospital row first (fixed lock order).
+      await expect(
+        reader.$queryRaw`SELECT 1 FROM hospitals WHERE id = ${h.id}::uuid FOR SHARE NOWAIT`,
+      ).rejects.toThrow(/could not obtain lock/);
+      const plain = await reader.taxClassificationVersion.findUniqueOrThrow({
+        where: { id: v.id },
+      });
+      return plain.ratePercent.toFixed(2);
+    });
+    expect(seen).toBe('12.00');
+    await expect(
+      reader.$queryRaw`SELECT 1 FROM tax_classifications WHERE id = ${c.id}::uuid FOR SHARE NOWAIT`,
+    ).resolves.toHaveLength(1);
+  });
+
+  it('a registration writer locks its hospital row without blocking foreign-key inserts', async () => {
+    const { h, admin } = await hospitalWithAdmin();
+    // Stamp the time zone lock first, so the only hospital-row lock inside the transaction below is
+    // the one revision 3 adds.
+    const c = await classification(h.id, admin.id, 'GOODS');
+    await prisma.taxClassificationVersion.create({
+      data: {
+        hospitalId: h.id,
+        classificationId: c.id,
+        createdById: admin.id,
+        treatment: 'TAXABLE',
+        ratePercent: '5.00',
+        priceIncludesTax: true,
+        effectiveFrom: await day(5),
+      },
+    });
+    await prisma.$transaction(async (tx) => {
+      await tx.hospitalGstRegistration.create({
+        data: {
+          hospitalId: h.id,
+          attestedById: admin.id,
+          registrationType: 'UNREGISTERED',
+          effectiveFrom: await day(5),
+        },
+      });
+      await expect(
+        reader.$queryRaw`SELECT 1 FROM hospitals WHERE id = ${h.id}::uuid FOR SHARE NOWAIT`,
+      ).rejects.toThrow(/could not obtain lock/);
+      // Foreign-key checks take KEY SHARE, which FOR NO KEY UPDATE does not block.
+      await expect(
+        reader.department.create({ data: { hospitalId: h.id, name: `int-dept-${uid()}` } }),
+      ).resolves.toBeDefined();
+    });
+    await expect(
+      reader.$queryRaw`SELECT 1 FROM hospitals WHERE id = ${h.id}::uuid FOR SHARE NOWAIT`,
+    ).resolves.toHaveLength(1);
+  });
+});
+
+describe('T-MIG-TAX-012: an inactive classification gets no new versions (revision 4)', () => {
+  it('refuses a new version, keeps recorded ones, and still allows a future one to be withdrawn', async () => {
+    const { h, admin } = await hospitalWithAdmin();
+    const c = await classification(h.id, admin.id, 'GOODS');
+    const version = (effectiveFrom: Date, ratePercent: string) =>
+      prisma.taxClassificationVersion.create({
+        data: {
+          hospitalId: h.id,
+          classificationId: c.id,
+          createdById: admin.id,
+          treatment: 'TAXABLE',
+          ratePercent,
+          priceIncludesTax: true,
+          effectiveFrom,
+        },
+      });
+    await version(await day(0), '5.00');
+    const future = await version(await day(5), '12.00');
+    await prisma.taxClassification.update({ where: { id: c.id }, data: { isActive: false } });
+    await expect(version(await day(9), '18.00')).rejects.toThrow(
+      /cannot be added to an inactive classification/,
+    );
+    expect(await prisma.taxClassificationVersion.count({ where: { classificationId: c.id } })).toBe(
+      2,
+    );
+    await expect(
+      prisma.taxClassificationVersion.delete({ where: { id: future.id } }),
+    ).resolves.toBeDefined();
+  });
+});
+
+describe('T-MIG-TAX-013: assigning a classification serialises with its deactivation (revision 4)', () => {
+  // A second connection plays the concurrent session. NOWAIT and lock_timeout keep the checks
+  // independent of timing.
+  const other = new PrismaClient();
+  afterAll(() => other.$disconnect());
+
+  it('an open default assignment holds the hospital row and the classification row', async () => {
+    const { h, admin } = await hospitalWithAdmin();
+    const service = await classification(h.id, admin.id, 'SERVICE');
+    await prisma.$transaction(async (tx) => {
+      await tx.hospitalTaxDefault.create({
+        data: {
+          hospitalId: h.id,
+          kind: 'CONSULTATION',
+          classificationId: service.id,
+          updatedById: admin.id,
+        },
+      });
+      await expect(
+        other.$queryRaw`SELECT 1 FROM hospitals WHERE id = ${h.id}::uuid FOR SHARE NOWAIT`,
+      ).rejects.toThrow(/could not obtain lock/);
+      // The concurrent deactivation has to wait; it gives up after a short lock timeout.
+      await expect(
+        other.$transaction(async (o) => {
+          await o.$executeRawUnsafe("SET LOCAL lock_timeout = '300ms'");
+          await o.taxClassification.update({
+            where: { id: service.id },
+            data: { isActive: false },
+          });
+        }),
+      ).rejects.toThrow(/lock timeout/);
+    });
+    // Once the assignment has committed, the deactivation sees it and is refused.
+    await expect(
+      other.taxClassification.update({ where: { id: service.id }, data: { isActive: false } }),
+    ).rejects.toThrow(/used as a hospital default/);
+    const after = await prisma.taxClassification.findUniqueOrThrow({ where: { id: service.id } });
+    expect(after.isActive).toBe(true);
+  });
+
+  it('an assignment made while a deactivation is open waits and is then refused', async () => {
+    const { h, admin } = await hospitalWithAdmin();
+    const service = await classification(h.id, admin.id, 'SERVICE');
+    await prisma.$transaction(async (tx) => {
+      await tx.taxClassification.update({ where: { id: service.id }, data: { isActive: false } });
+      await expect(
+        other.$transaction(async (o) => {
+          await o.$executeRawUnsafe("SET LOCAL lock_timeout = '300ms'");
+          await o.hospitalTaxDefault.create({
+            data: {
+              hospitalId: h.id,
+              kind: 'LAB',
+              classificationId: service.id,
+              updatedById: admin.id,
+            },
+          });
+        }),
+      ).rejects.toThrow(/lock timeout/);
+    });
+    await expect(
+      other.hospitalTaxDefault.create({
+        data: {
+          hospitalId: h.id,
+          kind: 'LAB',
+          classificationId: service.id,
+          updatedById: admin.id,
+        },
+      }),
+    ).rejects.toThrow(/inactive tax classification cannot be assigned/);
   });
 });

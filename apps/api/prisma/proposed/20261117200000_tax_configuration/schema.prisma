@@ -382,6 +382,9 @@ model Hospital {
   invoicePrefix      String             @default("INV")
   taxSetupConfirmedAt   DateTime?       @db.Timestamptz(3)
   taxSetupConfirmedById String?         @db.Uuid
+  /// Set when the hospital's first tax version or GST registration is written (M-11a); from then on
+  /// the database refuses any change to `timezone`, so effective dates cannot move.
+  taxTimezoneLockedAt   DateTime?       @db.Timestamptz(3)
 
   address             Address?             @relation("HospitalAddress", fields: [addressId], references: [id], onDelete: Restrict)
   /// Same-tenant guarantee: the address must belong to this hospital (constraints.sql, DEC-031).
