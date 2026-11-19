@@ -89,6 +89,7 @@ export class LabService {
     sampleType: t.sampleType,
     price: t.price.toFixed(2),
     isActive: t.isActive,
+    taxClassificationId: t.taxClassificationId,
     ranges: t.ranges.map(toRange),
   });
 

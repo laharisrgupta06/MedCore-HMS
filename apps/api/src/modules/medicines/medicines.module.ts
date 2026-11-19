@@ -180,6 +180,7 @@ export class MedicinesService {
       strength: m.strength,
       reorderLevel: m.reorderLevel,
       isActive: m.isActive,
+      taxClassificationId: m.taxClassificationId,
       available: avail.get(m.id) ?? 0,
     }));
   }

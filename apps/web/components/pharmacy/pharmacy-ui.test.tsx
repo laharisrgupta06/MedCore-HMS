@@ -244,6 +244,7 @@ describe('MedicineStockView', () => {
     strength: '500 mg',
     reorderLevel: 5,
     isActive: true,
+    taxClassificationId: null,
     available: 4,
   };
   it('shows batch states, the nightly run as performer, and adjusts with a reason (exact body)', async () => {

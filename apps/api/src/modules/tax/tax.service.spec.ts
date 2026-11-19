@@ -82,4 +82,22 @@ describe('TaxService input checks', () => {
       expect.objectContaining({ response: expect.objectContaining({ code: 'DEFAULTS_MISSING' }) }),
     );
   });
+
+  it('refuses a classification the hospital does not own, before writing the default or assignment', async () => {
+    const upsert = jest.fn();
+    const update = jest.fn();
+    const { svc } = make({
+      taxClassification: { findFirst: async () => null },
+      hospitalTaxDefault: { upsert },
+      medicine: { findFirst: async () => ({ id: 'm1' }), update },
+    });
+    await expect(svc.setDefault(actor, 'LAB', { classificationId: 'x' })).rejects.toThrow(
+      expect.objectContaining({ status: 404 }),
+    );
+    await expect(svc.assign(actor, 'medicines', 'm1', { classificationId: 'x' })).rejects.toThrow(
+      expect.objectContaining({ status: 404 }),
+    );
+    expect(upsert).not.toHaveBeenCalled();
+    expect(update).not.toHaveBeenCalled();
+  });
 });

@@ -46,6 +46,7 @@ const med: Medicine = {
   strength: '625 mg',
   reorderLevel: 10,
   isActive: true,
+  taxClassificationId: null,
   available: 40,
 };
 const record = {

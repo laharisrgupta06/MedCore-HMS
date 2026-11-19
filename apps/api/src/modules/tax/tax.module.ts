@@ -4,7 +4,6 @@ import {
   Controller,
   Delete,
   Get,
-  HttpCode,
   HttpException,
   Injectable,
   Module,
@@ -216,6 +215,12 @@ export class TaxService {
     });
   }
 
+  /** 404 unless the classification belongs to this hospital (the client is tenant scoped). */
+  private async ownClassification(tx: Prisma.TransactionClient, id: string): Promise<void> {
+    const c = await tx.taxClassification.findFirst({ where: { id }, select: { id: true } });
+    if (!c) throw notFound('tax classification');
+  }
+
   async settings(actor: AuthPrincipal): Promise<TaxSettings> {
     const db = this.db.client;
     const hospital = await db.hospital.findFirst({
@@ -380,20 +385,26 @@ export class TaxService {
     });
   }
 
-  async deleteVersion(actor: AuthPrincipal, id: string): Promise<void> {
-    await this.write(actor, async (tx) => {
+  async deleteVersion(actor: AuthPrincipal, id: string): Promise<{ id: string; deleted: true }> {
+    return this.write(actor, async (tx) => {
       const v = await tx.taxClassificationVersion.findFirst({
         where: { id },
         select: { id: true },
       });
       if (!v) throw notFound('tax version');
       await tx.taxClassificationVersion.delete({ where: { id } });
+      return { id, deleted: true as const };
     });
   }
 
-  async setDefault(actor: AuthPrincipal, kind: TaxDefaultKind, dto: DefaultDto): Promise<void> {
-    await this.write(actor, (tx) =>
-      tx.hospitalTaxDefault.upsert({
+  async setDefault(
+    actor: AuthPrincipal,
+    kind: TaxDefaultKind,
+    dto: DefaultDto,
+  ): Promise<{ kind: TaxDefaultKind; classificationId: string }> {
+    await this.write(actor, async (tx) => {
+      await this.ownClassification(tx, dto.classificationId);
+      return tx.hospitalTaxDefault.upsert({
         where: { hospitalId_kind: { hospitalId: actor.hospitalId!, kind } },
         create: {
           hospitalId: actor.hospitalId!,
@@ -402,8 +413,9 @@ export class TaxService {
           updatedById: actor.userId,
         },
         update: { classificationId: dto.classificationId, updatedById: actor.userId },
-      }),
-    );
+      });
+    });
+    return { kind, classificationId: dto.classificationId };
   }
 
   async addRegistration(actor: AuthPrincipal, dto: RegistrationDto): Promise<{ id: string }> {
@@ -426,11 +438,15 @@ export class TaxService {
     );
   }
 
-  async deleteRegistration(actor: AuthPrincipal, id: string): Promise<void> {
-    await this.write(actor, async (tx) => {
+  async deleteRegistration(
+    actor: AuthPrincipal,
+    id: string,
+  ): Promise<{ id: string; deleted: true }> {
+    return this.write(actor, async (tx) => {
       const r = await tx.hospitalGstRegistration.findFirst({ where: { id }, select: { id: true } });
       if (!r) throw notFound('GST registration');
       await tx.hospitalGstRegistration.delete({ where: { id } });
+      return { id, deleted: true as const };
     });
   }
 
@@ -460,9 +476,10 @@ export class TaxService {
     item: 'lab-tests' | 'medicines',
     id: string,
     dto: AssignDto,
-  ): Promise<void> {
-    await this.write(actor, async (tx) => {
+  ): Promise<{ id: string; taxClassificationId: string | null }> {
+    return this.write(actor, async (tx) => {
       const data = { taxClassificationId: dto.classificationId ?? null };
+      if (data.taxClassificationId) await this.ownClassification(tx, data.taxClassificationId);
       const found =
         item === 'lab-tests'
           ? await tx.labTest.findFirst({ where: { id }, select: { id: true } })
@@ -470,6 +487,7 @@ export class TaxService {
       if (!found) throw notFound(item === 'lab-tests' ? 'lab test' : 'medicine');
       if (item === 'lab-tests') await tx.labTest.update({ where: { id }, data });
       else await tx.medicine.update({ where: { id }, data });
+      return { id, ...data };
     });
   }
 }
@@ -538,7 +556,6 @@ export class TaxController {
   }
 
   @Delete('versions/:id')
-  @HttpCode(204)
   @Roles('HOSPITAL_ADMIN')
   @Audit('tax.version.delete', 'TaxClassificationVersion')
   deleteVersion(@CurrentUser() a: AuthPrincipal, @Param('id', uuid) id: string) {
@@ -546,7 +563,6 @@ export class TaxController {
   }
 
   @Put('defaults/:kind')
-  @HttpCode(204)
   @Roles('HOSPITAL_ADMIN')
   @Audit('tax.default.set', 'HospitalTaxDefault')
   setDefault(
@@ -574,7 +590,6 @@ export class TaxController {
   }
 
   @Delete('registrations/:id')
-  @HttpCode(204)
   @Roles('HOSPITAL_ADMIN')
   @Audit('tax.registration.delete', 'HospitalGstRegistration')
   deleteRegistration(@CurrentUser() a: AuthPrincipal, @Param('id', uuid) id: string) {
@@ -589,7 +604,6 @@ export class TaxController {
   }
 
   @Put('assignments/lab-tests/:id')
-  @HttpCode(204)
   @Roles('HOSPITAL_ADMIN')
   @Audit('tax.assign.lab-test', 'LabTest')
   assignLabTest(
@@ -601,7 +615,6 @@ export class TaxController {
   }
 
   @Put('assignments/medicines/:id')
-  @HttpCode(204)
   @Roles('HOSPITAL_ADMIN')
   @Audit('tax.assign.medicine', 'Medicine')
   assignMedicine(

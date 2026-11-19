@@ -16,6 +16,16 @@ import { email, phone } from '@/lib/validation';
 import { hospitalsApi } from '@/services/org';
 import { useAuth } from '@/store/auth';
 
+/** A time zone the browser knows (the API checks the IANA list again). */
+function isTimeZone(v: string): boolean {
+  try {
+    new Intl.DateTimeFormat('en', { timeZone: v });
+    return v.includes('/') || v === 'UTC';
+  } catch {
+    return false;
+  }
+}
+
 const schema = z.object({
   name: z.string().trim().min(1, 'Enter the hospital name.').max(120),
   email,
@@ -24,7 +34,7 @@ const schema = z.object({
   timezone: z
     .string()
     .trim()
-    .regex(/^[A-Za-z_]+(\/[A-Za-z0-9_+-]+)*$/, 'Use an IANA time zone, for example Asia/Kolkata.'),
+    .refine(isTimeZone, 'Use an IANA time zone, for example Asia/Kolkata.'),
   currency: z
     .string()
     .trim()
@@ -118,7 +128,14 @@ export function HospitalSettings() {
               {F('licenseNumber', 'Licence number')}
               {F('email', 'Contact email', { type: 'email' })}
               {F('phone', 'Contact phone', { type: 'tel' })}
-              {F('timezone', 'Time zone')}
+              {F(
+                'timezone',
+                'Time zone',
+                h.timezoneLocked ? { readOnly: true, className: 'bg-surface-muted' } : {},
+                h.timezoneLocked
+                  ? 'Locked: tax dates already use this time zone, so it cannot be changed here.'
+                  : 'Used for appointment times and tax dates. It locks once tax settings are recorded.',
+              )}
               {F('defaultSlotMinutes', 'Default appointment length (minutes)', {
                 type: 'number',
                 inputMode: 'numeric',

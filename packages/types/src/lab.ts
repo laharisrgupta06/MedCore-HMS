@@ -34,6 +34,8 @@ export interface LabTest {
   sampleType: string | null;
   price: string;
   isActive: boolean;
+  /** Tax classification for billing (BILL-008); null means the hospital's lab default. */
+  taxClassificationId: string | null;
   ranges: LabRange[];
 }
 

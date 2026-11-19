@@ -28,6 +28,8 @@ export interface Medicine {
   strength: string;
   reorderLevel: number;
   isActive: boolean;
+  /** Tax classification for billing (BILL-008); null until assigned in tax settings. */
+  taxClassificationId: string | null;
   /** Units in active, unexpired batches (cached up to 60 s, CACHE-002). */
   available: number;
 }

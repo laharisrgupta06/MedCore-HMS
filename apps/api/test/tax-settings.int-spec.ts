@@ -212,7 +212,7 @@ describe('Phase 8 integration: tax settings API on PostgreSQL', () => {
       }),
     ]);
     expect(s1.timezoneLocked).toBe(true); // tax dates now exist
-    await a.del(`/api/tax/versions/${fut}`).expect(204);
+    await a.del(`/api/tax/versions/${fut}`).expect(200);
 
     // ---- T-TAX-API-003: the time zone is locked (DEC-057) -------------------------------------
     const tz = await a.patch(`/api/hospitals/${A.id}`, { timezone: 'Europe/London' }).expect(409);
@@ -228,13 +228,14 @@ describe('Phase 8 integration: tax settings API on PostgreSQL', () => {
 
     // ---- T-TAX-API-004: defaults, confirmation, deactivation guard -----------------------------
     expect((await a.post('/api/tax/confirm').expect(400)).body.error.code).toBe('DEFAULTS_MISSING');
-    await a.put('/api/tax/defaults/CONSULTATION', { classificationId: consult }).expect(204);
-    await a.put('/api/tax/defaults/LAB', { classificationId: lab }).expect(204);
+    await a.put('/api/tax/defaults/CONSULTATION', { classificationId: consult }).expect(200);
+    await a.put('/api/tax/defaults/LAB', { classificationId: lab }).expect(200);
     expect(
       (await a.put('/api/tax/defaults/LAB', { classificationId: meds }).expect(409)).body.error
         .code,
     ).toBe('RULE_VIOLATION'); // goods cannot be a lab default
     await a.put('/api/tax/defaults/ROOM', { classificationId: lab }).expect(400);
+    await b.put('/api/tax/defaults/LAB', { classificationId: lab }).expect(404); // A's classification
     expect((await a.post('/api/tax/confirm').expect(201)).body.data.setupConfirmedAt).toEqual(
       expect.any(String),
     );
@@ -254,7 +255,7 @@ describe('Phase 8 integration: tax settings API on PostgreSQL', () => {
         reorderLevel: 1,
       },
     });
-    await a.put(`/api/tax/assignments/medicines/${med.id}`, { classificationId: meds }).expect(204);
+    await a.put(`/api/tax/assignments/medicines/${med.id}`, { classificationId: meds }).expect(200);
     expect(
       (await prisma.medicine.findUniqueOrThrow({ where: { id: med.id } })).taxClassificationId,
     ).toBe(meds);
@@ -265,7 +266,7 @@ describe('Phase 8 integration: tax settings API on PostgreSQL', () => {
           .expect(409)
       ).body.error.code,
     ).toBe('RULE_VIOLATION');
-    await a.put(`/api/tax/assignments/medicines/${med.id}`, { classificationId: null }).expect(204);
+    await a.put(`/api/tax/assignments/medicines/${med.id}`, { classificationId: null }).expect(200);
 
     // ---- T-TAX-API-006: GST registrations ----------------------------------------------------
     const g = gstin();
@@ -323,7 +324,7 @@ describe('Phase 8 integration: tax settings API on PostgreSQL', () => {
       .expect(409);
     expect(taken.body.error.code).toBe('GSTIN_UNAVAILABLE');
     expect(JSON.stringify(taken.body)).not.toContain(A.id);
-    await a.del(`/api/tax/registrations/${reg}`).expect(204);
+    await a.del(`/api/tax/registrations/${reg}`).expect(200);
 
     // ---- T-TAX-API-008: tenant isolation -----------------------------------------------------
     await b.patch(`/api/tax/classifications/${meds}`, { name: 'stolen' }).expect(404);
@@ -336,6 +337,18 @@ describe('Phase 8 integration: tax settings API on PostgreSQL', () => {
       })
       .expect(404);
     await b.put(`/api/tax/assignments/medicines/${med.id}`, { classificationId: null }).expect(404);
+    const bMed = await prisma.medicine.create({
+      data: {
+        hospitalId: B.id,
+        name: `int-tx-b-${run}`,
+        form: 'TABLET',
+        strength: '1 mg',
+        reorderLevel: 1,
+      },
+    });
+    await b
+      .put(`/api/tax/assignments/medicines/${bMed.id}`, { classificationId: meds })
+      .expect(404);
     expect((await b.get('/api/tax/settings').expect(200)).body.data.classifications).toEqual([]);
 
     // ---- T-TAX-API-009: concurrent writes never produce a 500 --------------------------------

@@ -56,6 +56,7 @@ const test: LabTest = {
   ...hb,
   price: '200.00',
   isActive: true,
+  taxClassificationId: null,
   ranges: [
     { gender: null, ageMinYears: null, ageMaxYears: null, low: 12, high: 16 },
     { gender: 'MALE', ageMinYears: 18, ageMaxYears: null, low: 13, high: 17 },

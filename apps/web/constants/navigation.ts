@@ -20,6 +20,7 @@ import {
   FileText,
   ClipboardCheck,
   BellRing,
+  ReceiptText,
 } from 'lucide-react';
 
 export interface NavItem {
@@ -126,6 +127,12 @@ export const STAFF_NAV: NavItem[] = [
   },
   { href: '/dashboard/staff', label: 'Staff', icon: Users, roles: ['HOSPITAL_ADMIN'] },
   { href: '/dashboard/departments', label: 'Departments', icon: Layers, roles: ['HOSPITAL_ADMIN'] },
+  {
+    href: '/dashboard/tax',
+    label: 'Tax settings',
+    icon: ReceiptText,
+    roles: ['HOSPITAL_ADMIN', 'ACCOUNTANT'],
+  },
   {
     href: '/dashboard/hospital',
     label: 'Hospital settings',
