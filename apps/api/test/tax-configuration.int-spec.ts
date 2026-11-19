@@ -14,17 +14,32 @@ let n = 0;
 const uid = () => `${run}-${++n}`;
 
 const ALPHABET = '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ';
-/** A well-formed GSTIN for state 27 with a random PAN and the correct mod-36 check character. */
-function gstin(): string {
-  const letters = () => Array.from(randomBytes(5), (b) => ALPHABET[10 + (b % 26)]).join('');
-  const digits = () => Array.from(randomBytes(4), (b) => String(b % 10)).join('');
-  const first14 = `27${letters()}${digits()}${ALPHABET[10 + (randomBytes(1)[0]! % 26)]}1Z`;
+/** PAN holder types accepted by medcore_gstin_valid (DEC-048 revision 2); K is refused. */
+const PAN_HOLDER_TYPES = 'ABCFGHJLPT';
+
+/** Appends the mod-36 check character to the first 14 characters of a GSTIN. */
+function withCheckCharacter(first14: string): string {
   let s = 0;
   for (let i = 0; i < 14; i++) {
     const p = ALPHABET.indexOf(first14[i]!) * (i % 2 === 0 ? 1 : 2);
     s += Math.floor(p / 36) + (p % 36);
   }
   return first14 + ALPHABET[(36 - (s % 36)) % 36];
+}
+
+/**
+ * A GSTIN that medcore_gstin_valid accepts (DEC-048 revision 2): state 27, a random PAN whose fourth
+ * character is a valid holder type and whose serial is 0001..9999, entity 1, Z, check character.
+ * Random so every run uses a GSTIN no earlier run has registered (the exclusion constraint keeps a
+ * GSTIN to one hospital, and integration runs keep their rows).
+ */
+function gstin(): string {
+  const r = randomBytes(8);
+  const letter = (b: number) => ALPHABET[10 + (b % 26)]!;
+  const serial = String(1 + (r.readUInt16BE(6) % 9999)).padStart(4, '0');
+  const holder = PAN_HOLDER_TYPES[r[3]! % PAN_HOLDER_TYPES.length]!;
+  const pan = `${letter(r[0]!)}${letter(r[1]!)}${letter(r[2]!)}${holder}${letter(r[4]!)}${serial}${letter(r[5]!)}`;
+  return withCheckCharacter(`27${pan}1Z`);
 }
 
 async function requireMigration(): Promise<void> {
@@ -319,6 +334,44 @@ describe('T-MIG-TAX-006: GST registrations', () => {
     await expect(prisma.hospitalGstRegistration.delete({ where: { id: r.id } })).rejects.toThrow(
       /cannot be deleted/,
     );
+  });
+
+  it('test GSTINs are valid, and the holder-type and serial rules are enforced (regression)', async () => {
+    // Regression: the generator once drew the PAN holder type from all 26 letters, so about 61% of
+    // generated GSTINs failed hospital_gst_registrations_details_chk and these tests failed at random.
+    const sample = Array.from({ length: 200 }, gstin);
+    const [row] = await prisma.$queryRaw<{ invalid: bigint }[]>`
+      SELECT count(*) AS invalid FROM unnest(${sample}::text[]) AS g WHERE NOT medcore_gstin_valid(g)`;
+    expect(Number(row!.invalid)).toBe(0);
+
+    const { h, admin } = await hospitalWithAdmin();
+    const g = gstin();
+    const base = {
+      hospitalId: h.id,
+      attestedById: admin.id,
+      legalName: 'int legal name',
+      stateCode: '27',
+      effectiveFrom: await day(0),
+    };
+    // Same PAN with holder type K (not a current PAN category), with a correct check character.
+    const holderK = withCheckCharacter(`${g.slice(0, 5)}K${g.slice(6, 14)}`);
+    // Same PAN with serial 0000, with a correct check character.
+    const serial0000 = withCheckCharacter(`${g.slice(0, 7)}0000${g.slice(11, 14)}`);
+    for (const bad of [holderK, serial0000]) {
+      for (const registrationType of ['REGULAR', 'COMPOSITION'] as const) {
+        await expect(
+          prisma.hospitalGstRegistration.create({
+            data: { ...base, registrationType, gstin: bad },
+          }),
+        ).rejects.toThrow(/hospital_gst_registrations_details_chk/);
+      }
+    }
+    // A composition registration with a valid GSTIN is accepted.
+    await expect(
+      prisma.hospitalGstRegistration.create({
+        data: { ...base, registrationType: 'COMPOSITION', gstin: g },
+      }),
+    ).resolves.toMatchObject({ registrationType: 'COMPOSITION', gstin: g });
   });
 
   it('Q1g A: one GSTIN belongs to one hospital, across registration changes', async () => {
