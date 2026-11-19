@@ -63,3 +63,86 @@ test('error messages never contain the database password', () => {
     assert.doesNotMatch(String(e.message), /s3cret/);
   }
 });
+
+// ---- Preflight (check.mjs) ------------------------------------------------------------------
+import { spawn } from 'node:child_process';
+import { createRequire } from 'node:module';
+import { readFileSync } from 'node:fs';
+import { E2E_PASSWORD_EMAIL, passwordProblem, pendingMigrations } from './check.mjs';
+
+test('E2E_PASSWORD rules match the application password rules exactly', () => {
+  const { checkPassword } = createRequire(import.meta.url)('../../packages/types/dist/index.js');
+  const samples = [
+    '',
+    'short1',
+    'abcdefghij',
+    '1234567890',
+    'abcdefghi1',
+    'Correct-Horse-9',
+    'x'.repeat(127) + '1',
+    'x'.repeat(128) + '1',
+    E2E_PASSWORD_EMAIL,
+    ' E2E-Super-Admin@medcore.test ',
+    'naïve-pass-1',
+  ];
+  for (const p of samples) {
+    assert.equal(
+      passwordProblem(p) === null,
+      checkPassword(p, E2E_PASSWORD_EMAIL) === null,
+      `sample of length ${p.length}`,
+    );
+  }
+  assert.match(passwordProblem(undefined), /not set/);
+});
+
+test('pending migrations are those in the repository that are not applied', () => {
+  const all = pendingMigrations([]);
+  assert.ok(all.length >= 9 && all.includes('20261116085814_init'));
+  assert.deepEqual(pendingMigrations(all), []);
+  assert.deepEqual(pendingMigrations(all.slice(0, -1)), all.slice(-1));
+});
+
+test('the preflight only ever reads, and only the maintenance or E2E database', () => {
+  const src = readFileSync(new URL('./check.mjs', import.meta.url), 'utf8');
+  const sql = [...src.matchAll(/select\(\s*(?:'postgres'|E2E_DB),\s*[`'"](.+?)[`'"]\s*\)/gs)].map(
+    (m) => m[1],
+  );
+  assert.ok(sql.length >= 3);
+  for (const q of sql) assert.match(q.trim(), /^SELECT /);
+  assert.doesNotMatch(src, /\b(DROP|CREATE|DELETE|UPDATE|INSERT|TRUNCATE|ALTER)\b/);
+});
+
+test('prepare validates E2E_PASSWORD before anything is dropped', () => {
+  const src = readFileSync(new URL('./db.mjs', import.meta.url), 'utf8');
+  const prepare = src.slice(src.indexOf("if (step === 'prepare')"));
+  assert.ok(prepare.indexOf('precheck()') < prepare.indexOf('recreate()'));
+});
+
+test('the launcher stops its whole process group, leaving nothing running', async () => {
+  // A stand-in for "pnpm exec nest start": a shell whose grandchild ignores nothing and sleeps.
+  const script = `
+    import { spawn } from 'node:child_process';
+    const c = spawn('sh', ['-c', 'sleep 60 & echo $! ; wait'], { detached: true, stdio: ['ignore', 'inherit', 'inherit'] });
+    process.on('SIGTERM', () => { try { process.kill(-c.pid, 'SIGTERM'); } catch {} });
+    c.on('exit', () => process.exit(0));
+  `;
+  const launcher = spawn(process.execPath, ['--input-type=module', '-e', script], {
+    stdio: ['ignore', 'pipe', 'inherit'],
+  });
+  const grandchild = await new Promise((done) =>
+    launcher.stdout.once('data', (d) => done(Number(String(d).trim()))),
+  );
+  const alive = (pid) => {
+    try {
+      process.kill(pid, 0);
+      return true;
+    } catch {
+      return false;
+    }
+  };
+  assert.ok(alive(grandchild));
+  launcher.kill('SIGTERM');
+  await new Promise((done) => launcher.once('exit', done));
+  await new Promise((done) => setTimeout(done, 300));
+  assert.equal(alive(grandchild), false);
+});

@@ -6,6 +6,7 @@
 // maintenance database. It never connects to, migrates or seeds the development database.
 import { spawnSync } from 'node:child_process';
 import { resolve } from 'node:path';
+import { passwordProblem } from './check.mjs';
 import { E2E_DB, ROOT, assertE2eDatabaseUrl, e2eEnv } from './env.mjs';
 
 const env = e2eEnv();
@@ -54,14 +55,28 @@ function migrate() {
   });
 }
 
+/** Checks that cannot fail half way: run before anything is dropped. */
+function precheck() {
+  const problem = passwordProblem(env.E2E_PASSWORD);
+  if (problem) {
+    console.error(`${problem}\nNothing was changed.`);
+    process.exit(1);
+  }
+}
+
 function seed() {
   assertE2eDatabaseUrl(env.DATABASE_URL);
+  precheck();
   run('pnpm', ['exec', 'nest', 'build'], { cwd: API });
   run(process.execPath, ['dist/cli/seed-e2e.js'], { cwd: API });
 }
 
 const step = process.argv[2];
 if (step === 'prepare') {
+  precheck();
+  process.stdout.write(
+    `Recreating ${E2E_DB} (the disposable E2E database only; your ${env.POSTGRES_DB} database is not touched).\n`,
+  );
   recreate();
   migrate();
   seed();

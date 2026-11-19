@@ -6,7 +6,8 @@ import { defineConfig, devices } from '@playwright/test';
  * Runs only against the isolated E2E stack (DEC-061): web on 3100 and API on 3101, connected to the
  * disposable medcore_e2e database and Redis database 1. Your development stack (3000/3001, your
  * development database) is never used. Prepare the database once with `pnpm e2e:db:prepare`;
- * Playwright starts the two servers itself (or reuses them if already running).
+ * `pnpm test:e2e` runs a read-only preflight (`pnpm e2e:check`), then Playwright starts both servers
+ * and stops them when the run ends.
  * Browsers are installed separately with: pnpm --filter @medcore/e2e exec playwright install
  */
 const WEB = 'http://localhost:3100';
@@ -27,14 +28,17 @@ export default defineConfig({
     {
       command: 'node ../scripts/e2e/run.mjs api',
       url: 'http://localhost:3101/api/health',
-      reuseExistingServer: !process.env.CI,
+      // Always a fresh server, stopped at the end (the preflight refuses a busy port).
+      reuseExistingServer: false,
       timeout: 180_000,
+      gracefulShutdown: { signal: 'SIGTERM', timeout: 15_000 },
     },
     {
       command: 'node ../scripts/e2e/run.mjs web',
       url: WEB,
-      reuseExistingServer: !process.env.CI,
+      reuseExistingServer: false,
       timeout: 180_000,
+      gracefulShutdown: { signal: 'SIGTERM', timeout: 15_000 },
     },
   ],
   projects: [
