@@ -21,6 +21,8 @@ export interface Hospital {
   taxRatePercent: string;
   invoicePrefix: string;
   subscriptionStatus: SubscriptionStatus;
+  /** True once tax data uses the time zone (DEC-057): it can no longer be changed in the app. */
+  timezoneLocked: boolean;
   createdAt: string;
 }
 

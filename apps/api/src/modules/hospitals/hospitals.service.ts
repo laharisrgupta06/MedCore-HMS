@@ -1,5 +1,5 @@
 import { ConflictException, Injectable } from '@nestjs/common';
-import type { Hospital as HospitalDto } from '@medcore/types';
+import { TaxErrorCode, type Hospital as HospitalDto } from '@medcore/types';
 import type { Hospital, Prisma } from '@prisma/client';
 import { SessionStore } from '../../common/auth/session.store';
 import { PaginatedResult } from '../../common/http/paginated-result';
@@ -8,6 +8,14 @@ import { skipTake } from '../../common/dto/fields';
 import { TenantPrismaService } from '../../common/tenancy/tenant-prisma.service';
 import { AuthService } from '../auth/auth.service';
 import type { CreateHospitalDto, ListHospitalsQuery, UpdateHospitalDto } from './hospitals.dto';
+
+function timezoneLocked(): ConflictException {
+  return new ConflictException({
+    code: TaxErrorCode.TIMEZONE_LOCKED,
+    message:
+      'The time zone is locked because tax settings already use it. A correction needs a reviewed database migration.',
+  });
+}
 
 export function toHospital(h: Hospital): HospitalDto {
   return {
@@ -25,6 +33,7 @@ export function toHospital(h: Hospital): HospitalDto {
     taxRatePercent: h.taxRatePercent.toString(),
     invoicePrefix: h.invoicePrefix,
     subscriptionStatus: h.subscriptionStatus,
+    timezoneLocked: h.taxTimezoneLockedAt !== null,
     createdAt: h.createdAt.toISOString(),
   };
 }
@@ -127,9 +136,20 @@ export class HospitalsService {
   }
 
   async update(id: string, dto: UpdateHospitalDto): Promise<HospitalDto> {
-    await this.get(id);
-    const h = await this.db.client.hospital.update({ where: { id }, data: { ...dto } });
-    return toHospital(h);
+    const current = await this.db.client.hospital.findUnique({ where: { id } });
+    if (!current) throw notFound('hospital');
+    // DEC-057: once tax dates exist the time zone is fixed; corrections need a reviewed migration.
+    if (dto.timezone && dto.timezone !== current.timezone && current.taxTimezoneLockedAt)
+      throw timezoneLocked();
+    try {
+      const h = await this.db.client.hospital.update({ where: { id }, data: { ...dto } });
+      return toHospital(h);
+    } catch (e) {
+      // The lock can be stamped between the read above and this update; the database trigger refuses it.
+      if (e instanceof Error && e.message.includes('time zone of a hospital with tax versions'))
+        throw timezoneLocked();
+      throw e;
+    }
   }
 
   async setStatus(id: string, status: 'VERIFIED' | 'SUSPENDED'): Promise<HospitalDto> {

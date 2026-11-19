@@ -8,3 +8,5 @@ export * from './appointments';
 export * from './emr';
 export * from './pharmacy';
 export * from './lab';
+export * from './billing';
+export * from './tax';

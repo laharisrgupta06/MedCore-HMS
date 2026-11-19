@@ -118,3 +118,15 @@ PATCH,/api/lab-orders/:id/reject,DENY,DENY,DENY,DENY,DENY,ALLOW,DENY,DENY,DENY,S
 POST,/api/lab-orders/:id/amend,DENY,DENY,DENY,DENY,DENY,ALLOW,DENY,DENY,DENY,Senior; approved orders
 GET,/api/lab-orders/:id/report,DENY,DENY,ALLOW,ALLOW,DENY,ALLOW,DENY,DENY,OWN,Approved only; flags in red
 GET,/api/lab-orders/:id/report-file,DENY,DENY,ALLOW,ALLOW,DENY,ALLOW,DENY,DENY,OWN,Attached PDF
+GET,/api/tax/settings,DENY,ALLOW,DENY,DENY,DENY,DENY,DENY,ALLOW,DENY,BILL-008 tax settings (8-B2)
+POST,/api/tax/classifications,DENY,ALLOW,DENY,DENY,DENY,DENY,DENY,DENY,DENY,BILL-008 classification
+PATCH,/api/tax/classifications/:id,DENY,ALLOW,DENY,DENY,DENY,DENY,DENY,DENY,DENY,Name and active flag (DEC-059)
+POST,/api/tax/classifications/:id/versions,DENY,ALLOW,DENY,DENY,DENY,DENY,DENY,DENY,DENY,Dated rate version (DEC-047)
+PATCH,/api/tax/versions/:id,DENY,ALLOW,DENY,DENY,DENY,DENY,DENY,DENY,DENY,Future versions only (DEC-059)
+DELETE,/api/tax/versions/:id,DENY,ALLOW,DENY,DENY,DENY,DENY,DENY,DENY,DENY,Future versions only (DEC-059)
+PUT,/api/tax/defaults/:kind,DENY,ALLOW,DENY,DENY,DENY,DENY,DENY,DENY,DENY,Consultation and lab defaults
+POST,/api/tax/registrations,DENY,ALLOW,DENY,DENY,DENY,DENY,DENY,DENY,DENY,GST registration (DEC-048)
+DELETE,/api/tax/registrations/:id,DENY,ALLOW,DENY,DENY,DENY,DENY,DENY,DENY,DENY,Not yet in force only
+POST,/api/tax/confirm,DENY,ALLOW,DENY,DENY,DENY,DENY,DENY,DENY,DENY,Tax set-up confirmation
+PUT,/api/tax/assignments/lab-tests/:id,DENY,ALLOW,DENY,DENY,DENY,DENY,DENY,DENY,DENY,Lab test classification
+PUT,/api/tax/assignments/medicines/:id,DENY,ALLOW,DENY,DENY,DENY,DENY,DENY,DENY,DENY,Medicine classification

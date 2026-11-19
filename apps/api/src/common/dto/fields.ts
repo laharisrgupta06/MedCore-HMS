@@ -10,6 +10,7 @@ import {
   Matches,
   Max,
   MaxLength,
+  ValidateBy,
   Min,
   ValidateIf,
 } from 'class-validator';
@@ -99,3 +100,27 @@ export class PageQuery {
 }
 
 export const skipTake = (q: PageQuery) => ({ skip: (q.page - 1) * q.limit, take: q.limit });
+
+const IANA_ZONES = new Set(Intl.supportedValuesOf('timeZone'));
+
+/** A real IANA time zone known to the runtime (8-B2), not merely zone-shaped text. */
+export function isIanaTimeZone(value: unknown): boolean {
+  if (typeof value !== 'string') return false;
+  if (IANA_ZONES.has(value) || value === 'UTC') return true;
+  try {
+    // Accept canonical aliases the runtime resolves (for example Asia/Calcutta).
+    new Intl.DateTimeFormat('en', { timeZone: value });
+    return /^[A-Za-z_]+(\/[A-Za-z0-9_+-]+)+$/.test(value);
+  } catch {
+    return false;
+  }
+}
+
+export const IsIanaTimeZone = () =>
+  ValidateBy({
+    name: 'isIanaTimeZone',
+    validator: {
+      validate: (v) => isIanaTimeZone(v),
+      defaultMessage: () => 'timezone must be an IANA time zone, for example Asia/Kolkata',
+    },
+  });

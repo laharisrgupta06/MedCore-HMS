@@ -12,7 +12,15 @@ import {
   Min,
   ValidateNested,
 } from 'class-validator';
-import { Email, PageQuery, PersonName, Phone, Text, trim } from '../../common/dto/fields';
+import {
+  Email,
+  IsIanaTimeZone,
+  PageQuery,
+  PersonName,
+  Phone,
+  Text,
+  trim,
+} from '../../common/dto/fields';
 
 const upper = ({ value }: { value: unknown }) =>
   typeof value === 'string' ? value.trim().toUpperCase() : value;
@@ -47,7 +55,7 @@ export class CreateHospitalDto extends HospitalProfileFields {
 
   @ApiPropertyOptional({ default: 'Asia/Kolkata' })
   @IsOptional()
-  @Matches(/^[A-Za-z_]+(\/[A-Za-z0-9_+-]+)*$/, { message: 'timezone must be an IANA time zone' })
+  @IsIanaTimeZone()
   timezone?: string;
 
   @ApiPropertyOptional({ default: 'INR' })
@@ -82,7 +90,7 @@ export class UpdateHospitalDto {
 
   @ApiPropertyOptional()
   @IsOptional()
-  @Matches(/^[A-Za-z_]+(\/[A-Za-z0-9_+-]+)*$/, { message: 'timezone must be an IANA time zone' })
+  @IsIanaTimeZone()
   timezone?: string;
 
   @ApiPropertyOptional()
