@@ -487,3 +487,63 @@ the plan (sources listed there); each hospital's accountant must confirm its own
   row lock, so a concurrent deactivation is either seen or causes a serialization error. Tests: behaviour
   checks (one per rule), `classification_race_tests.sh` (versions against deactivation at three isolation
   levels), T-MIG-TAX-012.
+
+## Phases 8–10 execution (architecture review approved 2026-11-19 19:10)
+
+Owner decisions on the Phases 8–10 architecture review (D1–D6) and related approvals. Each entry says
+whether it is approved scope from the PRD or earlier decisions, or a new requirement.
+
+### DEC-060: Patient-facing pages are built with their backend (D1 B)
+- Status: **Approved** (owner, 2026-11-19 19:10). Scope unchanged; order of work only.
+- Portal billing pages (finalised invoices, online checkout, payment history, receipts) are built in Phase 8
+  with the billing API; the portal and staff notification inbox in Phase 9 with the notification API.
+  Phase 10 is the hardening of the existing portal: one ownership check, a patient-isolation suite, the
+  dashboard summary, reschedule in the portal if missing, mobile and accessibility, and the PRD journeys.
+- The existing portal is extended, never rebuilt. Alternative rejected: strictly sequential phases (each
+  API reopened and tested twice).
+
+### DEC-061: Isolated E2E database and signed-in Playwright tests (approvals 1 and 2)
+- Status: **Approved** (owner, 2026-11-19 19:10). Test infrastructure brought forward from Phase 14
+  (seed data); no product scope.
+- A disposable database `medcore_e2e` in the development PostgreSQL container. Its name is a constant in
+  code, never read from configuration; every E2E command refuses any other database, refuses production
+  settings, and refuses a development database with that name. Only that database is ever dropped, through
+  the `postgres` maintenance database.
+- The E2E stack is fully separate from development: web 3100, API 3101, Redis database 1, file storage
+  `apps/api/var/storage-e2e`, Next.js build folder `.next-e2e`, development SMS inbox only.
+- A seed (`apps/api/src/cli/seed-e2e.ts`) creates two verified hospitals, one account per role, a senior lab
+  technician, a doctor with a weekly schedule, and three patients (two in hospital A). The shared password
+  comes from `E2E_PASSWORD` in `.env` (owner sets it; never committed or printed). Clinical and billing
+  scenarios are created through the real API by the tests.
+- Playwright starts the E2E servers itself, signs in each seeded account once through the real sign-in
+  page, and saves its browser state to `e2e/.auth/` (git-ignored).
+
+### DEC-062: Durable notifications and Socket.IO (D2 B, D3 A; approvals 3 and 4)
+- Status: **Approved** (owner, 2026-11-19 19:10). Implements PRD NOTIF-001/NOTIF-010 and TECH-024.
+- The `notifications` row (with a duplicate-prevention key) is written inside the business transaction;
+  one delivery job per channel is enqueued after commit; a sweeper re-enqueues deliveries still pending
+  after a set time. Reuses `notifications` and `notification_deliveries` (one delivery per notification and
+  channel, already unique). Needs migration M-15. In-memory domain events (DEC-040 D5) stay for other
+  subscribers. Alternatives rejected: events alone (lost on restart), a separate outbox table (same
+  guarantee, more parts).
+- Real-time delivery by Socket.IO on one API instance, one room per user, authenticated with the existing
+  access cookie; the Redis adapter only when a second instance exists.
+
+### DEC-063: Cancellation and rescheduling notifications (D4 B; approval 5)
+- Status: **Approved** (owner, 2026-11-19 19:10). **New requirement** beyond the PRD's eight triggers.
+- "Appointment cancelled" and "Appointment rescheduled" go to the patient by email and in-app.
+- No notification preferences in Phase 9 (deferred; the eight PRD triggers are transactional).
+
+### DEC-064: Double-payment prevention (D5 A)
+- Status: **Approved** (owner, 2026-11-19 19:10). Enforces DEC-054 (online pays the whole balance) and Q3 A
+  (no refunds).
+- While an online checkout is open for an invoice, cash is refused; staff cancel the checkout first.
+  Enforced in the database (M-12), including concurrent requests and webhook races: at most one open online
+  checkout per invoice, and succeeded payments may never exceed the invoice total. A success webhook for a
+  checkout that was cancelled is held for the accountant, never applied.
+
+### DEC-065: No clinical information in email or SMS (D6 A; approval 6)
+- Status: **Approved** (owner, 2026-11-19 19:10). **New requirement** (content policy).
+- Email and SMS say only what is ready or changed and link to the signed-in portal; no diagnoses, test or
+  medicine names, or results. In-app titles follow the same rule; details appear only on authenticated
+  pages. Links never carry tokens or patient data.

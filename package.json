@@ -19,7 +19,12 @@
     "format:check": "prettier --check .",
     "infra:up": "docker compose -f docker/compose.dev.yml --env-file .env up -d",
     "infra:down": "docker compose -f docker/compose.dev.yml --env-file .env down",
-    "infra:ps": "docker compose -f docker/compose.dev.yml --env-file .env ps"
+    "infra:ps": "docker compose -f docker/compose.dev.yml --env-file .env ps",
+    "e2e:db:prepare": "node scripts/e2e/db.mjs prepare",
+    "e2e:db:migrate": "node scripts/e2e/db.mjs migrate",
+    "e2e:db:seed": "node scripts/e2e/db.mjs seed",
+    "test:e2e": "pnpm --filter @medcore/e2e test:e2e",
+    "test:scripts": "node --test scripts/e2e/env.test.mjs"
   },
   "devDependencies": {
     "@eslint/js": "^9.39.5",

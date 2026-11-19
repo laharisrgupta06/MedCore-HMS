@@ -12,6 +12,7 @@ dist/
 build/
 out/
 .next/
+.next-e2e/
 .turbo/
 *.tsbuildinfo
 next-env.d.ts
@@ -21,6 +22,8 @@ coverage/
 playwright-report/
 test-results/
 blob-report/
+# Signed-in browser state for each E2E role (cookies; never committed)
+e2e/.auth/
 .nyc_output/
 
 # Logs

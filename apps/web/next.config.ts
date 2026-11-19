@@ -8,6 +8,9 @@ import type { NextConfig } from 'next';
 const apiOrigin = process.env.API_INTERNAL_URL ?? 'http://localhost:3001';
 
 const nextConfig: NextConfig = {
+  // The isolated E2E web server (DEC-061) builds into its own folder so it never shares .next with
+  // the development server running at the same time.
+  distDir: process.env.NEXT_DIST_DIR || '.next',
   reactStrictMode: true,
   poweredByHeader: false,
   // Linting runs once for the whole monorepo via `pnpm lint` (root eslint.config.mjs).
