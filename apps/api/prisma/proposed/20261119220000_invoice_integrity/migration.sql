@@ -1,4 +1,8 @@
--- M-11b invoice_integrity (Phase 8, task 8-A2). PROPOSAL: not part of prisma/migrations until approved.
+-- M-11b invoice_integrity (Phase 8, task 8-A2), revision 2. PROPOSAL: not part of prisma/migrations until approved.
+--
+-- Revision 2 (owner decisions 4 and 7, DEC-066): voiding a draft releases its sources (releasedAt) so a
+-- replacement draft can bill them, at most one unreleased line per source; document prefixes are also
+-- unique per hospital and financial year.
 --
 -- Implements, in the database, the approved billing rules for invoices and their lines:
 --   DEC-051  every line snapshots its tax data; the snapshot and the line arithmetic are checked;
@@ -205,6 +209,11 @@ CREATE TABLE "document_number_series" (
 CREATE UNIQUE INDEX "document_number_series_id_hospitalId_key" ON "document_number_series" ("id", "hospitalId");
 CREATE UNIQUE INDEX "document_number_series_numberingScope_financialYear_prefix_key"
   ON "document_number_series" ("numberingScope", "financialYear", "prefix");
+-- Decision 7 (DEC-066): also unique per hospital and year, whatever the scope or registration, so a
+-- hospital never prints the same number twice in a year (after a GSTIN or registration change too).
+-- Binds series opened by hand as well as those opened at finalising.
+CREATE UNIQUE INDEX "document_number_series_hospitalId_financialYear_prefix_key"
+  ON "document_number_series" ("hospitalId", "financialYear", "prefix");
 CREATE UNIQUE INDEX "document_number_series_one_open"
   ON "document_number_series" ("hospitalId", COALESCE("gstRegistrationId", '00000000-0000-0000-0000-000000000000'::uuid), "financialYear", "documentType")
   WHERE "closedAt" IS NULL;
@@ -272,11 +281,32 @@ ALTER TABLE invoice_items
   ADD COLUMN "taxAmount" DECIMAL(12,2) NOT NULL,
   ADD COLUMN "roomRuleId" UUID,
   ADD COLUMN "roomDailyCharge" DECIMAL(12,2),
-  ADD COLUMN "roomCriticalCare" BOOLEAN;
+  ADD COLUMN "roomCriticalCare" BOOLEAN,
+  ADD COLUMN "consultationAppointmentId" UUID,
+  ADD COLUMN "releasedAt" TIMESTAMPTZ(3);
+
+-- Decision 4 (DEC-066): a source is billed on at most one unreleased line. Voiding a draft releases its
+-- lines (the database sets releasedAt), so a replacement draft can bill the same consultation, lab
+-- order item or dispense; the voided lines stay as they were, for audit. These partial unique indexes
+-- replace the initial "billed once, ever" unique indexes and hold under any concurrency.
+DROP INDEX "invoice_items_labOrderItemId_key";
+DROP INDEX "invoice_items_labOrderItemId_hospitalId_key";
+DROP INDEX "invoice_items_dispenseId_key";
+DROP INDEX "invoice_items_dispenseId_hospitalId_key";
+CREATE UNIQUE INDEX "invoice_items_lab_unreleased" ON invoice_items ("labOrderItemId")
+  WHERE "labOrderItemId" IS NOT NULL AND "releasedAt" IS NULL;
+CREATE UNIQUE INDEX "invoice_items_dispense_unreleased" ON invoice_items ("dispenseId")
+  WHERE "dispenseId" IS NOT NULL AND "releasedAt" IS NULL;
+CREATE UNIQUE INDEX "invoice_items_consultation_unreleased" ON invoice_items ("consultationAppointmentId")
+  WHERE "consultationAppointmentId" IS NOT NULL AND "releasedAt" IS NULL;
+CREATE INDEX "invoice_items_labOrderItemId_idx" ON invoice_items ("labOrderItemId");
+CREATE INDEX "invoice_items_dispenseId_idx" ON invoice_items ("dispenseId");
+CREATE INDEX "invoice_items_consultationAppointmentId_idx" ON invoice_items ("consultationAppointmentId");
 
 ALTER TABLE invoice_items
   ADD CONSTRAINT invoice_items_description_chk CHECK (length(btrim(description)) BETWEEN 1 AND 300),
   ADD CONSTRAINT invoice_items_manual_by_chk CHECK (kind NOT IN ('ROOM', 'OTHER') OR "addedById" IS NOT NULL),
+  ADD CONSTRAINT invoice_items_consultation_link_chk CHECK ((kind = 'CONSULTATION') = ("consultationAppointmentId" IS NOT NULL)),
   -- Only automatic consultation, lab and pharmacy lines can be unclassified (never blocks clinical
   -- work); such a line has no tax data and its invoice cannot be finalised.
   ADD CONSTRAINT invoice_items_snapshot_chk CHECK (
@@ -327,6 +357,8 @@ ALTER TABLE invoice_items
     REFERENCES tax_classifications (id, "hospitalId") ON DELETE RESTRICT ON UPDATE CASCADE,
   ADD CONSTRAINT "invoice_items_classificationVersionId_hospitalId_fkey" FOREIGN KEY ("classificationVersionId", "hospitalId")
     REFERENCES tax_classification_versions (id, "hospitalId") ON DELETE RESTRICT ON UPDATE CASCADE,
+  ADD CONSTRAINT "invoice_items_consultationAppointmentId_hospitalId_fkey" FOREIGN KEY ("consultationAppointmentId", "hospitalId")
+    REFERENCES appointments (id, "hospitalId") ON DELETE RESTRICT ON UPDATE CASCADE,
   ADD CONSTRAINT "invoice_items_roomRuleId_fkey" FOREIGN KEY ("roomRuleId")
     REFERENCES statutory_room_tax_rules (id) ON DELETE RESTRICT ON UPDATE CASCADE;
 CREATE INDEX "invoice_items_classificationVersionId_idx" ON invoice_items ("classificationVersionId");
@@ -363,6 +395,24 @@ DECLARE
   diff text[] := ARRAY[]::text[];
 BEGIN
   PERFORM medcore_billing_require_read_committed();
+
+  -- Release (decision 4): only the void of the line's own draft sets releasedAt, from inside
+  -- medcore_invoice_history (trigger depth 2), to the draft's voidedAt, changing nothing else. A direct
+  -- UPDATE (depth 1), a second release, or a release on a draft or issued invoice is refused.
+  IF TG_OP = 'UPDATE' AND NEW."releasedAt" IS DISTINCT FROM OLD."releasedAt" THEN
+    SELECT status, "voidedAt" INTO inv FROM invoices WHERE id = OLD."invoiceId";
+    IF pg_trigger_depth() < 2 OR OLD."releasedAt" IS NOT NULL OR inv.status <> 'VOID'
+       OR NEW."releasedAt" IS DISTINCT FROM inv."voidedAt"
+       OR (to_jsonb(NEW) - 'releasedAt') IS DISTINCT FROM (to_jsonb(OLD) - 'releasedAt') THEN
+      RAISE EXCEPTION 'A line is released only by voiding its draft'
+        USING ERRCODE = 'integrity_constraint_violation';
+    END IF;
+    RETURN NEW;
+  END IF;
+  IF TG_OP = 'INSERT' AND NEW."releasedAt" IS NOT NULL THEN
+    RAISE EXCEPTION 'A line is released only by voiding its draft' USING ERRCODE = 'integrity_constraint_violation';
+  END IF;
+
   h := CASE WHEN TG_OP = 'DELETE' THEN OLD."hospitalId" ELSE NEW."hospitalId" END;
   PERFORM 1 FROM hospitals WHERE id = h FOR SHARE;
 
@@ -403,10 +453,10 @@ BEGIN
 
   IF TG_OP = 'UPDATE' AND (NEW.id, NEW."hospitalId", NEW."invoiceId", NEW.kind, NEW.description, NEW.quantity,
         NEW."unitPrice", NEW."labOrderItemId", NEW."dispenseId", NEW."roomId", NEW."serviceDate", NEW."addedById",
-        NEW."createdAt")
+        NEW."consultationAppointmentId", NEW."createdAt")
      IS DISTINCT FROM (OLD.id, OLD."hospitalId", OLD."invoiceId", OLD.kind, OLD.description, OLD.quantity,
         OLD."unitPrice", OLD."labOrderItemId", OLD."dispenseId", OLD."roomId", OLD."serviceDate", OLD."addedById",
-        OLD."createdAt") THEN
+        OLD."consultationAppointmentId", OLD."createdAt") THEN
     RAISE EXCEPTION 'Only the tax snapshot and discount share of a draft line can change; remove the line and add it again instead'
       USING ERRCODE = 'integrity_constraint_violation';
   END IF;
@@ -421,9 +471,12 @@ BEGIN
       SELECT d."consultationFee" INTO exp_price FROM appointments a JOIN doctors d ON d.id = a."doctorId"
        WHERE a.id = inv."appointmentId";
       exp_qty := 1;
-      IF EXISTS (SELECT 1 FROM invoice_items i JOIN invoices v ON v.id = i."invoiceId"
-                  WHERE v."appointmentId" = inv."appointmentId" AND v.status <> 'VOID'
-                    AND i.kind = 'CONSULTATION' AND i.id <> NEW.id) THEN
+      IF NEW."consultationAppointmentId" IS DISTINCT FROM inv."appointmentId" THEN
+        RAISE EXCEPTION 'A consultation charge must belong to the invoice''s visit' USING ERRCODE = 'integrity_constraint_violation';
+      END IF;
+      -- A clear message for the common case; the partial unique index is the guarantee.
+      IF EXISTS (SELECT 1 FROM invoice_items i WHERE i."consultationAppointmentId" = inv."appointmentId"
+                    AND i."releasedAt" IS NULL AND i.id <> NEW.id) THEN
         RAISE EXCEPTION 'This visit is already charged a consultation' USING ERRCODE = 'integrity_constraint_violation';
       END IF;
     ELSIF NEW.kind = 'LAB' THEN
@@ -535,8 +588,9 @@ CREATE TRIGGER invoice_items_rules BEFORE INSERT OR UPDATE OR DELETE ON invoice_
 
 -- Prefix for a new series: the hospital's latest prefix for this document type, or the suggested
 -- default (TI, ICB, BOS); if a series in the same scope and year already uses it, the next free of
--- <prefix>2..<prefix>9 (at most 4 characters), so a new registration under the same GSTIN never
--- repeats a number. The hospital admin can open a series with another prefix at any time.
+-- <first three characters>2..9 (at most 4 characters), free both in the numbering scope and year and
+-- in the hospital and year (decision 7), so no number ever repeats, after a registration or GSTIN
+-- change too. The hospital admin can open a series with another free prefix at any time.
 CREATE FUNCTION medcore_document_prefix(h uuid, scope text, fy text, dt "DocumentType") RETURNS text LANGUAGE plpgsql AS $$
 DECLARE
   base text;
@@ -549,7 +603,8 @@ BEGIN
   FOR n IN 1..9 LOOP
     candidate := CASE WHEN n = 1 THEN base ELSE left(base, 3) || n::text END;
     IF NOT EXISTS (SELECT 1 FROM "document_number_series"
-                    WHERE "numberingScope" = scope AND "financialYear" = fy AND prefix = candidate) THEN
+                    WHERE "financialYear" = fy AND prefix = candidate
+                      AND ("numberingScope" = scope OR "hospitalId" = h)) THEN
       RETURN candidate;
     END IF;
   END LOOP;
@@ -844,6 +899,8 @@ BEGIN
   ELSIF NEW.status = 'VOID' AND OLD.status = 'DRAFT' THEN
     INSERT INTO "invoice_events" ("hospitalId", "invoiceId", kind, "actorId", note)
     VALUES (NEW."hospitalId", NEW.id, 'VOIDED', NEW."voidedById", NEW."voidReason");
+    -- Decision 4: release the draft's sources; its lines are otherwise kept exactly as they were.
+    UPDATE invoice_items SET "releasedAt" = NEW."voidedAt" WHERE "invoiceId" = NEW.id;
   END IF;
   RETURN NULL;
 END;

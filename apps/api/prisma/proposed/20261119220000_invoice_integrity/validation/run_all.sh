@@ -3,7 +3,7 @@
 # clock (run before 23:50 IST). Never touches any database other than the scratch m11b* databases.
 cd /home/claude/m11b; V=validation; L=$V/results.txt; : > $L
 log() { echo "$@" | tee -a $L; }
-log "M-11b invoice_integrity validation, PostgreSQL $(cd /tmp; sudo -u postgres psql -Atc 'SHOW server_version' -d postgres | cut -d' ' -f1)"
+log "M-11b invoice_integrity revision 2 validation, PostgreSQL $(cd /tmp; sudo -u postgres psql -Atc 'SHOW server_version' -d postgres | cut -d' ' -f1)"
 log "started $(TZ=Asia/Kolkata date '+%Y-%m-%d %H:%M:%S IST'); migration.sql sha256 $(sha256sum migration.sql | cut -c1-16); rollback.sql sha256 $(sha256sum rollback.sql | cut -c1-16); schema.prisma sha256 $(sha256sum schema.prisma | cut -c1-16)"
 log ""; log "######## safety_checks.sh (preconditions, existing rows, rollback)"
 $V/safety_checks.sh 2>/dev/null | tee -a $L

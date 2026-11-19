@@ -547,3 +547,26 @@ whether it is approved scope from the PRD or earlier decisions, or a new require
 - Email and SMS say only what is ready or changed and link to the signed-in portal; no diagnoses, test or
   medicine names, or results. In-app titles follow the same rule; details appear only on authenticated
   pages. Links never carry tokens or patient data.
+
+### DEC-066: M-11b review decisions 1 to 8 (owner review 2026-11-19 21:38 and 21:44)
+- Status: **Approved** (owner, 2026-11-19 21:44). Recorded in the M-11b proposal (revision 2).
+- 1: billing writes run at READ COMMITTED; the billing triggers refuse other isolation levels (the DEC-058
+  lock protocol gives exact reads only at READ COMMITTED). 2: a voided original draft can be replaced by a
+  new original; an issued original never. 3: lines of a draft can be removed; issued lines never change.
+  5: the database allocates the document number when an invoice is finalised. 6: consultation and lab
+  lines with no usable classification are stored unclassified (as medicines), so clinical work is never
+  blocked; finalising stays blocked. 8: a room charge dated before 18 July 2022, and GST collected under an
+  earlier regular registration on a document issued when the hospital is no longer regular, are refused
+  (this replaces the plan's acceptance line "a room charge before 18 July 2022 is exempt").
+- 4 (resolved): **voiding a draft releases its sources and keeps its lines.** Each line has `releasedAt`,
+  set by the database (only by the void of its draft, never by a direct update, never on an issued or
+  draft invoice). A consultation (the visit), lab order item or dispense can be on at most one unreleased
+  line, enforced by partial unique indexes, so a replacement draft can bill the same consultation, lab and
+  pharmacy charges and nothing is ever billed twice, under any concurrency. Voided invoices and their
+  lines are kept unchanged apart from `releasedAt`, for audit.
+- 7 (resolved): **automatic prefixes** reuse the hospital's latest prefix for the document type (defaults
+  TI, ICB, BOS), or the first free of `<first three characters><2..9>`. A prefix is unique per GSTIN
+  scope and year **and per hospital and year** (unique index on series, which also binds series opened by
+  hand), so a hospital never prints the same number twice in a year, even after a registration or GSTIN
+  change. DEC-052 unchanged otherwise: series per document type, gap-free numbering, at most 16
+  characters. The automatic suffix convention is part of the accountant review (8-G1).

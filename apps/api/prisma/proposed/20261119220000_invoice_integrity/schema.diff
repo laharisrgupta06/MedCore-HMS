@@ -1,5 +1,5 @@
 --- schema.base.prisma	2026-11-19 15:58:41.881376200 +0000
-+++ schema.prisma	2026-11-19 15:59:46.956509704 +0000
++++ schema.prisma	2026-11-19 16:16:12.970849686 +0000
 @@ -255,6 +255,40 @@
    VOID
  }
@@ -78,16 +78,35 @@
  
    @@unique([userId, hospitalId])
    @@unique([id, hospitalId])
-@@ -750,7 +798,7 @@
+@@ -750,7 +798,8 @@
    department    Department     @relation(fields: [departmentId, hospitalId], references: [id, hospitalId], onDelete: Restrict)
    createdBy     User           @relation("AppointmentCreatedBy", fields: [createdById, hospitalId], references: [id, hospitalId], onDelete: Restrict)
    medicalRecord MedicalRecord?
 -  invoice       Invoice?
 +  invoices      Invoice[]
++  consultationLines InvoiceItem[] @relation("InvoiceItemConsultation")
  
    @@unique([id, hospitalId])
    @@index([hospitalId, scheduledAt])
-@@ -1457,69 +1505,221 @@
+@@ -1309,7 +1358,7 @@
+   batch            MedicineBatch    @relation(fields: [batchId, hospitalId], references: [id, hospitalId], onDelete: Restrict)
+   dispensedBy      User             @relation(fields: [dispensedById, hospitalId], references: [id, hospitalId], onDelete: Restrict)
+   stockMovement    StockMovement?
+-  invoiceItem      InvoiceItem?
++  invoiceItems     InvoiceItem[]
+ 
+   @@unique([id, hospitalId])
+   @@index([prescriptionItemId])
+@@ -1422,7 +1471,7 @@
+   labOrder    LabOrder     @relation(fields: [labOrderId, hospitalId], references: [id, hospitalId], onDelete: Restrict)
+   labTest     LabTest      @relation(fields: [labTestId, hospitalId], references: [id, hospitalId], onDelete: Restrict)
+   result      LabResult?
+-  invoiceItem InvoiceItem?
++  invoiceItems InvoiceItem[]
+ 
+   @@unique([id, hospitalId])
+   @@unique([labOrderId, labTestId])
+@@ -1457,69 +1506,229 @@
  // Billing and payments (PRD 7.7)
  // ---------------------------------------------------------------------------
  
@@ -223,8 +242,8 @@
 +  quantity                Int
 +  unitPrice               Decimal                @db.Decimal(12, 2)
 +  lineTotal               Decimal                @db.Decimal(12, 2)
-+  labOrderItemId          String?                @unique @db.Uuid
-+  dispenseId              String?                @unique @db.Uuid
++  labOrderItemId          String?                @db.Uuid
++  dispenseId              String?                @db.Uuid
 +  roomId                  String?                @db.Uuid
 +  serviceDate             DateTime               @db.Date
 +  addedById               String?                @db.Uuid
@@ -246,6 +265,10 @@
 +  roomRuleId              String?                @db.Uuid
 +  roomDailyCharge         Decimal?               @db.Decimal(12, 2)
 +  roomCriticalCare        Boolean?
++  /// The visit charged by a consultation line (decision 4: one unreleased consultation per visit).
++  consultationAppointmentId String?              @db.Uuid
++  /// Set by the database only when the line's draft is voided; frees its source for a replacement draft.
++  releasedAt              DateTime?              @db.Timestamptz(3)
 +  createdAt               DateTime               @default(now()) @db.Timestamptz(3)
 +
 +  hospital       Hospital                  @relation(fields: [hospitalId], references: [id], onDelete: Restrict)
@@ -257,10 +280,15 @@
 +  classification TaxClassification?        @relation(fields: [classificationId, hospitalId], references: [id, hospitalId], onDelete: Restrict)
 +  version        TaxClassificationVersion? @relation(fields: [classificationVersionId, hospitalId], references: [id, hospitalId], onDelete: Restrict)
 +  roomRule       StatutoryRoomTaxRule?     @relation(fields: [roomRuleId], references: [id], onDelete: Restrict)
++  consultationAppointment Appointment?     @relation("InvoiceItemConsultation", fields: [consultationAppointmentId, hospitalId], references: [id, hospitalId], onDelete: Restrict)
  
-   @@unique([labOrderItemId, hospitalId])
-   @@unique([dispenseId, hospitalId])
+-  @@unique([labOrderItemId, hospitalId])
+-  @@unique([dispenseId, hospitalId])
++  // At most one unreleased line per source: partial unique indexes in the migration (decision 4).
    @@index([invoiceId])
++  @@index([labOrderItemId])
++  @@index([dispenseId])
++  @@index([consultationAppointmentId])
 +  @@index([classificationVersionId])
 +  @@index([classificationId])
    @@map("invoice_items")
@@ -291,6 +319,7 @@
 +
 +  @@unique([id, hospitalId])
 +  @@unique([numberingScope, financialYear, prefix])
++  @@unique([hospitalId, financialYear, prefix])
 +  @@map("document_number_series")
 +}
 +
@@ -355,7 +384,7 @@
  /// Card/UPI/netbanking payments are confirmed only by verified webhooks (PRD 7.7).
  model Payment {
    id                String           @id @default(uuid()) @db.Uuid
-@@ -1684,6 +1884,7 @@
+@@ -1684,6 +1893,7 @@
    defaults  HospitalTaxDefault[]
    labTests  LabTest[]
    medicines Medicine[]
@@ -363,7 +392,7 @@
  
    @@unique([id, hospitalId])
    @@unique([hospitalId, name])
-@@ -1706,6 +1907,7 @@
+@@ -1706,6 +1916,7 @@
    hospital       Hospital          @relation(fields: [hospitalId], references: [id], onDelete: Restrict)
    classification TaxClassification @relation(fields: [classificationId, hospitalId], references: [id, hospitalId], onDelete: Restrict)
    createdBy      User              @relation("TaxClassificationVersionCreatedBy", fields: [createdById, hospitalId], references: [id, hospitalId], onDelete: Restrict)
@@ -371,7 +400,7 @@
  
    @@unique([id, hospitalId])
    @@unique([classificationId, effectiveFrom])
-@@ -1743,6 +1945,8 @@
+@@ -1743,6 +1954,8 @@
  
    hospital   Hospital @relation(fields: [hospitalId], references: [id], onDelete: Restrict)
    attestedBy User     @relation("GstRegistrationAttestedBy", fields: [attestedById, hospitalId], references: [id, hospitalId], onDelete: Restrict)
@@ -380,7 +409,7 @@
  
    @@unique([id, hospitalId])
    @@unique([hospitalId, effectiveFrom])
-@@ -1760,6 +1964,7 @@
+@@ -1760,6 +1973,7 @@
    priceIncludesTax Boolean  @default(false)
    legalReference   String
    createdAt        DateTime @default(now()) @db.Timestamptz(3)

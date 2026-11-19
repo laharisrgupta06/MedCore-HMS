@@ -9,6 +9,8 @@ parallel connections at READ COMMITTED (the application's level):
   C5  a line racing a finalise: whichever locks the invoice first wins, never both
   C6  two sessions creating the visit's draft at once: exactly one succeeds
   C7  a writer that rolls back leaves the line on the old values
+  C8  a replacement draft waits for an open void, then re-bills the released lab item (decision 4)
+  C9  if that void rolls back, the replacement draft is refused and the lab item stays on the draft
 """
 import threading
 import time
@@ -81,7 +83,7 @@ def visits(n):
             inv = f"aaaaaaaa-2222-0000-0000-{i:012d}"
             c.execute("SET LOCAL session_replication_role = replica")
             c.execute('INSERT INTO appointments (id,"hospitalId","doctorId","patientId","departmentId","scheduledAt","endAt",status,"createdById","updatedAt") '
-                      "VALUES (%s,%s,%s,%s,%s,now()-(%s+1)*interval '1 hour',now()-(%s+1)*interval '1 hour'+interval '15 minutes','COMPLETED',%s,now())",
+                      "VALUES (%s,%s,%s,%s,%s,timestamptz '2025-01-01 00:00+00'+%s*interval '1 hour',timestamptz '2025-01-01 00:15+00'+%s*interval '1 hour','COMPLETED',%s,now())",
                       (v, A, DOC, PT, DEPT, i, i, RC))
             c.execute("SET LOCAL session_replication_role = origin")
             c.execute('INSERT INTO invoices (id,"hospitalId","appointmentId","patientId","createdById","updatedAt") VALUES (%s,%s,%s,%s,%s,now())',
@@ -147,10 +149,10 @@ def b_consult(c, collected):
     c.execute(
         'INSERT INTO invoice_items (id,"hospitalId","invoiceId",kind,description,quantity,"unitPrice","lineTotal","serviceDate",'
         '"classificationId","classificationVersionId","classificationName","hsnSac","supplyType",treatment,"ratePercent","priceIncludesTax",'
-        '"gstCollected","notCollectedReason","grossAmount","taxableValue","taxAmount") VALUES '
+        '"gstCollected","notCollectedReason","grossAmount","taxableValue","taxAmount","consultationAppointmentId") VALUES '
         "('bbbbbbbb-3333-0000-0000-000000000001',%s,'bbbbbbbb-2222-0000-0000-000000000001','CONSULTATION','Consultation',1,400,400,"
-        "%s,%s,%s,'Healthcare services','999312','SERVICE','EXEMPT',0,false,%s,%s,400,400,0)",
-        (B, today(c), C_SVC_B, V_SVC_B, collected, reason))
+        "%s,%s,%s,'Healthcare services','999312','SERVICE','EXEMPT',0,false,%s,%s,400,400,0,%s)",
+        (B, today(c), C_SVC_B, V_SVC_B, collected, reason, VB))
     c.execute("UPDATE invoices SET subtotal=400, total=400 WHERE id='bbbbbbbb-2222-0000-0000-000000000001'")
 
 
@@ -305,6 +307,63 @@ ts = [threading.Thread(target=mk, args=(i,)) for i in range(2)]
 [t.join() for t in ts]
 report("C6 two sessions create the visit's draft at once: exactly one succeeds", len(oks) == 1 and len(errs) == 1
        and ("invoices_one_draft_per_appointment" in errs[0] or "invoices_appointmentId_sequence_key" in errs[0]), errs[0] if errs else "")
+
+# ---- C8, C9: void racing its replacement (decision 4) -----------------------------------------------
+LAB_LINE = ('INSERT INTO invoice_items (id,"hospitalId","invoiceId",kind,description,quantity,"unitPrice","lineTotal","serviceDate",'
+            '"classificationId","classificationVersionId","classificationName","hsnSac","supplyType",treatment,"ratePercent","priceIncludesTax",'
+            '"gstCollected","grossAmount","taxableValue","taxAmount","labOrderItemId") VALUES (%s,%s,%s,\'LAB\',\'CBC\',1,350,350,%s,'
+            "'11111111-0000-0000-0000-000000000003','11111111-0000-0000-0000-000000000103','Diagnostics','999316','SERVICE','EXEMPT',0,false,"
+            "true,350,350,0,'aaaaaaaa-0000-0000-0000-00000000c201')")
+D1, D2 = "aaaaaaaa-2222-0000-0000-0000000000d1", "aaaaaaaa-2222-0000-0000-0000000000d2"
+
+
+def void_race(commit_void):
+    fresh()
+    with conn() as c:
+        c.execute('INSERT INTO invoices (id,"hospitalId","appointmentId","patientId","createdById","updatedAt") VALUES (%s,%s,%s,%s,%s,now())',
+                  (D1, A, V1, PT, RC))
+        c.execute(LAB_LINE, ("aaaaaaaa-3333-0000-0000-0000000000d1", A, D1, today(c)))
+        c.execute("UPDATE invoices SET subtotal=350, total=350 WHERE id=%s", (D1,))
+        c.commit()
+    v = conn()
+    v.execute("UPDATE invoices SET status='VOID', \"voidedById\"=%s, \"voidReason\"='Voided by mistake' WHERE id=%s", (RC, D1))
+    out = {}
+
+    def replacement():
+        t0 = time.time()
+        try:
+            with conn() as c:
+                c.execute('INSERT INTO invoices (id,"hospitalId","appointmentId","patientId","createdById","updatedAt") VALUES (%s,%s,%s,%s,%s,now())',
+                          (D2, A, V1, PT, RC))
+                c.execute(LAB_LINE, ("aaaaaaaa-3333-0000-0000-0000000000d2", A, D2, today(c)))
+                c.execute("UPDATE invoices SET subtotal=350, total=350 WHERE id=%s", (D2,))
+                c.commit()
+            out["ok"] = True
+        except Exception as e:  # noqa: BLE001
+            out["ok"] = False
+            out["err"] = str(e).splitlines()[0]
+        out["waited"] = time.time() - t0
+
+    t = threading.Thread(target=replacement)
+    t.start()
+    time.sleep(1.5)
+    waiting = t.is_alive()
+    (v.commit if commit_void else v.rollback)()
+    v.close()
+    t.join()
+    with conn() as c:
+        live = c.execute('SELECT count(*) FROM invoice_items WHERE "labOrderItemId"=\'aaaaaaaa-0000-0000-0000-00000000c201\' AND "releasedAt" IS NULL').fetchone()[0]
+        total = c.execute('SELECT count(*) FROM invoice_items WHERE "labOrderItemId"=\'aaaaaaaa-0000-0000-0000-00000000c201\'').fetchone()[0]
+    return waiting, out, live, total
+
+
+waiting, out, live, total = void_race(True)
+report("C8 a replacement draft waits for an open void, then re-bills the released lab item; one live line, both kept",
+       waiting and out.get("ok") and live == 1 and total == 2, f"waited {out['waited']:.1f}s, live {live}, lines {total} {out.get('err', '')}")
+waiting, out, live, total = void_race(False)
+report("C9 if the void rolls back, the replacement is refused and the lab item stays on the original draft",
+       waiting and not out.get("ok") and "invoices_one_draft_per_appointment" in out.get("err", "") and live == 1 and total == 1,
+       f"{out.get('err', 'committed')}; live {live}, lines {total}")
 
 with psycopg.connect("dbname=postgres", autocommit=True) as c:
     c.execute(f"DROP DATABASE IF EXISTS {DB} WITH (FORCE)")

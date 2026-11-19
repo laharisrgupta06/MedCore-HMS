@@ -61,14 +61,14 @@ def q(v):
 
 def line(id_, inv, kind, *, qty=1, price, gross, taxable, tax, sd=TODAY, share=0, uncl=False, cid=None, vid=None,
          name=None, hsn=None, supply=None, treat=None, rate=None, incl=None, collected=False, reason=None,
-         lab=None, disp=None, room=None, rule=None, daily=None, crit=None, added=None, hosp=A, desc="Charge"):
+         lab=None, disp=None, room=None, rule=None, daily=None, crit=None, added=None, hosp=A, desc="Charge", cappt=None):
     cols = {"id": id_, "hospitalId": hosp, "invoiceId": inv, "kind": kind, "description": desc, "quantity": qty,
             "unitPrice": price, "lineTotal": None, "serviceDate": sd, "addedById": added, "unclassified": uncl,
             "classificationId": cid, "classificationVersionId": vid, "classificationName": name, "hsnSac": hsn,
             "supplyType": supply, "treatment": treat, "ratePercent": rate, "priceIncludesTax": incl,
             "gstCollected": collected, "notCollectedReason": reason, "grossAmount": gross, "discountShare": share,
             "taxableValue": taxable, "taxAmount": tax, "labOrderItemId": lab, "dispenseId": disp, "roomId": room,
-            "roomRuleId": rule, "roomDailyCharge": daily, "roomCriticalCare": crit}
+            "roomRuleId": rule, "roomDailyCharge": daily, "roomCriticalCare": crit, "consultationAppointmentId": cappt}
     cols["lineTotal"] = round(taxable + tax, 2)
     names = ",".join(f'"{k}"' for k in cols)
     return f"INSERT INTO invoice_items ({names}) VALUES ({','.join(q(v) for v in cols.values())})"
@@ -76,7 +76,7 @@ def line(id_, inv, kind, *, qty=1, price, gross, taxable, tax, sd=TODAY, share=0
 
 def consult(id_, inv, **kw):
     a = dict(price=500, gross=500, taxable=500, tax=0, cid=C_SVC, vid=V_SVC, name="Healthcare services", hsn="999312",
-             supply="SERVICE", treat="EXEMPT", rate=0, incl=False, collected=True)
+             supply="SERVICE", treat="EXEMPT", rate=0, incl=False, collected=True, cappt=V1)
     a.update(kw)
     return line(id_, inv, "CONSULTATION", **a)
 
@@ -123,6 +123,27 @@ def finalise(inv, by=RC):
 
 def number_is(inv, n):
     return check(f"(SELECT \"invoiceNumber\" FROM invoices WHERE id='{inv}') = '{n}'", f"number {n}")
+
+
+def _gstin(first14):
+    al = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+    t = 0
+    for i, ch in enumerate(first14):
+        p = al.index(ch) * (1 if i % 2 == 0 else 2)
+        t += p // 36 + p % 36
+    return first14 + al[(36 - t % 36) % 36]
+
+
+GSTIN_B = _gstin("29AAACB1234F1Z")
+GSTIN_A2 = _gstin("27AAPFU0939F2Z")
+ADM_B = "bbbbbbbb-0000-0000-0000-0000000000b1"
+
+
+def other_b(id_, inv):
+    """An exempt other charge in hospital B, collected (B is regular from 18 Nov in these cases)."""
+    return line(id_, inv, "OTHER", hosp=B, price=100, gross=100, taxable=100, tax=0, cid=C_SVC_B, vid=V_SVC_B,
+                name="Healthcare services", hsn="999312", supply="SERVICE", treat="EXEMPT", rate=0, incl=False,
+                collected=True, added=RC_B)
 
 
 L1, L2, L3, L4, L5 = (f"88888888-0000-0000-0000-00000000000{i}" for i in range(1, 6))
@@ -254,18 +275,52 @@ CASES = [
         number_is(I1, "ICB/26-27/00001")], "ok"),
     ("unregistered hospital: no GST collected, bill of supply, hospital scope", [
         invoice(I1, appt=VB, patient=PT_B, by=RC_B, hosp=B),
-        consult(L1, I1, hosp=B, price=400, gross=400, taxable=400, cid=C_SVC_B, vid=V_SVC_B, collected=False, reason="UNREGISTERED"),
+        consult(L1, I1, hosp=B, price=400, gross=400, taxable=400, cid=C_SVC_B, vid=V_SVC_B, collected=False, reason="UNREGISTERED", cappt=VB),
         totals(I1), finalise(I1, by=RC_B), number_is(I1, "BOS/26-27/00001"),
         check(f"(SELECT \"numberingScope\" FROM invoices WHERE id='{I1}') = 'HOSPITAL:{B}'", "scope"),
         check(f"(SELECT \"sellerGstin\" IS NULL AND \"registrationType\"='UNREGISTERED' FROM invoices WHERE id='{I1}')", "seller")], "ok"),
     ("two hospitals number independently", ISSUED_A + [
         invoice(I2, appt=VB, patient=PT_B, by=RC_B, hosp=B),
-        consult(L2, I2, hosp=B, price=400, gross=400, taxable=400, cid=C_SVC_B, vid=V_SVC_B, collected=False, reason="UNREGISTERED"),
+        consult(L2, I2, hosp=B, price=400, gross=400, taxable=400, cid=C_SVC_B, vid=V_SVC_B, collected=False, reason="UNREGISTERED", cappt=VB),
         totals(I2), finalise(I2, by=RC_B), number_is(I1, "BOS/26-27/00001"), number_is(I2, "BOS/26-27/00001")], "ok"),
-    ("a voided draft keeps its lines and their sources: a lab item is billed once, ever", ISSUED_A + [
-        invoice(I2, appt=V2), lab(L2, I2, item=LAB2), totals(I2),
-        f"UPDATE invoices SET status='VOID', \"voidedById\"='{RC}', \"voidReason\"='Patient left' WHERE id='{I2}'",
-        invoice(I3, appt=V2), lab(L3, I3, item=LAB2)], "invoice_items_labOrderItemId_key"),
+    # ---- decision 4: void releases the sources; replacement drafts (DEC-066) ----------------------
+    ("replacement draft re-bills the same consultation, lab item and dispense; finalised end to end", [
+        invoice(I1), consult(L1, I1), lab(L2, I1), para(L3, I1), totals(I1),
+        f"UPDATE invoices SET status='VOID', \"voidedById\"='{RC}', \"voidReason\"='Voided by mistake' WHERE id='{I1}'",
+        check(f"(SELECT count(*) FROM invoice_items WHERE \"invoiceId\"='{I1}' AND \"releasedAt\" = (SELECT \"voidedAt\" FROM invoices WHERE id='{I1}')) = 3", "all three released at the void time"),
+        invoice(I2), consult(L4, I2), lab(L5, I2), para("88888888-0000-0000-0000-000000000006", I2), totals(I2), finalise(I2),
+        number_is(I2, "ICB/26-27/00001"),
+        check(f"(SELECT (status, total, \"invoiceNumber\" IS NULL)::text FROM invoices WHERE id='{I1}') = '(VOID,970.00,t)'", "voided draft kept with its totals"),
+        check(f"(SELECT count(*) FROM invoice_items WHERE \"invoiceId\"='{I1}') = 3", "voided lines kept"),
+        check(f"(SELECT \"sequence\" FROM invoices WHERE id='{I2}') = 2", "replacement is sequence 2"),
+        COMMIT_CHECK], "ok"),
+    ("a source stays on at most one unreleased line: lab item already on the issued original", [
+        invoice(I1), consult(L1, I1), lab(L2, I1), totals(I1), finalise(I1),
+        invoice(I2, kind="LATE_CHARGES", related=I1), lab(L3, I2)], "invoice_items_lab_unreleased"),
+    ("... dispense already on the issued original", [
+        invoice(I1), para(L1, I1), totals(I1), finalise(I1),
+        invoice(I2, kind="LATE_CHARGES", related=I1), para(L2, I2)], "invoice_items_dispense_unreleased"),
+    ("... consultation already on the issued original (message, then the index)", [
+        invoice(I1), consult(L1, I1), totals(I1), finalise(I1),
+        invoice(I2, kind="LATE_CHARGES", related=I1), consult(L2, I2)], "already charged a consultation"),
+    ("the consultation index holds even without the friendly check", [
+        invoice(I1), consult(L1, I1), totals(I1),
+        "SET LOCAL session_replication_role = replica",
+        consult(L2, I1)], "invoice_items_consultation_unreleased"),
+    ("a consultation line must name its own visit", [invoice(I1), consult(L1, I1, cappt=V2)], "must belong to the invoice's visit"),
+    ("a direct update cannot release a line of a voided draft", [invoice(I1), lab(L1, I1), totals(I1),
+        f"UPDATE invoices SET status='VOID', \"voidedById\"='{RC}', \"voidReason\"='Voided by mistake' WHERE id='{I1}'",
+        f"UPDATE invoice_items SET \"releasedAt\"=NULL WHERE id='{L1}'"], "released only by voiding its draft"),
+    ("a direct update cannot release a draft line", DRAFT_A + [f"UPDATE invoice_items SET \"releasedAt\"=now() WHERE id='{L1}'"],
+        "released only by voiding its draft"),
+    ("a direct update cannot release an issued line", ISSUED_A + [f"UPDATE invoice_items SET \"releasedAt\"=now() WHERE id='{L1}'"],
+        "released only by voiding its draft"),
+    ("a line cannot be inserted already released", [invoice(I1),
+        consult(L1, I1).replace('"consultationAppointmentId")', '"consultationAppointmentId","releasedAt")').replace("'" + V1 + "')", "'" + V1 + "',now())")],
+        "released only by voiding its draft"),
+    ("a released line of a voided invoice cannot otherwise change", [invoice(I1), lab(L1, I1), totals(I1),
+        f"UPDATE invoices SET status='VOID', \"voidedById\"='{RC}', \"voidReason\"='Voided by mistake' WHERE id='{I1}'",
+        f"UPDATE invoice_items SET \"discountShare\"=0 WHERE id='{L1}'"], "Lines of an issued or void invoice cannot change"),
     ("consecutive numbers in one series; a voided draft consumes none", ISSUED_A + [
         invoice(I2, appt=V2), lab(L2, I2, item=LAB2), totals(I2),
         f"UPDATE invoices SET status='VOID', \"voidedById\"='{RC}', \"voidReason\"='Patient left' WHERE id='{I2}'",
@@ -304,6 +359,61 @@ CASES = [
         number_is(I2, "BOS2/26-27/00001"),
         check(f"(SELECT \"registrationType\"='COMPOSITION' FROM invoices WHERE id='{I2}')", "composition")], "ok"),
 
+    # ---- decision 7: prefixes unique per scope and year and per hospital and year (DEC-066) --------
+    ("unregistered hospital registers as regular mid-year: next bill of supply uses BOS2, never BOS again", [
+        invoice(I1, appt=VB, patient=PT_B, by=RC_B, hosp=B),
+        consult(L1, I1, hosp=B, price=400, gross=400, taxable=400, cid=C_SVC_B, vid=V_SVC_B, collected=False, reason="UNREGISTERED", cappt=VB),
+        totals(I1), finalise(I1, by=RC_B), number_is(I1, "BOS/26-27/00001"),
+        "SET LOCAL session_replication_role = replica",
+        f"INSERT INTO hospital_gst_registrations (id,\"hospitalId\",\"registrationType\",gstin,\"legalName\",\"stateCode\",\"effectiveFrom\",\"attestedById\") "
+        f"VALUES ('33333333-0000-0000-0000-0000000000b9','{B}','REGULAR','{GSTIN_B}','Hospital B Pvt Ltd','29','2026-11-18','{ADM_B}')",
+        "SET LOCAL session_replication_role = origin",
+        invoice(I2, appt=VB, patient=PT_B, by=RC_B, hosp=B, kind="LATE_CHARGES", related=I1),
+        other_b(L2, I2), totals(I2), finalise(I2, by=RC_B), number_is(I2, "BOS2/26-27/00001"),
+        check(f"(SELECT \"numberingScope\" FROM invoices WHERE id='{I2}') = '{GSTIN_B}'", "new scope is the GSTIN"),
+        COMMIT_CHECK], "ok"),
+    ("GSTIN change mid-year (regular to regular): tax invoices continue as TI2", [
+        invoice(I1), para(L1, I1), totals(I1), finalise(I1), number_is(I1, "TI/26-27/00001"),
+        "SET LOCAL session_replication_role = replica",
+        f"INSERT INTO hospital_gst_registrations (id,\"hospitalId\",\"registrationType\",gstin,\"legalName\",\"stateCode\",\"effectiveFrom\",\"attestedById\") "
+        f"VALUES ('33333333-0000-0000-0000-0000000000a9','{A}','REGULAR','{GSTIN_A2}','Hospital A Pvt Ltd','27','2026-11-18','{ADM}')",
+        "SET LOCAL session_replication_role = origin",
+        invoice(I2, appt=V2), para(L2, I2, disp=DISP_PARA2), totals(I2), finalise(I2), number_is(I2, "TI2/26-27/00001"),
+        check(f"(SELECT \"sellerGstin\" FROM invoices WHERE id='{I2}') = '{GSTIN_A2}'", "new GSTIN on the document")], "ok"),
+    ("different document types in one year get separate series and prefixes", [
+        invoice(I1), para(L1, I1), totals(I1), finalise(I1),
+        invoice(I2, appt=V2), lab(L2, I2, item=LAB2), totals(I2), finalise(I2),
+        invoice(I3, appt=V2, kind="LATE_CHARGES", related=I2), para(L3, I3, disp=DISP_PARA2),
+        line(L4, I3, "OTHER", price=100, gross=100, taxable=100, tax=0, cid=C_SVC, vid=V_SVC, name="Healthcare services", hsn="999312",
+             supply="SERVICE", treat="EXEMPT", rate=0, incl=False, collected=True, added=RC),
+        totals(I3), finalise(I3),
+        number_is(I1, "TI/26-27/00001"), number_is(I2, "BOS/26-27/00001"), number_is(I3, "ICB/26-27/00001"),
+        check("(SELECT count(DISTINCT \"documentType\") FROM document_number_series) = 3", "three series")], "ok"),
+    ("a series opened by hand cannot reuse a prefix the hospital used this year under another scope", [
+        invoice(I1, appt=VB, patient=PT_B, by=RC_B, hosp=B),
+        consult(L1, I1, hosp=B, price=400, gross=400, taxable=400, cid=C_SVC_B, vid=V_SVC_B, collected=False, reason="UNREGISTERED", cappt=VB),
+        totals(I1), finalise(I1, by=RC_B),
+        "SET LOCAL session_replication_role = replica",
+        f"INSERT INTO hospital_gst_registrations (id,\"hospitalId\",\"registrationType\",gstin,\"legalName\",\"stateCode\",\"effectiveFrom\",\"attestedById\") "
+        f"VALUES ('33333333-0000-0000-0000-0000000000b9','{B}','REGULAR','{GSTIN_B}','Hospital B Pvt Ltd','29','2026-11-18','{ADM_B}')",
+        "SET LOCAL session_replication_role = origin",
+        f"INSERT INTO document_number_series (\"hospitalId\",\"gstRegistrationId\",\"numberingScope\",\"documentType\",\"financialYear\",prefix,\"openedById\") "
+        f"VALUES ('{B}','33333333-0000-0000-0000-0000000000b9','{GSTIN_B}','BILL_OF_SUPPLY','26-27','BOS','{ADM_B}')"],
+        "document_number_series_hospitalId_financialYear_prefix_key"),
+    ("a series opened by hand with a free prefix is used by the next finalise", [
+        f"INSERT INTO document_number_series (\"hospitalId\",\"gstRegistrationId\",\"numberingScope\",\"documentType\",\"financialYear\",prefix,\"openedById\") "
+        f"VALUES ('{A}','33333333-0000-0000-0000-000000000001','27AAPFU0939F1ZV','TAX_INVOICE','26-27','HTX','{ADM}')",
+        invoice(I1), para(L1, I1), totals(I1), finalise(I1), number_is(I1, "HTX/26-27/00001")], "ok"),
+    ("closing a series and reopening its prefix in the same year is refused", ISSUED_A + [
+        f"UPDATE document_number_series SET \"closedAt\"=now(), \"closedById\"='{ADM}'",
+        f"INSERT INTO document_number_series (\"hospitalId\",\"gstRegistrationId\",\"numberingScope\",\"documentType\",\"financialYear\",prefix,\"openedById\") "
+        f"VALUES ('{A}','33333333-0000-0000-0000-000000000001','27AAPFU0939F1ZV','BILL_OF_SUPPLY','26-27','BOS','{ADM}')"],
+        # Same GSTIN scope: the scope index refuses first; the cross-scope case above proves the hospital index.
+        'violates unique constraint "document_number_series_'),
+    ("every issued number is at most 16 characters (longest form BOS2/26-27/00001)", ISSUED_A + [
+        f"UPDATE document_number_series SET \"closedAt\"=now(), \"closedById\"='{ADM}'",
+        invoice(I2, appt=V2), lab(L2, I2, item=LAB2), totals(I2), finalise(I2), number_is(I2, "BOS2/26-27/00001"),
+        check("(SELECT max(length(\"invoiceNumber\")) FROM invoices) = 16", "16 characters")], "ok"),
     # ---- issued documents are immutable (DEC-053) ------------------------------------------------
     ("issued: amounts cannot change", ISSUED_A + [f"UPDATE invoices SET total=1 WHERE id='{I1}'"], "cannot be changed in MedCore"),
     ("issued: cannot be voided", ISSUED_A + [

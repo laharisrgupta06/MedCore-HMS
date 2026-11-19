@@ -1,4 +1,4 @@
--- Rollback of M-11b invoice_integrity. For a database where M-11b is applied but billing has not been
+-- Rollback of M-11b invoice_integrity (revision 2). For a database where M-11b is applied but billing has not been
 -- used. Refuses if any invoice, line, series, event, request or note exists (those rows would be lost
 -- or would no longer satisfy the initial schema). Restores the schema exactly as M-11a left it.
 DO $$
@@ -36,9 +36,17 @@ DROP FUNCTION medcore_invoice_item_rules();
 DROP FUNCTION medcore_document_series_rules();
 
 -- Lines
+DROP INDEX "invoice_items_consultationAppointmentId_idx";
+DROP INDEX "invoice_items_dispenseId_idx";
+DROP INDEX "invoice_items_labOrderItemId_idx";
+DROP INDEX "invoice_items_consultation_unreleased";
+DROP INDEX "invoice_items_dispense_unreleased";
+DROP INDEX "invoice_items_lab_unreleased";
 DROP INDEX "invoice_items_classificationId_idx";
 DROP INDEX "invoice_items_classificationVersionId_idx";
 ALTER TABLE invoice_items
+  DROP CONSTRAINT "invoice_items_consultationAppointmentId_hospitalId_fkey",
+  DROP CONSTRAINT invoice_items_consultation_link_chk,
   DROP CONSTRAINT "invoice_items_roomRuleId_fkey",
   DROP CONSTRAINT "invoice_items_classificationVersionId_hospitalId_fkey",
   DROP CONSTRAINT "invoice_items_classificationId_hospitalId_fkey",
@@ -50,6 +58,7 @@ ALTER TABLE invoice_items
   DROP CONSTRAINT invoice_items_manual_by_chk,
   DROP CONSTRAINT invoice_items_description_chk;
 ALTER TABLE invoice_items
+  DROP COLUMN "releasedAt", DROP COLUMN "consultationAppointmentId",
   DROP COLUMN "roomCriticalCare", DROP COLUMN "roomDailyCharge", DROP COLUMN "roomRuleId",
   DROP COLUMN "taxAmount", DROP COLUMN "taxableValue", DROP COLUMN "discountShare", DROP COLUMN "grossAmount",
   DROP COLUMN "notCollectedReason", DROP COLUMN "gstCollected", DROP COLUMN "priceIncludesTax", DROP COLUMN "ratePercent",
@@ -57,6 +66,10 @@ ALTER TABLE invoice_items
   DROP COLUMN "classificationVersionId", DROP COLUMN "classificationId", DROP COLUMN "unclassified",
   DROP COLUMN "addedById", DROP COLUMN "serviceDate";
 ALTER TABLE invoice_items ADD CONSTRAINT invoice_items_line_total_chk CHECK ("lineTotal" = quantity * "unitPrice");
+CREATE UNIQUE INDEX "invoice_items_labOrderItemId_key" ON "invoice_items"("labOrderItemId");
+CREATE UNIQUE INDEX "invoice_items_dispenseId_key" ON "invoice_items"("dispenseId");
+CREATE UNIQUE INDEX "invoice_items_labOrderItemId_hospitalId_key" ON "invoice_items"("labOrderItemId", "hospitalId");
+CREATE UNIQUE INDEX "invoice_items_dispenseId_hospitalId_key" ON "invoice_items"("dispenseId", "hospitalId");
 
 -- Invoices
 ALTER TABLE invoices DROP CONSTRAINT "invoices_seriesId_hospitalId_fkey";

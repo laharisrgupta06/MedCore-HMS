@@ -1,11 +1,11 @@
-M-11b invoice_integrity validation, PostgreSQL 16.15
-started 2026-11-19 21:30:56 IST; migration.sql sha256 a9fda32f55f75d04; rollback.sql sha256 b9ea9fd8a7bab9cd; schema.prisma sha256 3b37cac7ee65a608
+M-11b invoice_integrity revision 2 validation, PostgreSQL 16.15
+started 2026-11-19 21:48:23 IST; migration.sql sha256 2742c9cb17d9bc55; rollback.sql sha256 7dc939907131b0e5; schema.prisma sha256 6b70f4b12432421c
 
 ######## safety_checks.sh (preconditions, existing rows, rollback)
 existing rows before: 325 dump lines, 64 live rows
 PASS migration stops on existing billing rows and changes nothing
 PASS migration applies as one multi-statement query
-PASS every existing row identical after the migration (data dump, fe6e563381b5)
+PASS every existing row identical after the migration (data dump, b828c246e515)
 object counts: 55 tables, 64 triggers, 3 exclusions
 PASS rollback refused while billing rows exist
 PASS rollback applies
@@ -71,7 +71,17 @@ PASS finalise: tax invoice when every line is taxed
 PASS finalise: invoice-cum-bill of supply for mixed lines (Rule 46A)
 PASS unregistered hospital: no GST collected, bill of supply, hospital scope
 PASS two hospitals number independently
-PASS a voided draft keeps its lines and their sources: a lab item is billed once, ever
+PASS replacement draft re-bills the same consultation, lab item and dispense; finalised end to end
+PASS a source stays on at most one unreleased line: lab item already on the issued original
+PASS ... dispense already on the issued original
+PASS ... consultation already on the issued original (message, then the index)
+PASS the consultation index holds even without the friendly check
+PASS a consultation line must name its own visit
+PASS a direct update cannot release a line of a voided draft
+PASS a direct update cannot release a draft line
+PASS a direct update cannot release an issued line
+PASS a line cannot be inserted already released
+PASS a released line of a voided invoice cannot otherwise change
 PASS consecutive numbers in one series; a voided draft consumes none
 PASS only a receptionist or accountant can finalise
 PASS tax set-up must be confirmed first
@@ -84,6 +94,13 @@ PASS financial year: 31 March 23:59 and 1 April 00:00 are different years
 PASS series exhaustion: 99,999 is the last number
 PASS series exhaustion refuses the next number
 PASS new registration under the same GSTIN opens a series with a new prefix
+PASS unregistered hospital registers as regular mid-year: next bill of supply uses BOS2, never BOS again
+PASS GSTIN change mid-year (regular to regular): tax invoices continue as TI2
+PASS different document types in one year get separate series and prefixes
+PASS a series opened by hand cannot reuse a prefix the hospital used this year under another scope
+PASS a series opened by hand with a free prefix is used by the next finalise
+PASS closing a series and reopening its prefix in the same year is refused
+PASS every issued number is at most 16 characters (longest form BOS2/26-27/00001)
 PASS issued: amounts cannot change
 PASS issued: cannot be voided
 PASS issued: number cannot change
@@ -112,7 +129,7 @@ PASS a line cannot use another hospital's classification
 PASS an invoice cannot reference another hospital's visit
 PASS billing writes refuse REPEATABLE READ
 
-94/94 passed
+111/111 passed
 
 ######## concurrency_tests.py (real sessions, real clock)
 PASS C1 50 concurrent finalises: serials 1..50, no gap or duplicate, counter at 51  (errors=0, serials [1, 2, 3]..[48, 49, 50], series rows [(51,)])
@@ -124,16 +141,21 @@ PASS C4 a pharmacy line waits for an open classification assignment, then refuse
 PASS C5a a finalise waits for an open line, then issues it with both lines  (total 10000.00, lines 2)
 PASS C5b a line waits for an open finalise, then is refused  (Lines of an issued or void invoice cannot change)
 PASS C6 two sessions create the visit's draft at once: exactly one succeeds  (duplicate key value violates unique constraint "invoices_appointmentId_sequence_key")
+PASS C8 a replacement draft waits for an open void, then re-bills the released lab item; one live line, both kept  (waited 1.5s, live 1, lines 2 )
+PASS C9 if the void rolls back, the replacement is refused and the lab item stays on the original draft  (duplicate key value violates unique constraint "invoices_one_draft_per_appointment"; live 1, lines 1)
 
-9/9 concurrency checks passed
+11/11 concurrency checks passed
 
 ######## conform.js (proposed schema.prisma vs migrated database)
   outside Prisma (partial/expression): invoices_one_draft_per_appointment
   outside Prisma (partial/expression): invoices_one_original_per_appointment
+  outside Prisma (partial/expression): invoice_items_lab_unreleased
+  outside Prisma (partial/expression): invoice_items_dispense_unreleased
+  outside Prisma (partial/expression): invoice_items_consultation_unreleased
   outside Prisma (partial/expression): document_number_series_one_open
-416/416 checks match
+427/427 checks match
 
 ######## summary
-PASS lines: 111; FAIL lines: 0; MISMATCH lines: 0
-behaviour 94/94 passed; concurrency 9/9 concurrency checks passed; conformance 416/416 checks match
-finished 2026-11-19 21:31:21 IST
+PASS lines: 130; FAIL lines: 0; MISMATCH lines: 0
+behaviour 111/111 passed; concurrency 11/11 concurrency checks passed; conformance 427/427 checks match
+finished 2026-11-19 21:48:54 IST
