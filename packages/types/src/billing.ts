@@ -103,20 +103,25 @@ export function lineTax(i: LineTaxInput): LineTaxResult {
 }
 
 /**
- * DEC-051 discount allocation: shares in proportion to gross (rounded down), the remainder to the
- * largest line (earliest on ties). The shares always add up to the discount exactly.
+ * Discount allocation (DEC-051; plan section 6, Q1d): each line with a gross amount gets
+ * D x gross / total gross, rounded half-up to the paisa; the rounding remainder, positive or
+ * negative, goes to the line with the largest gross (earliest on ties). The shares always add up
+ * to the discount exactly, and no share exceeds its line (the database checks both).
  */
 export function allocateDiscount(grossPaise: readonly bigint[], discountPaise: bigint): bigint[] {
+  if (grossPaise.some((g) => g < 0n)) throw new Error('A line amount cannot be negative.');
   const total = grossPaise.reduce((a, b) => a + b, 0n);
   if (discountPaise < 0n) throw new Error('A discount cannot be negative.');
   if (discountPaise > total) throw new Error('A discount cannot exceed the invoice amount.');
   if (discountPaise === 0n || total === 0n) return grossPaise.map(() => 0n);
-  const shares = grossPaise.map((g) => (discountPaise * g) / total);
+  const shares = grossPaise.map((g) => (g === 0n ? 0n : divHalfUp(discountPaise * g, total)));
   let largest = 0;
   grossPaise.forEach((g, i) => {
     if (g > grossPaise[largest]!) largest = i;
   });
   shares[largest] = shares[largest]! + discountPaise - shares.reduce((a, b) => a + b, 0n);
+  if (shares.some((sh, i) => sh < 0n || sh > grossPaise[i]!))
+    throw new Error('The discount cannot be shared within the line amounts.');
   return shares;
 }
 

@@ -102,10 +102,12 @@ describe('DEC-051 line arithmetic', () => {
 
 describe('DEC-051 discount allocation and totals', () => {
   it('shares in proportion to gross, remainder to the largest line', () => {
-    expect(allocateDiscount([100n, 200n, 300n], 100n)).toEqual([16n, 33n, 51n]);
+    // 16.67 -> 17, 33.33 -> 33, 50.00 -> 50 (half-up); remainder 0.
+    expect(allocateDiscount([100n, 200n, 300n], 100n)).toEqual([17n, 33n, 50n]);
   });
   it('gives the remainder to the earliest of equal largest lines', () => {
-    expect(allocateDiscount([200n, 200n], 3n)).toEqual([2n, 1n]);
+    // 1.5 -> 2 each (half-up), remainder -1 to the earliest largest line.
+    expect(allocateDiscount([200n, 200n], 3n)).toEqual([1n, 2n]);
   });
   it('always adds up exactly, and refuses a discount above the total', () => {
     const gross = [12345n, 999n, 1n, 50000n, 7777n];
