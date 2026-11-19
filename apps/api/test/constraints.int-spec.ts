@@ -83,7 +83,7 @@ const at = (h: number, m = 0) => new Date(Date.UTC(2031, 0, 15, h, m));
 beforeAll(requireMigration);
 
 describe('T-MIG-001: database objects exist', () => {
-  it('has 51 tables, 53 triggers, three exclusion constraints and the extensions', async () => {
+  it('has 55 tables, 64 triggers, three exclusion constraints and the extensions', async () => {
     const [tables] = await prisma.$queryRaw<{ c: bigint }[]>`
       SELECT count(*) AS c FROM information_schema.tables
       WHERE table_schema = 'public' AND table_name <> '_prisma_migrations'`;
@@ -97,8 +97,9 @@ describe('T-MIG-001: database objects exist', () => {
     // 44 tables and 31 triggers through M-06; M-08 and M-10 add one table each, M-09 and M-10 add
     // 11 triggers (counts measured on PostgreSQL 16 after each migration, T-MIG-PH-002). M-11a adds
     // 5 tables, 11 triggers and 1 exclusion constraint (measured on PostgreSQL 16, T-MIG-TAX-001).
-    expect(Number(tables!.c)).toBe(51);
-    expect(Number(triggers!.c)).toBe(53);
+    // M-11b adds 4 tables and 11 triggers (measured on PostgreSQL 16, T-MIG-INV-001; named below).
+    expect(Number(tables!.c)).toBe(55);
+    expect(Number(triggers!.c)).toBe(64);
     expect(Number(exclusions!.c)).toBe(3);
     expect(ext.map((e) => e.extname)).toEqual(expect.arrayContaining(['pgcrypto', 'btree_gist']));
     // The Phase 7 objects by name, so a missing one cannot hide behind a correct total.
@@ -161,6 +162,56 @@ describe('T-MIG-001: database objects exist', () => {
         'tax_classification_versions_rules_at_commit',
         'tax_classifications',
         'tax_classifications_rules',
+      ].sort(),
+    );
+    // The M-11b invoice integrity objects by name (T-MIG-INV-001).
+    const invoiceNames = await prisma.$queryRaw<{ n: string }[]>`
+      SELECT table_name AS n FROM information_schema.tables
+       WHERE table_schema = 'public' AND table_name IN ('document_number_series', 'invoice_events',
+         'invoice_correction_requests', 'invoice_correction_request_notes')
+      UNION ALL
+      SELECT tgname FROM pg_trigger WHERE NOT tgisinternal AND tgname IN (
+        'document_number_series_rules', 'invoice_items_rules', 'invoices_rules', 'invoices_totals_at_commit',
+        'invoice_items_totals_at_commit', 'invoice_events_append_only', 'invoices_history',
+        'invoice_correction_requests_rules', 'invoice_correction_request_notes_rules',
+        'invoice_correction_requests_append_only', 'invoice_correction_request_notes_append_only')
+      UNION ALL
+      SELECT indexname FROM pg_indexes WHERE schemaname = 'public' AND indexname IN (
+        'invoices_one_draft_per_appointment', 'invoices_one_original_per_appointment',
+        'invoice_items_lab_unreleased', 'invoice_items_dispense_unreleased',
+        'invoice_items_consultation_unreleased', 'document_number_series_one_open',
+        'document_number_series_hospitalId_financialYear_prefix_key',
+        'document_number_series_numberingScope_financialYear_prefix_key',
+        'invoices_numberingScope_financialYear_invoiceNumber_key',
+        'invoices_hospitalId_financialYear_invoiceNumber_key', 'invoices_seriesId_serial_key')`;
+    expect(invoiceNames.map((x) => x.n).sort()).toEqual(
+      [
+        'document_number_series',
+        'document_number_series_hospitalId_financialYear_prefix_key',
+        'document_number_series_numberingScope_financialYear_prefix_key',
+        'document_number_series_one_open',
+        'document_number_series_rules',
+        'invoice_correction_request_notes',
+        'invoice_correction_request_notes_append_only',
+        'invoice_correction_request_notes_rules',
+        'invoice_correction_requests',
+        'invoice_correction_requests_append_only',
+        'invoice_correction_requests_rules',
+        'invoice_events',
+        'invoice_events_append_only',
+        'invoice_items_consultation_unreleased',
+        'invoice_items_dispense_unreleased',
+        'invoice_items_lab_unreleased',
+        'invoice_items_rules',
+        'invoice_items_totals_at_commit',
+        'invoices_history',
+        'invoices_hospitalId_financialYear_invoiceNumber_key',
+        'invoices_numberingScope_financialYear_invoiceNumber_key',
+        'invoices_one_draft_per_appointment',
+        'invoices_one_original_per_appointment',
+        'invoices_rules',
+        'invoices_seriesId_serial_key',
+        'invoices_totals_at_commit',
       ].sort(),
     );
   });
@@ -333,38 +384,73 @@ describe('T-MIG-005: clinical and audit immutability', () => {
   });
 });
 
-describe('T-MIG-006: invoice totals (TEST-015)', () => {
-  it('rejects a total that is not subtotal + tax − discount', async () => {
+describe('T-MIG-006: invoice drafts under M-11b (TEST-015, DEC-051, DEC-053)', () => {
+  // Replaces the initial-schema check of total = subtotal + tax - discount: under M-11b an invoice
+  // starts as an empty draft, its totals must equal the sum of its lines at commit (total = subtotal
+  // + tax), only a draft can be voided, and invoices are never deleted. Issuing, numbering and lines
+  // are covered through the API in test/invoices.int-spec.ts. Rows created here cannot be deleted
+  // (by design); they stay in this test's own hospital.
+  it('starts empty, keeps totals equal to the lines, voids only drafts and never deletes', async () => {
     const { h, dept } = await hospital();
     const doc = await doctor(h.id);
     const pat = await patient(h.id);
-    const appt = (hour: number) =>
-      prisma.appointment.create({
-        data: {
-          hospitalId: h.id,
-          doctorId: doc.d.id,
-          patientId: pat.p.id,
-          departmentId: dept.id,
-          scheduledAt: at(hour),
-          endAt: at(hour, 30),
-          createdById: doc.u.id,
-        },
-      });
-    const ok = await appt(18);
-    const bad = await appt(19);
-    const inv = (appointmentId: string, total: number) =>
-      prisma.invoice.create({
-        data: {
-          hospitalId: h.id,
-          appointmentId,
-          invoiceNumber: `INV-${uid()}`,
-          subtotal: 100,
-          taxAmount: 18,
-          discountAmount: 10,
-          total,
-        },
-      });
-    await expect(inv(ok.id, 108)).resolves.toBeDefined();
-    await expect(inv(bad.id, 118)).rejects.toThrow();
+    const rc = await prisma.user.create({ data: userData('RECEPTIONIST', h.id) });
+    const appt = await prisma.appointment.create({
+      data: {
+        hospitalId: h.id,
+        doctorId: doc.d.id,
+        patientId: pat.p.id,
+        departmentId: dept.id,
+        scheduledAt: at(18),
+        endAt: at(18, 30),
+        createdById: doc.u.id,
+      },
+    });
+    const base = {
+      hospitalId: h.id,
+      appointmentId: appt.id,
+      patientId: pat.p.id,
+      createdById: rc.id,
+    };
+    await expect(
+      prisma.invoice.create({ data: { ...base, subtotal: 100, total: 100 } }),
+    ).rejects.toThrow(/starts as an empty draft/);
+    const draft = await prisma.invoice.create({ data: base });
+    expect(draft).toMatchObject({
+      status: 'DRAFT',
+      sequence: 1,
+      invoiceNumber: null,
+      kind: 'ORIGINAL',
+    });
+    // total = subtotal + tax (DEC-051); the old "minus discount" form is refused by the CHECK.
+    await expect(
+      prisma.invoice.update({
+        where: { id: draft.id },
+        data: { subtotal: 100, taxAmount: 18, total: 108 - 10 },
+      }),
+    ).rejects.toThrow(/invoices_total_chk/);
+    // Totals that the lines do not add up to are refused when the transaction commits.
+    await expect(
+      prisma.invoice.update({ where: { id: draft.id }, data: { subtotal: 100, total: 100 } }),
+    ).rejects.toThrow(/Invoice totals must equal the sum of its lines/);
+    // A doctor cannot void; a receptionist can, with a reason; then the invoice is final.
+    await expect(
+      prisma.invoice.update({
+        where: { id: draft.id },
+        data: { status: 'VOID', voidedById: doc.u.id, voidReason: 'Opened by mistake' },
+      }),
+    ).rejects.toThrow(/receptionist or accountant can void/);
+    await prisma.invoice.update({
+      where: { id: draft.id },
+      data: { status: 'VOID', voidedById: rc.id, voidReason: 'Opened by mistake' },
+    });
+    await expect(
+      prisma.invoice.update({ where: { id: draft.id }, data: { status: 'DRAFT' } }),
+    ).rejects.toThrow(/void invoice cannot change/);
+    await expect(prisma.invoice.delete({ where: { id: draft.id } })).rejects.toThrow(
+      /never deleted/,
+    );
+    // A replacement original for the visit is allowed after the void (decision 2).
+    await expect(prisma.invoice.create({ data: base })).resolves.toMatchObject({ sequence: 2 });
   });
 });

@@ -5,8 +5,8 @@ const H = '11111111-1111-4111-8111-111111111111';
 const OTHER = '22222222-2222-4222-8222-222222222222';
 
 describe('tenant scoping of Prisma operations (TEN-002/003)', () => {
-  it('knows the 47 hospital-scoped models and leaves the 4 global ones alone', () => {
-    expect(TENANT_MODELS.size).toBe(47);
+  it('knows the 51 hospital-scoped models and leaves the 4 global ones alone', () => {
+    expect(TENANT_MODELS.size).toBe(51);
     // M-08: the nightly expiry results are hospital-scoped like every other hospital table.
     expect(TENANT_MODELS.has('ExpiryReport')).toBe(true);
     expect(TENANT_MODELS.has('PrescriptionEvent')).toBe(true);
@@ -16,6 +16,15 @@ describe('tenant scoping of Prisma operations (TEN-002/003)', () => {
       'TaxClassificationVersion',
       'HospitalTaxDefault',
       'HospitalGstRegistration',
+    ]) {
+      expect(TENANT_MODELS.has(scoped)).toBe(true);
+    }
+    // M-11b: number series, invoice history, correction requests and notes are hospital data.
+    for (const scoped of [
+      'DocumentNumberSeries',
+      'InvoiceEvent',
+      'InvoiceCorrectionRequest',
+      'InvoiceCorrectionRequestNote',
     ]) {
       expect(TENANT_MODELS.has(scoped)).toBe(true);
     }

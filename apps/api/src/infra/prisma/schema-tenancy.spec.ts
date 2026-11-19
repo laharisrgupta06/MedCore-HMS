@@ -28,11 +28,15 @@ const GLOBAL_MODELS = ['Hospital', 'Icd10Code', 'StatutoryRoomTaxRule', 'Webhook
 /** Platform-level rows (Super Admin activity) may have no hospital. */
 const OPTIONAL_TENANT_MODELS = ['User', 'Notification', 'NotificationDelivery', 'AuditLog'];
 /** Relations from required-tenant models that intentionally stay single-column. */
-const SINGLE_COLUMN_ALLOWED = ['Diagnosis.icd10 -> Icd10Code'];
+const SINGLE_COLUMN_ALLOWED = [
+  'Diagnosis.icd10 -> Icd10Code',
+  // M-11b: a room line records the platform-wide statutory room rule it used (global reference data).
+  'InvoiceItem.roomRule -> StatutoryRoomTaxRule',
+];
 
 describe('schema multi-tenancy rules', () => {
   it('parses the expected number of models', () => {
-    expect(models.length).toBe(51);
+    expect(models.length).toBe(55); // M-11b adds 4 hospital-scoped models
   });
 
   it('every model carries hospitalId unless it is a documented global model', () => {

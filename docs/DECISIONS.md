@@ -549,7 +549,9 @@ whether it is approved scope from the PRD or earlier decisions, or a new require
   pages. Links never carry tokens or patient data.
 
 ### DEC-066: M-11b review decisions 1 to 8 (owner review 2026-11-19 21:38 and 21:44)
-- Status: **Approved** (owner, 2026-11-19 21:44). Recorded in the M-11b proposal (revision 2).
+- Status: **Approved** (owner, 2026-11-19 21:44). Recorded in the M-11b proposal (revision 2). Revision 2
+  moved into `prisma/migrations` with its schema on 2026-11-19 21:52 (owner approval); **not applied** on
+  macOS until a separate approval, preceded by the read-only invoice count.
 - 1: billing writes run at READ COMMITTED; the billing triggers refuse other isolation levels (the DEC-058
   lock protocol gives exact reads only at READ COMMITTED). 2: a voided original draft can be replaced by a
   new original; an issued original never. 3: lines of a draft can be removed; issued lines never change.
