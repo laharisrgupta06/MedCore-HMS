@@ -1,5 +1,6 @@
 import { BadRequestException, ConflictException, HttpException } from '@nestjs/common';
 import { InvoiceErrorCode } from '@medcore/types';
+import { Prisma } from '@prisma/client';
 import { dbError } from '../../common/http/db-rule-errors';
 
 /**
@@ -66,8 +67,42 @@ const RULES: {
   },
 ];
 
+/**
+ * A unique violation reported by Prisma (P2002) names the constrained columns, not the index: the
+ * native engine in meta.target, the driver adapter in meta.driverAdapterError.cause.constraint.
+ */
+function uniqueFields(e: unknown): string[] | null {
+  if (!(e instanceof Prisma.PrismaClientKnownRequestError) || e.code !== 'P2002') return null;
+  const meta = (e.meta ?? {}) as {
+    target?: string | string[];
+    driverAdapterError?: { cause?: { constraint?: { fields?: string[]; index?: string } } };
+  };
+  const c = meta.driverAdapterError?.cause?.constraint;
+  const raw = [
+    ...(Array.isArray(meta.target) ? meta.target : meta.target ? [meta.target] : []),
+    ...(c?.fields ?? []),
+    ...(c?.index ? [c.index] : []),
+  ];
+  return raw.map((f) => f.replace(/"/g, ''));
+}
+
 export function mapInvoiceDbError(e: unknown): never {
   if (e instanceof HttpException) throw e;
+  const fields = uniqueFields(e);
+  if (fields) {
+    const has = (re: RegExp) => fields.some((f) => re.test(f));
+    if (has(/labOrderItemId|dispenseId|consultationAppointmentId|_unreleased$/))
+      throw new ConflictException({
+        code: 'ALREADY_BILLED',
+        message: 'This charge is already on an invoice of this visit.',
+      });
+    if (has(/appointmentId|one_draft|one_original/))
+      throw new ConflictException({
+        code: 'INVOICE_EXISTS',
+        message:
+          'This visit already has an open invoice, or one was created at the same moment. Refresh and try again.',
+      });
+  }
   const { message } = dbError(e);
   const text = `${message ?? ''} ${e instanceof Error ? e.message : ''}`;
   for (const r of RULES) {

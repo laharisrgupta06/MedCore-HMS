@@ -130,3 +130,15 @@ DELETE,/api/tax/registrations/:id,DENY,ALLOW,DENY,DENY,DENY,DENY,DENY,DENY,DENY,
 POST,/api/tax/confirm,DENY,ALLOW,DENY,DENY,DENY,DENY,DENY,DENY,DENY,Tax set-up confirmation
 PUT,/api/tax/assignments/lab-tests/:id,DENY,ALLOW,DENY,DENY,DENY,DENY,DENY,DENY,DENY,Lab test classification
 PUT,/api/tax/assignments/medicines/:id,DENY,ALLOW,DENY,DENY,DENY,DENY,DENY,DENY,DENY,Medicine classification
+GET,/api/invoices,DENY,ALLOW,DENY,DENY,ALLOW,DENY,DENY,ALLOW,ALLOW,BILL-003; patients see their own issued documents (Q8 A); doctors have no invoice access (Q16 A)
+GET,/api/invoices/:id,DENY,ALLOW,DENY,DENY,ALLOW,DENY,DENY,ALLOW,ALLOW,Patients: own issued documents only; read audited
+POST,/api/invoices,DENY,DENY,DENY,DENY,ALLOW,DENY,DENY,ALLOW,DENY,Original draft for a visit; 409 INVOICE_EXISTS
+POST,/api/invoices/:id/late-charges,DENY,DENY,DENY,DENY,ALLOW,DENY,DENY,ALLOW,DENY,Late-charge draft after the original is issued (Q19 A)
+POST,/api/invoices/:id/items,DENY,DENY,DENY,DENY,ALLOW,DENY,DENY,ALLOW,DENY,Manual room (Q5 A) or other charge on a draft
+DELETE,/api/invoices/:id/items/:itemId,DENY,DENY,DENY,DENY,ALLOW,DENY,DENY,ALLOW,DENY,Manual charges only; automatic charges follow their source
+POST,/api/invoices/:id/reresolve-tax,DENY,DENY,DENY,DENY,ALLOW,DENY,DENY,ALLOW,DENY,Draft only: re-applies current tax settings
+PATCH,/api/invoices/:id/discount,DENY,DENY,DENY,DENY,DENY,DENY,DENY,ALLOW,DENY,Accountant only (Q2 B); reason required
+PATCH,/api/invoices/:id/finalise,DENY,DENY,DENY,DENY,ALLOW,DENY,DENY,ALLOW,DENY,Explicit finalise (Q18 A); allocates the document number
+PATCH,/api/invoices/:id/void,DENY,DENY,DENY,DENY,ALLOW,DENY,DENY,ALLOW,DENY,Drafts only; releases their charges (DEC-066)
+POST,/api/invoices/:id/correction-requests,DENY,DENY,DENY,DENY,ALLOW,DENY,DENY,ALLOW,DENY,Issued documents only (DEC-053)
+POST,/api/invoices/:id/correction-requests/:rid/notes,DENY,DENY,DENY,DENY,DENY,DENY,DENY,ALLOW,DENY,Accountant outcome note (DEC-053)

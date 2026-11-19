@@ -1,3 +1,4 @@
+import { CHARGE_RECORDER, type ChargeRecorder } from '../billing/charges';
 import {
   BadRequestException,
   ConflictException,
@@ -125,6 +126,7 @@ export class SchedulingService {
     private readonly db: TenantPrismaService,
     @Inject(REDIS_CLIENT) private readonly redis: Redis,
     @Inject(REMINDER_SCHEDULER) private readonly reminders: ReminderScheduler,
+    @Inject(CHARGE_RECORDER) private readonly charges: ChargeRecorder,
   ) {}
 
   // ------------------------------------------------------------------ access helpers
@@ -664,6 +666,9 @@ export class SchedulingService {
           where: { id: current.medicalRecordId },
           data: { status: 'CLOSED', closedAt: new Date() },
         });
+      // Q4 A: the consultation is charged when it is completed, in the same transaction.
+      if (dto.status === 'COMPLETED')
+        await this.charges.charge(tx, actor, { kind: 'CONSULTATION', appointmentId: id });
     });
     if (dto.status === 'CANCELLED' || dto.status === 'NO_SHOW') {
       await this.reminders.cancel(id);

@@ -12,3 +12,4 @@ export * from './billing';
 export * from './tax';
 export * from './invoice-snapshot';
 export * from './invoice-plan';
+export * from './invoices';

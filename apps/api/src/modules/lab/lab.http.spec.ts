@@ -460,6 +460,15 @@ describe('Phase 6: laboratory (in-memory Prisma)', () => {
         .expect(200)
     ).body.data;
     expect(c).toMatchObject({ status: 'CANCELLED', cancellationReason: 'Ordered by mistake' });
+    // Q4 A, Q6 A: each ordered test was charged; cancelling releases those charges.
+    const itemIds = t.prisma
+      .rows('LabOrderItem')
+      .filter((i) => i.labOrderId === o.id)
+      .map((i) => i.id);
+    expect(t.charges).toContainEqual(
+      expect.objectContaining({ kind: 'LAB', labOrderItemId: itemIds[0], description: hb.name }),
+    );
+    expect(t.charges).toContainEqual({ kind: 'RELEASE_LAB', labOrderItemIds: itemIds });
     await (await as(reception)).patch(`/api/lab-orders/${o.id}/sample`).expect(409);
     const o2 = await order([hb.id]);
     await toProcessing(o2.id);

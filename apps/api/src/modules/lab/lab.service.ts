@@ -3,6 +3,7 @@ import {
   BadRequestException,
   ConflictException,
   ForbiddenException,
+  Inject,
   Injectable,
 } from '@nestjs/common';
 import {
@@ -22,6 +23,7 @@ import type { AuthPrincipal } from '../../common/auth/decorators';
 import { DomainEvents } from '../../common/events/domain-events';
 import { PaginatedResult } from '../../common/http/paginated-result';
 import { mapPrismaError, notFound } from '../../common/http/prisma-errors';
+import { CHARGE_RECORDER, type ChargeRecorder } from '../billing/charges';
 import { TenantPrismaService } from '../../common/tenancy/tenant-prisma.service';
 import { PdfService } from '../../infra/pdf/pdf.service';
 import { StorageService } from '../../infra/storage/storage.service';
@@ -76,6 +78,7 @@ export class LabService {
     private readonly events: DomainEvents,
     private readonly storage: StorageService,
     private readonly pdf: PdfService,
+    @Inject(CHARGE_RECORDER) private readonly charges: ChargeRecorder,
   ) {}
 
   // ------------------------------------------------------------------ catalogue
@@ -245,10 +248,18 @@ export class LabService {
           clinicalNotes: dto.clinicalNotes || null,
         },
       });
-      for (const testId of dto.testIds)
-        await tx.labOrderItem.create({
+      for (const testId of dto.testIds) {
+        const item = await tx.labOrderItem.create({
           data: { hospitalId: r.hospitalId, labOrderId: o.id, labTestId: testId },
         });
+        // Q4 A, Q6 A: each test is charged when ordered, at its price now.
+        await this.charges.charge(tx, actor, {
+          kind: 'LAB',
+          appointmentId: r.appointmentId,
+          labOrderItemId: item.id,
+          description: tests.find((t) => t.id === testId)!.name,
+        });
+      }
       return o.id;
     });
     return this.get(actor, id);
@@ -299,17 +310,26 @@ export class LabService {
         code: 'FORBIDDEN',
         message: 'Only the doctor who placed the order can cancel it.',
       });
-    await this.move(
-      o,
-      ['ORDERED'],
-      'Only orders whose sample has not been collected can be cancelled.',
-      {
-        status: 'CANCELLED',
-        cancelledAt: new Date(),
-        cancelledById: actor.userId,
-        cancellationReason: dto.reason,
-      },
-    );
+    const message = 'Only orders whose sample has not been collected can be cancelled.';
+    if (o.status !== 'ORDERED') throw transition(message);
+    await this.db.client.$transaction(async (tx) => {
+      const u = await tx.labOrder.updateMany({
+        where: { id: o.id, status: 'ORDERED' },
+        data: {
+          status: 'CANCELLED',
+          cancelledAt: new Date(),
+          cancelledById: actor.userId,
+          cancellationReason: dto.reason,
+        },
+      });
+      if (u.count === 0) throw transition(message);
+      // The cancelled tests are no longer charged while the invoice is a draft (issued charges stay).
+      await this.charges.releaseLabCharges(
+        tx,
+        actor,
+        o.items.map((i) => i.id),
+      );
+    });
     return this.get(actor, id);
   }
 

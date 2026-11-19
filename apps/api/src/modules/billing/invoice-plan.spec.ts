@@ -129,6 +129,26 @@ describe('M-11b refusals become API errors', () => {
   ])('%s %s', (c, m, expected) => {
     expect(code(pg(c, m))).toBe(expected);
   });
+  it('unique violations reported by Prisma (P2002) are mapped by their columns, from either engine', () => {
+    const p2002 = (meta: Record<string, unknown>) =>
+      new Prisma.PrismaClientKnownRequestError('Unique constraint failed', {
+        code: 'P2002',
+        clientVersion: 't',
+        meta,
+      });
+    // Driver adapter shape, as observed on PostgreSQL 16 for the partial unique index.
+    expect(
+      code(
+        p2002({ driverAdapterError: { cause: { constraint: { fields: ['"labOrderItemId"'] } } } }),
+      ),
+    ).toBe('ALREADY_BILLED');
+    expect(code(p2002({ target: ['dispenseId'] }))).toBe('ALREADY_BILLED');
+    expect(code(p2002({ target: 'invoice_items_consultation_unreleased' }))).toBe('ALREADY_BILLED');
+    expect(code(p2002({ target: ['appointmentId'] }))).toBe('INVOICE_EXISTS');
+    expect(code(p2002({ target: ['appointmentId', 'sequence'] }))).toBe('INVOICE_EXISTS');
+    expect(code(p2002({ target: ['somethingElse'] }))).toBe('rethrown');
+  });
+
   it('the issued-document message names the accountant and the process outside MedCore', () => {
     try {
       mapInvoiceDbError(

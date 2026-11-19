@@ -297,6 +297,15 @@ describe('Phase 7: pharmacy and inventory', () => {
       [soon, 6],
       [later, 2],
     ]);
+    // Q4 A: each dispense is charged, in the dispensing transaction.
+    for (const d of dispenses)
+      expect(t.charges).toContainEqual(
+        expect.objectContaining({
+          kind: 'PHARMACY',
+          dispenseId: d.id,
+          description: expect.stringContaining(` x ${d.quantity}`),
+        }),
+      );
     expect(
       rows('StockMovement')
         .filter((x) => x.type === 'DISPENSE')

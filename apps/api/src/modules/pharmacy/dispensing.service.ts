@@ -1,6 +1,7 @@
 import {
   BadRequestException,
   ConflictException,
+  Inject,
   Injectable,
   UnprocessableEntityException,
 } from '@nestjs/common';
@@ -16,6 +17,7 @@ import { DomainEvents } from '../../common/events/domain-events';
 import { PaginatedResult } from '../../common/http/paginated-result';
 import { notFound } from '../../common/http/prisma-errors';
 import { TenantPrismaService } from '../../common/tenancy/tenant-prisma.service';
+import { CHARGE_RECORDER, type ChargeRecorder } from '../billing/charges';
 import { localDate } from '../../common/time/zoned';
 import { dateText, dateValue, LowStock } from '../medicines/low-stock';
 import { MedicinesService, StockLevels } from '../medicines/medicines.module';
@@ -37,6 +39,7 @@ export class DispensingService {
     private readonly stock: StockLevels,
     private readonly lowStock: LowStock,
     private readonly events: DomainEvents,
+    @Inject(CHARGE_RECORDER) private readonly charges: ChargeRecorder,
   ) {}
 
   async queue(actor: AuthPrincipal, q: QueueQuery): Promise<PaginatedResult<PrescriptionView>> {
@@ -128,6 +131,18 @@ export class DispensingService {
           code: PharmacyErrorCode.NOT_VERIFIED,
           message: 'Verify the prescription before dispensing it.',
         });
+      const visit = await tx.medicalRecord.findFirstOrThrow({
+        where: { id: p.medicalRecordId },
+        select: { appointmentId: true },
+      });
+      const medicineName = new Map(
+        (
+          await tx.medicine.findMany({
+            where: { id: { in: p.items.map((i) => i.medicineId) } },
+            select: { id: true, name: true, strength: true },
+          })
+        ).map((m) => [m.id, `${m.name} ${m.strength}`]),
+      );
       const touched = new Set<string>();
       for (const req of dto.items) {
         const item = p.items.find((i) => i.id === req.itemId);
@@ -211,6 +226,14 @@ export class DispensingService {
               dispenseId: d.id,
               performedById: actor.userId,
             },
+          });
+          // Q4 A: each dispense is charged at its batch's MRP, in the same transaction (outpatient
+          // sale, DEC-046 Q1e).
+          await this.charges.charge(tx, actor, {
+            kind: 'PHARMACY',
+            appointmentId: visit.appointmentId,
+            dispenseId: d.id,
+            description: `${medicineName.get(item.medicineId) ?? 'Medicine'} x ${a.quantity}`,
           });
           await tx.medicineBatch.updateMany({
             where: { id: a.batchId, hospitalId, status: 'ACTIVE', quantity: 0 },

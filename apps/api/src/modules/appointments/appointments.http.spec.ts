@@ -373,6 +373,8 @@ describe('Phase 3: availability and appointments (in-memory Prisma)', () => {
         medicalRecordId: rec0.body.data.id,
       });
       expect(t.prisma.rows('MedicalRecord')[0]).toMatchObject({ status: 'CLOSED' });
+      // Q4 A: completing the consultation charges it, in the same transaction.
+      expect(t.charges).toContainEqual({ kind: 'CONSULTATION', appointmentId: apptId });
       await rec
         .patch(`/api/appointments/${apptId}/status`, { status: 'CANCELLED', reason: 'x' })
         .expect(400);

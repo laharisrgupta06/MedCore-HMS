@@ -26,6 +26,7 @@ import { SchedulingModule } from './modules/appointments/appointments.module';
 import { EmrModule } from './modules/emr/emr.module';
 import { MedicinesModule } from './modules/medicines/medicines.module';
 import { TaxModule } from './modules/tax/tax.module';
+import { BillingModule } from './modules/billing/billing.module';
 import { PharmacyModule } from './modules/pharmacy/pharmacy.module';
 import { PrescriptionsModule } from './modules/prescriptions/prescriptions.module';
 import { LabModule } from './modules/lab/lab.module';
@@ -76,6 +77,7 @@ describe('Permissions matrix (ROLE-011)', () => {
           EmrModule,
           MedicinesModule,
           TaxModule,
+          BillingModule,
           PrescriptionsModule,
           LabModule,
           PharmacyModule,

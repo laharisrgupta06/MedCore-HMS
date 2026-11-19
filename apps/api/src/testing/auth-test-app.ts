@@ -32,6 +32,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { FakePrisma } from './fake-prisma';
 import { REMINDER_SCHEDULER } from '../modules/appointments/reminders';
+import { CHARGE_RECORDER } from '../modules/billing/charges';
+import type { AutomaticCharge } from '../modules/billing/billing.service';
 
 export const TEST_ENV = {
   NODE_ENV: 'test',
@@ -53,6 +55,12 @@ export interface AuthTestApp {
   emails: EmailMessage[];
   sms: SmsMessage[];
   reminders: { id: string; at: string }[];
+  /**
+   * Charges requested by clinical actions (consultation, lab order, dispense) and lab charges released
+   * by a cancellation. The in-memory database has no M-11b triggers, so billing itself is tested on
+   * PostgreSQL (test/invoices.int-spec.ts).
+   */
+  charges: (AutomaticCharge | { kind: 'RELEASE_LAB'; labOrderItemIds: string[] })[];
 }
 
 @Module({})
@@ -68,6 +76,7 @@ export async function createAuthTestApp(
   const emails: EmailMessage[] = [];
   const sms: SmsMessage[] = [];
   const reminders: { id: string; at: string }[] = [];
+  const charges: AuthTestApp['charges'] = [];
   const infra = [
     { provide: REDIS_CLIENT, useValue: redis },
     {
@@ -102,6 +111,19 @@ export async function createAuthTestApp(
       },
     },
     {
+      provide: CHARGE_RECORDER,
+      useValue: {
+        charge: (_tx: unknown, _actor: unknown, c: AutomaticCharge) => (
+          charges.push(c),
+          Promise.resolve()
+        ),
+        releaseLabCharges: (_tx: unknown, _actor: unknown, ids: string[]) => (
+          charges.push({ kind: 'RELEASE_LAB', labOrderItemIds: ids }),
+          Promise.resolve()
+        ),
+      },
+    },
+    {
       provide: REMINDER_SCHEDULER,
       useValue: {
         schedule: (id: string, at: Date) => (
@@ -123,6 +145,7 @@ export async function createAuthTestApp(
           MAIL_ADAPTER,
           SMS_ADAPTER,
           REMINDER_SCHEDULER,
+          CHARGE_RECORDER,
           FIELD_CRYPTO,
           DomainEvents,
           PdfService,
@@ -164,7 +187,7 @@ export async function createAuthTestApp(
     await sessions.create(u.id, sid, randomUUID(), 60_000);
     return tokens.signAccess({ sub: u.id, sid, role: u.role as Role, hid: u.hospitalId });
   };
-  return { app, prisma, redis, emails, sms, reminders, tokenFor };
+  return { app, prisma, redis, emails, sms, reminders, charges, tokenFor };
 }
 
 /** Extracts the 6-digit code from the most recent message, as a person reading Mailpit would. */
