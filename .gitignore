@@ -54,3 +54,6 @@ uploads/
 # Local file storage (development)
 var/
 apps/api/var/
+
+# Local database backups (never committed)
+backups/
