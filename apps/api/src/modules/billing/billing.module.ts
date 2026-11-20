@@ -172,6 +172,15 @@ export class InvoicesController {
     return this.billing.list(a, q);
   }
 
+  @Get('options')
+  @Roles('RECEPTIONIST', 'ACCOUNTANT')
+  @ApiOperation({
+    summary: 'Choices for manual charges: active tax classifications and rooms with a daily charge',
+  })
+  options(@CurrentUser() a: AuthPrincipal) {
+    return this.billing.chargeOptions(a);
+  }
+
   @Get(':id')
   @Roles('RECEPTIONIST', 'ACCOUNTANT', 'HOSPITAL_ADMIN', 'PATIENT')
   @AuditRead('invoice.view', 'Invoice')

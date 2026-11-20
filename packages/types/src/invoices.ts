@@ -120,3 +120,8 @@ export interface AddOtherLineRequest {
   serviceDate: string;
 }
 export type AddLineRequest = AddRoomLineRequest | AddOtherLineRequest;
+
+export interface ChargeOptions {
+  classifications: { id: string; name: string; supplyType: 'GOODS' | 'SERVICE'; hsnSac: string }[];
+  rooms: { id: string; number: string; type: string; dailyCharge: string }[];
+}

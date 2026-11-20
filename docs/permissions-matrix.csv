@@ -131,6 +131,7 @@ POST,/api/tax/confirm,DENY,ALLOW,DENY,DENY,DENY,DENY,DENY,DENY,DENY,Tax set-up c
 PUT,/api/tax/assignments/lab-tests/:id,DENY,ALLOW,DENY,DENY,DENY,DENY,DENY,DENY,DENY,Lab test classification
 PUT,/api/tax/assignments/medicines/:id,DENY,ALLOW,DENY,DENY,DENY,DENY,DENY,DENY,DENY,Medicine classification
 GET,/api/invoices,DENY,ALLOW,DENY,DENY,ALLOW,DENY,DENY,ALLOW,ALLOW,BILL-003; patients see their own issued documents (Q8 A); doctors have no invoice access (Q16 A)
+GET,/api/invoices/options,DENY,DENY,DENY,DENY,ALLOW,DENY,DENY,ALLOW,DENY,Choices for manual charges (active classifications and rooms)
 GET,/api/invoices/:id,DENY,ALLOW,DENY,DENY,ALLOW,DENY,DENY,ALLOW,ALLOW,Patients: own issued documents only; read audited
 POST,/api/invoices,DENY,DENY,DENY,DENY,ALLOW,DENY,DENY,ALLOW,DENY,Original draft for a visit; 409 INVOICE_EXISTS
 POST,/api/invoices/:id/late-charges,DENY,DENY,DENY,DENY,ALLOW,DENY,DENY,ALLOW,DENY,Late-charge draft after the original is issued (Q19 A)

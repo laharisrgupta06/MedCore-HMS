@@ -20,6 +20,7 @@ import {
   FileText,
   ClipboardCheck,
   BellRing,
+  Receipt,
   ReceiptText,
 } from 'lucide-react';
 
@@ -128,6 +129,12 @@ export const STAFF_NAV: NavItem[] = [
   { href: '/dashboard/staff', label: 'Staff', icon: Users, roles: ['HOSPITAL_ADMIN'] },
   { href: '/dashboard/departments', label: 'Departments', icon: Layers, roles: ['HOSPITAL_ADMIN'] },
   {
+    href: '/dashboard/invoices',
+    label: 'Invoices',
+    icon: Receipt,
+    roles: ['RECEPTIONIST', 'ACCOUNTANT', 'HOSPITAL_ADMIN'],
+  },
+  {
     href: '/dashboard/tax',
     label: 'Tax settings',
     icon: ReceiptText,
@@ -154,6 +161,7 @@ export const PATIENT_NAV: NavItem[] = [
   { href: '/portal/health', label: 'My health record', icon: HeartPulse, roles: ['PATIENT'] },
   { href: '/portal/prescriptions', label: 'Prescriptions', icon: Pill, roles: ['PATIENT'] },
   { href: '/portal/lab-reports', label: 'Lab reports', icon: FileText, roles: ['PATIENT'] },
+  { href: '/portal/invoices', label: 'My bills', icon: Receipt, roles: ['PATIENT'] },
   { href: '/portal/account', label: 'My account', icon: UserRound, roles: ['PATIENT'] },
 ];
 

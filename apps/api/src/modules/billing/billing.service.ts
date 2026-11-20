@@ -800,6 +800,29 @@ export class BillingService {
 
   // ------------------------------------------------------------------ reads
 
+  /** What staff can choose for manual charges (other: active classifications; room: rooms with a daily charge). */
+  async chargeOptions(_actor: AuthPrincipal): Promise<{
+    classifications: { id: string; name: string; supplyType: string; hsnSac: string }[];
+    rooms: { id: string; number: string; type: string; dailyCharge: string }[];
+  }> {
+    const [classifications, rooms] = await Promise.all([
+      this.db.client.taxClassification.findMany({
+        where: { isActive: true },
+        orderBy: { name: 'asc' },
+        select: { id: true, name: true, supplyType: true, hsnSac: true },
+      }),
+      this.db.client.room.findMany({
+        where: { dailyCharge: { not: null } },
+        orderBy: { number: 'asc' },
+        select: { id: true, number: true, type: true, dailyCharge: true },
+      }),
+    ]);
+    return {
+      classifications,
+      rooms: rooms.map((r) => ({ ...r, dailyCharge: r.dailyCharge!.toFixed(2) })),
+    };
+  }
+
   private patientScope(actor: AuthPrincipal): Prisma.InvoiceWhereInput {
     if (actor.role !== 'PATIENT') return {};
     // Q8 A: patients see their own issued documents only (never drafts or voided drafts).
