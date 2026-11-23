@@ -42,8 +42,10 @@ export function Toaster() {
           key={t.id}
           role={t.tone === 'error' ? 'alert' : 'status'}
           className={cn(
-            'mc-enter pointer-events-auto flex items-start gap-3 rounded-md border bg-surface px-4 py-3 text-body-sm shadow-2',
-            t.tone === 'error' ? 'border-error/30' : 'border-success/30',
+            'mc-enter pointer-events-auto flex items-start gap-3 rounded-md border border-l-4 bg-surface px-4 py-3 text-body-sm shadow-2',
+            t.tone === 'error'
+              ? 'border-error/30 border-l-error'
+              : 'border-success/30 border-l-success',
           )}
         >
           {t.tone === 'error' ? (
@@ -53,7 +55,7 @@ export function Toaster() {
           )}
           <p className="flex-1">{t.message}</p>
           <button
-            className="rounded-sm text-ink-muted hover:text-ink"
+            className="-m-1 rounded-md p-1 text-ink-muted transition-colors duration-150 hover:bg-sage-50 hover:text-ink"
             onClick={() => dismiss(t.id)}
             aria-label="Dismiss"
           >

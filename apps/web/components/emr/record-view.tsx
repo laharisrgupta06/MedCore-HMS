@@ -11,7 +11,6 @@ import {
 } from '@medcore/types';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { FileText, Lock, Paperclip, Plus, Upload } from 'lucide-react';
-import Link from 'next/link';
 import { useRef, useState } from 'react';
 import { PageHeader } from '@/components/app/app-shell';
 import { Alert } from '@/components/ui/alert';
@@ -84,6 +83,11 @@ export function RecordView({ recordId, backHref }: { recordId: string; backHref:
   return (
     <>
       <PageHeader
+        crumbs={[
+          backHref.startsWith('/portal')
+            ? { label: 'My health record', href: backHref }
+            : { label: 'Appointments', href: backHref },
+        ]}
         title={`${p.firstName} ${p.lastName}`}
         description={
           <span>
@@ -101,9 +105,6 @@ export function RecordView({ recordId, backHref }: { recordId: string; backHref:
             ) : (
               <Badge tone="info">Consultation in progress</Badge>
             )}
-            <Link href={backHref} className="text-body-sm text-sage-700 underline">
-              Back
-            </Link>
             {can.complete && <CompleteButton record={r} onDone={() => void q.refetch()} />}
           </div>
         }
@@ -627,7 +628,7 @@ function DiagnosisDialog({
                 <li key={c.code} className="border-b border-border last:border-0">
                   <button
                     type="button"
-                    className="w-full px-3 py-2 text-left text-body-sm hover:bg-sage-50"
+                    className="w-full px-3 py-2 text-left text-body-sm transition-colors duration-150 hover:bg-sage-50 max-sm:py-3"
                     onClick={() => setCode(c)}
                   >
                     <span className="font-mono">{c.code}</span> {c.title}

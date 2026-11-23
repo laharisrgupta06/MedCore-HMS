@@ -57,6 +57,7 @@ export function EncounterStart({ appointmentId }: { appointmentId: string }) {
   return (
     <>
       <PageHeader
+        crumbs={[{ label: 'Appointments', href: '/dashboard/appointments' }]}
         title={`Start consultation: ${a.patient.firstName} ${a.patient.lastName}`}
         description={
           <span>

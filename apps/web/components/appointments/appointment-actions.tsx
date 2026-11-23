@@ -11,9 +11,9 @@ import { useQueryClient } from '@tanstack/react-query';
 import Link from 'next/link';
 import { useState } from 'react';
 import { Alert } from '@/components/ui/alert';
-import { Button } from '@/components/ui/button';
+import { Button, buttonVariants } from '@/components/ui/button';
 import { Dialog } from '@/components/ui/dialog';
-import { Field } from '@/components/ui/field';
+import { Field, textareaClass } from '@/components/ui/field';
 import { toast } from '@/components/ui/toast';
 import { errorMessage } from '@/lib/forms';
 import { fmtDate, fmtTime, localDate } from '@/lib/time';
@@ -21,8 +21,7 @@ import { appointmentsApi } from '@/services/appointments';
 import { useAuth } from '@/store/auth';
 import { SlotPicker } from './slot-picker';
 
-const linkButton =
-  'inline-flex h-8 items-center rounded-md bg-sage-600 px-3 text-body-sm font-medium text-white hover:bg-sage-700 max-sm:h-11';
+const linkButton = buttonVariants({ size: 'compact', className: 'max-sm:h-11' });
 
 const LABEL: Partial<Record<AppointmentStatus, string>> = {
   CONFIRMED: 'Confirm',
@@ -206,7 +205,7 @@ function CancelDialog({
           <textarea
             id={p.id}
             aria-describedby={p.describedBy}
-            className="min-h-20 w-full rounded-md border border-border-strong bg-surface px-3 py-2 text-body-sm"
+            className={textareaClass}
             maxLength={500}
             value={reason}
             onChange={(e) => setReason(e.target.value)}

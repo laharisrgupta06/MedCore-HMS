@@ -167,6 +167,7 @@ export class InvoicesController {
 
   @Get()
   @Roles('RECEPTIONIST', 'ACCOUNTANT', 'HOSPITAL_ADMIN', 'PATIENT')
+  @AuditRead('invoice.list', 'Invoice')
   @ApiOperation({ summary: 'Invoices (patients: their own issued documents)' })
   list(@CurrentUser() a: AuthPrincipal, @Query() q: InvoiceQuery) {
     return this.billing.list(a, q);

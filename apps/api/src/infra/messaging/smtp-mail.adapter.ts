@@ -28,6 +28,7 @@ export class SmtpMailAdapter implements MailAdapter {
       subject: m.subject,
       text: m.text,
       html: m.html,
+      attachments: m.attachments,
     });
   }
 }

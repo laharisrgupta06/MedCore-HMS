@@ -24,6 +24,7 @@ import { medicinesApi } from '@/services/prescriptions';
 import { taxApi } from '@/services/tax';
 import { useAuth } from '@/store/auth';
 import { ClassificationDialog, RegistrationDialog, VersionDialog } from './tax-forms';
+import { Segmented } from '@/components/ui/segmented';
 
 /** Hospital tax settings (BILL-008, task 8-B2). Accountants see the same page read-only. */
 
@@ -216,7 +217,7 @@ function Registrations({
                   <Badge tone="neutral">Superseded</Badge>
                 )}
                 {canEdit && r.deletable && (
-                  <Button size="compact" variant="ghost" onClick={() => setRemoving(r)}>
+                  <Button size="compact" variant="danger" onClick={() => setRemoving(r)}>
                     Delete
                   </Button>
                 )}
@@ -593,23 +594,18 @@ function ItemAssignments({ t, canEdit }: { t: TaxSettings; canEdit: boolean }) {
     <Panel title="Item classifications">
       <div className="flex flex-col gap-4 p-5">
         <div className="flex flex-wrap items-center justify-between gap-3">
-          <div
-            role="tablist"
-            aria-label="Item type"
-            className="inline-flex rounded-md border border-border p-0.5"
-          >
-            {(['medicines', 'lab-tests'] as const).map((k) => (
-              <button
-                key={k}
-                role="tab"
-                aria-selected={tab === k}
-                className={`rounded px-3 py-1.5 text-body-sm ${tab === k ? 'bg-sage-600 text-white' : 'text-ink-secondary hover:bg-sage-50'}`}
-                onClick={() => (setTab(k), setPage(1))}
-              >
-                {k === 'medicines' ? 'Medicines' : 'Lab tests'}
-              </button>
-            ))}
-          </div>
+          <Segmented
+            label="Item type"
+            value={tab}
+            options={[
+              { value: 'medicines', label: 'Medicines' },
+              { value: 'lab-tests', label: 'Lab tests' },
+            ]}
+            onChange={(k) => {
+              setTab(k);
+              setPage(1);
+            }}
+          />
           <SearchInput label="Search items" placeholder="Search by name" onSearch={onSearch} />
         </div>
         <p className="text-caption text-ink-muted">

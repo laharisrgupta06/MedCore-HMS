@@ -3,6 +3,8 @@ import {
   BadRequestException,
   ConflictException,
   ForbiddenException,
+  HttpException,
+  HttpStatus,
   Inject,
   Injectable,
   Logger,
@@ -13,6 +15,7 @@ import {
   ACCESS_TOKEN_TTL_SECONDS,
   AuthErrorCode,
   checkPassword,
+  CommonErrorCode,
   REFRESH_TOKEN_TTL_SECONDS,
   ROLE_PERMISSIONS,
   type MeResponse,
@@ -298,13 +301,41 @@ export class AuthService {
     }
   }
 
+  /**
+   * Per-account sign-in limit (Phase 12), on top of the per-IP auth limit (SEC-005), so guesses
+   * spread across many addresses still stop. Keyed by a hash of the normalised email whether or not
+   * the account exists, and answered the same way, so it reveals nothing about accounts. A correct
+   * password while locked is refused too (and not checked), so the lock cannot be probed. A
+   * successful sign-in clears the counter. Trade-off: someone who knows an address can keep that
+   * account locked; the window is short and the per-IP limit still applies to them.
+   */
+  static readonly LOGIN_MAX_FAILURES = 10;
+  static readonly LOGIN_WINDOW_SECONDS = 15 * 60;
+  private static loginKey(email: string): string {
+    return `loginfail:${createHash('sha256').update(email.trim().toLowerCase()).digest('hex')}`;
+  }
+
   async login(email: string, password: string, meta: RequestMeta): Promise<IssuedSession> {
+    const failKey = AuthService.loginKey(email);
+    const failures = Number((await this.redis.get(failKey)) ?? 0);
+    if (failures >= AuthService.LOGIN_MAX_FAILURES)
+      throw new HttpException(
+        {
+          code: CommonErrorCode.RATE_LIMITED,
+          message:
+            'Too many sign-in attempts for this account. Wait 15 minutes or reset your password.',
+        },
+        HttpStatus.TOO_MANY_REQUESTS,
+      );
     const user = await this.prisma.user.findUnique({
       where: { email },
       include: { hospital: true },
     });
     const ok = await this.passwords.verify(password, user?.passwordHash);
     if (!user || !ok) {
+      // The window starts at the first failure and is not extended by later ones.
+      const n = await this.redis.incr(failKey);
+      if (n === 1) await this.redis.expire(failKey, AuthService.LOGIN_WINDOW_SECONDS);
       await this.audit.record({
         action: 'auth.login_failed',
         entityType: 'User',
@@ -319,6 +350,7 @@ export class AuthService {
       );
     }
     this.assertCanHoldSession(user);
+    await this.redis.del(failKey);
 
     const sessionId = randomUUID();
     const jti = randomUUID();
@@ -484,6 +516,10 @@ export class AuthService {
 
   /** Always succeeds from the caller's point of view, so it cannot be used to discover accounts. */
   async forgotPassword(email: string, meta: RequestMeta): Promise<void> {
+    // One reset email per address per minute (Phase 12), so the form cannot be used to flood an
+    // inbox. Applied before the account lookup and silent, like the rest of this endpoint.
+    const cooldown = `pwforgot:${createHash('sha256').update(email.trim().toLowerCase()).digest('hex')}`;
+    if ((await this.redis.set(cooldown, '1', 'EX', 60, 'NX')) !== 'OK') return;
     const user = await this.prisma.user.findUnique({ where: { email } });
     if (!user || user.deletedAt || !user.isActive) return;
     await this.sendPasswordLink(user, 'reset');

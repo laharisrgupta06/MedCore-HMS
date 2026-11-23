@@ -12,7 +12,19 @@ export type DomainEvent =
   | { type: 'prescription.ready'; hospitalId: string; prescriptionId: string }
   | { type: 'lab.report.approved'; hospitalId: string; labOrderId: string }
   | { type: 'stock.low'; hospitalId: string; medicineId: string }
-  | { type: 'stock.expiring'; hospitalId: string; reportId: string };
+  | { type: 'stock.expiring'; hospitalId: string; reportId: string }
+  // Phase 9 notification triggers (NOTIF-002, 006, 007, 009; DEC-063).
+  | { type: 'appointment.confirmed'; hospitalId: string; appointmentId: string }
+  | { type: 'appointment.cancelled'; hospitalId: string; appointmentId: string }
+  | {
+      type: 'appointment.rescheduled';
+      hospitalId: string;
+      appointmentId: string;
+      scheduledAt: string;
+    }
+  | { type: 'appointment.emergency'; hospitalId: string; appointmentId: string }
+  | { type: 'invoice.finalised'; hospitalId: string; invoiceId: string }
+  | { type: 'payment.received'; hospitalId: string; paymentId: string };
 
 type Handler<T extends DomainEvent['type']> = (
   e: Extract<DomainEvent, { type: T }>,

@@ -41,6 +41,10 @@ import type {
   UpdateScheduleDto,
 } from './scheduling.dto';
 import { REMINDER_SCHEDULER, type ReminderScheduler } from './reminders';
+import { DomainEvents } from '../../common/events/domain-events';
+import { NotificationWriter, type StagedDeliveries } from '../notifications/notification.writer';
+import { CONTENT } from '../notifications/notification-content';
+import { appointmentPeople } from '../notifications/notification-recipients';
 
 const SLOT_TTL_SECONDS = 60; // CACHE-002
 const ACTIVE: AppointmentStatus[] = ['PENDING', 'CONFIRMED', 'IN_PROGRESS', 'COMPLETED'];
@@ -127,6 +131,8 @@ export class SchedulingService {
     @Inject(REDIS_CLIENT) private readonly redis: Redis,
     @Inject(REMINDER_SCHEDULER) private readonly reminders: ReminderScheduler,
     @Inject(CHARGE_RECORDER) private readonly charges: ChargeRecorder,
+    private readonly events: DomainEvents,
+    private readonly notifications: NotificationWriter,
   ) {}
 
   // ------------------------------------------------------------------ access helpers
@@ -518,6 +524,7 @@ export class SchedulingService {
   }
 
   async book(actor: AuthPrincipal, dto: BookDto): Promise<AppointmentView> {
+    let staged: StagedDeliveries | undefined;
     const type = dto.type ?? 'REGULAR';
     if (type === 'EMERGENCY' && actor.role !== 'RECEPTIONIST')
       throw new ForbiddenException({
@@ -535,8 +542,8 @@ export class SchedulingService {
     const created = await this.writeLocked(
       dto.doctorId,
       { start, end, emergency: type === 'EMERGENCY', patientId: patient.id },
-      (tx) =>
-        tx.appointment.create({
+      async (tx) => {
+        const row = await tx.appointment.create({
           data: {
             hospitalId: patient.hospitalId,
             doctorId: dto.doctorId,
@@ -550,10 +557,32 @@ export class SchedulingService {
             reason: dto.reason ?? null,
             createdById: actor.userId,
           },
-        }),
+        });
+        // NOTIF-009: the doctor hears about an emergency booking, in the booking's transaction.
+        if (type === 'EMERGENCY') {
+          const people = await appointmentPeople(tx, row.id);
+          if (people)
+            staged = await this.notifications.stage(tx, {
+              hospitalId: patient.hospitalId,
+              recipientIds: [people.doctor],
+              content: CONTENT.appointmentEmergency(),
+              entityType: 'Appointment',
+              entityId: row.id,
+            });
+        }
+        return row;
+      },
     );
+    await this.notifications.dispatch(staged);
     await this.invalidateSlots(dto.doctorId);
     if (type !== 'EMERGENCY') await this.reminders.schedule(created.id, start);
+    // NOTIF-009: the doctor hears about an emergency booking at once.
+    else
+      await this.events.publish({
+        type: 'appointment.emergency',
+        hospitalId: patient.hospitalId,
+        appointmentId: created.id,
+      });
     return this.get(actor, created.id);
   }
 
@@ -652,6 +681,7 @@ export class SchedulingService {
         'START_FROM_ENCOUNTER',
         'Start the consultation from the encounter screen so its medical record is created.',
       );
+    let staged: StagedDeliveries | undefined;
     await this.db.client.$transaction(async (tx) => {
       await tx.appointment.update({
         where: { id },
@@ -669,15 +699,39 @@ export class SchedulingService {
       // Q4 A: the consultation is charged when it is completed, in the same transaction.
       if (dto.status === 'COMPLETED')
         await this.charges.charge(tx, actor, { kind: 'CONSULTATION', appointmentId: id });
+      // NOTIF-002 and DEC-063: written with the status change, so both commit or neither does.
+      if (dto.status === 'CONFIRMED' || dto.status === 'CANCELLED') {
+        const people = await appointmentPeople(tx, id);
+        if (people)
+          staged = await this.notifications.stage(tx, {
+            hospitalId: actor.hospitalId!,
+            recipientIds: [people.patient],
+            content:
+              dto.status === 'CONFIRMED'
+                ? CONTENT.appointmentConfirmed()
+                : CONTENT.appointmentCancelled(),
+            entityType: 'Appointment',
+            entityId: id,
+          });
+      }
     });
+    await this.notifications.dispatch(staged);
     if (dto.status === 'CANCELLED' || dto.status === 'NO_SHOW') {
       await this.reminders.cancel(id);
       await this.invalidateSlots(current.doctor.id);
     }
+    // NOTIF-002 and DEC-063, after the change has committed.
+    if (dto.status === 'CONFIRMED' || dto.status === 'CANCELLED')
+      await this.events.publish({
+        type: dto.status === 'CONFIRMED' ? 'appointment.confirmed' : 'appointment.cancelled',
+        hospitalId: actor.hospitalId!,
+        appointmentId: id,
+      });
     return this.get(actor, id);
   }
 
   async reschedule(actor: AuthPrincipal, id: string, dto: RescheduleDto): Promise<AppointmentView> {
+    let staged: StagedDeliveries | undefined;
     const current = await this.get(actor, id);
     if (!['PENDING', 'CONFIRMED'].includes(current.status))
       throw bad(
@@ -694,14 +748,31 @@ export class SchedulingService {
     await this.writeLocked(
       current.doctor.id,
       { start, end, emergency: false, patientId: current.patient.id, ignoreId: id },
-      (tx) =>
-        tx.appointment.update({
+      async (tx) => {
+        await tx.appointment.update({
           where: { id },
           data: { scheduledAt: start, endAt: end, departmentId, status: 'PENDING' },
-        }),
+        });
+        // DEC-063, in the same transaction as the move.
+        const people = await appointmentPeople(tx, id);
+        staged = await this.notifications.stage(tx, {
+          hospitalId: actor.hospitalId!,
+          recipientIds: people ? [people.patient] : [],
+          content: CONTENT.appointmentRescheduled(),
+          entityType: 'Appointment',
+          entityId: id,
+        });
+      },
     );
+    await this.notifications.dispatch(staged);
     await this.invalidateSlots(current.doctor.id);
     await this.reminders.schedule(id, start);
+    await this.events.publish({
+      type: 'appointment.rescheduled',
+      hospitalId: actor.hospitalId!,
+      appointmentId: id,
+      scheduledAt: start.toISOString(),
+    });
     return this.get(actor, id);
   }
 }

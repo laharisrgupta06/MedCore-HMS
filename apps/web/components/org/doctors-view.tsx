@@ -12,7 +12,7 @@ import { Alert } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { DataTable, Pagination } from '@/components/ui/data-table';
 import { Dialog } from '@/components/ui/dialog';
-import { Field, Input, Select } from '@/components/ui/field';
+import { Field, Input, Select, textareaClass } from '@/components/ui/field';
 import { Badge, Panel } from '@/components/ui/misc';
 import { SearchInput } from '@/components/ui/search-input';
 import { toast } from '@/components/ui/toast';
@@ -322,12 +322,7 @@ function DoctorDialog({
             )}
             {departments.data?.map((d) => (
               <label key={d.id} className="flex items-center gap-2 text-body-sm">
-                <input
-                  type="checkbox"
-                  value={d.id}
-                  className="size-4 accent-[#52714D]"
-                  {...reg('departmentIds')}
-                />
+                <input type="checkbox" value={d.id} className="size-4" {...reg('departmentIds')} />
                 {d.name}
               </label>
             ))}
@@ -344,7 +339,7 @@ function DoctorDialog({
               id={id}
               rows={3}
               aria-describedby={describedBy}
-              className="w-full rounded-sm border border-border-strong bg-surface px-3 py-2 text-body"
+              className={textareaClass}
               {...reg('bio')}
             />
           )}

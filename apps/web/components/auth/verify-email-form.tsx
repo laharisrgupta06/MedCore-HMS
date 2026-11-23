@@ -90,7 +90,7 @@ export function VerifyEmailForm() {
         />
       </div>
       <p className="text-center text-body-sm">
-        <Link href="/login" className="font-medium text-sage-700 hover:underline">
+        <Link href="/login" className="mc-link">
           Back to sign in
         </Link>
       </p>

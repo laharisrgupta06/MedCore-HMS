@@ -6,13 +6,13 @@ import { useState, type ReactNode } from 'react';
 import { Alert } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { Dialog } from '@/components/ui/dialog';
-import { Field } from '@/components/ui/field';
+import { Field, textareaClass } from '@/components/ui/field';
 import { Badge } from '@/components/ui/misc';
 import { toast } from '@/components/ui/toast';
 import { errorMessage } from '@/lib/forms';
 
-export const textareaClass =
-  'min-h-20 w-full rounded-sm border border-border-strong bg-surface px-3 py-2 text-body-sm';
+/** Clinical text areas use the shared field style (components/ui/field). */
+export { textareaClass };
 
 /** Clinical timestamps in the hospital's time zone, like appointments (DEC-038). */
 export const when = (iso: string, tz: string) =>

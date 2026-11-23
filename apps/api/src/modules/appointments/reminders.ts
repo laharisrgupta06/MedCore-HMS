@@ -1,18 +1,14 @@
 import { InjectQueue, Processor, WorkerHost } from '@nestjs/bullmq';
-import { Inject, Injectable, Logger } from '@nestjs/common';
+import { Injectable } from '@nestjs/common';
 import type { Job, Queue } from 'bullmq';
-import {
-  MAIL_ADAPTER,
-  SMS_ADAPTER,
-  type MailAdapter,
-  type SmsAdapter,
-} from '../../infra/messaging/messaging.types';
 import { PrismaService } from '../../infra/prisma/prisma.service';
+import { CONTENT } from '../notifications/notification-content';
+import { NotificationWriter } from '../notifications/notification.writer';
 
 export const APPOINTMENTS_QUEUE = 'appointments';
 export const REMINDER_SCHEDULER = Symbol('REMINDER_SCHEDULER');
 
-/** APPT-005: reminders 24 hours and 1 hour before, by email and SMS. */
+/** APPT-005 / NOTIF-003: reminders 24 hours and 1 hour before (in-app, email and SMS since Phase 9). */
 export const REMINDER_OFFSETS = [
   { key: '24h', ms: 24 * 60 * 60 * 1000, label: 'tomorrow' },
   { key: '1h', ms: 60 * 60 * 1000, label: 'in one hour' },
@@ -74,63 +70,65 @@ export class BullReminderScheduler implements ReminderScheduler {
   }
 }
 
-/** Sends a reminder if the appointment is still active and was not moved since the job was queued. */
+/**
+ * Sends a reminder if the appointment is still active and was not moved since the job was queued.
+ * Since Phase 9 it is a durable notification (in-app, email, SMS) with the same delivery tracking,
+ * per-channel queues and retries as every other notification.
+ */
 @Processor(APPOINTMENTS_QUEUE)
 export class ReminderProcessor extends WorkerHost {
-  private readonly logger = new Logger(ReminderProcessor.name);
-
   constructor(
     private readonly prisma: PrismaService,
-    @Inject(MAIL_ADAPTER) private readonly mail: MailAdapter,
-    @Inject(SMS_ADAPTER) private readonly sms: SmsAdapter,
+    private readonly writer: NotificationWriter,
   ) {
     super();
   }
 
   async process(job: Job<ReminderJob>): Promise<void> {
-    await sendReminder(this.prisma, this.mail, this.sms, job.data, this.logger);
+    await sendReminder(this.prisma, this.writer, job.data);
   }
 }
 
-/** Exported for tests. System job: reads with the base client (no request tenant). */
+/**
+ * Exported for tests. System job: the base client (no request tenant), every row with its hospitalId.
+ * The appointment row is locked first, so a retried job and the original cannot both write; the
+ * notification is skipped when this patient already has a reminder of this offset for the same
+ * appointment time (a rescheduled visit gets new reminders, because its time differs).
+ */
 export async function sendReminder(
-  prisma: Pick<PrismaService, 'appointment'>,
-  mail: MailAdapter,
-  sms: SmsAdapter,
+  prisma: Pick<PrismaService, '$transaction'>,
+  writer: Pick<NotificationWriter, 'stage' | 'dispatch'>,
   data: ReminderJob,
-  logger?: Logger,
 ): Promise<'sent' | 'skipped'> {
-  const a = await prisma.appointment.findUnique({
-    where: { id: data.appointmentId },
-    include: {
-      patient: { include: { user: true } },
-      doctor: { include: { user: true } },
-      hospital: true,
-    },
+  const staged = await prisma.$transaction(async (tx) => {
+    await tx.$queryRaw`SELECT id FROM appointments WHERE id = ${data.appointmentId}::uuid FOR UPDATE`;
+    const a = await tx.appointment.findUnique({
+      where: { id: data.appointmentId },
+      include: {
+        patient: { select: { userId: true } },
+        hospital: { select: { name: true, timezone: true } },
+      },
+    });
+    if (
+      !a ||
+      !['PENDING', 'CONFIRMED'].includes(a.status) ||
+      a.scheduledAt.toISOString() !== data.scheduledAt
+    )
+      return null;
+    const when = new Intl.DateTimeFormat('en-IN', {
+      timeZone: a.hospital.timezone,
+      dateStyle: 'full',
+      timeStyle: 'short',
+    }).format(a.scheduledAt);
+    return writer.stage(tx, {
+      hospitalId: a.hospitalId,
+      recipientIds: [a.patient.userId],
+      content: CONTENT.appointmentReminder(`${when} at ${a.hospital.name}`, data.offset),
+      entityType: 'Appointment',
+      entityId: a.id,
+    });
   });
-  if (
-    !a ||
-    !['PENDING', 'CONFIRMED'].includes(a.status) ||
-    a.scheduledAt.toISOString() !== data.scheduledAt
-  )
-    return 'skipped';
-  const when = new Intl.DateTimeFormat('en-IN', {
-    timeZone: a.hospital.timezone,
-    dateStyle: 'full',
-    timeStyle: 'short',
-  }).format(a.scheduledAt);
-  const label = REMINDER_OFFSETS.find((o) => o.key === data.offset)?.label ?? 'soon';
-  const text = `Reminder: your appointment with Dr ${a.doctor.user.firstName} ${a.doctor.user.lastName} at ${a.hospital.name} is ${label}, ${when}.`;
-  const u = a.patient.user;
-  await mail.send({
-    to: u.email,
-    subject: 'Appointment reminder',
-    text: `Hello ${u.firstName},\n\n${text}\n\nIf you cannot attend, please cancel or reschedule in the patient portal.`,
-  });
-  if (u.phone && u.phoneVerifiedAt) {
-    await sms
-      .send({ to: u.phone, body: `MedCore: ${text}` })
-      .catch((e: Error) => logger?.warn(`Reminder SMS failed for ${a.id}: ${e.message}`));
-  }
+  if (!staged || staged.length === 0) return 'skipped';
+  await writer.dispatch(staged);
   return 'sent';
 }

@@ -53,6 +53,20 @@ export const envSchema = z
     TWILIO_ACCOUNT_SID: z.string().default(''),
     TWILIO_AUTH_TOKEN: z.string().default(''),
     TWILIO_FROM_NUMBER: z.string().default(''),
+    /** Online payments (DEC-054): fake = development test checkout (default outside production); none = cash only. */
+    PAYMENT_PROVIDER: z.enum(['fake', 'stripe', 'razorpay', 'none']).optional(),
+    /** Stripe (PAYMENT_PROVIDER=stripe): secret API key and the endpoint's webhook signing secret. */
+    STRIPE_SECRET_KEY: z.string().default(''),
+    STRIPE_WEBHOOK_SECRET: z.string().default(''),
+    /** Razorpay (PAYMENT_PROVIDER=razorpay): API key id and secret, and the webhook secret. */
+    RAZORPAY_KEY_ID: z.string().default(''),
+    RAZORPAY_KEY_SECRET: z.string().default(''),
+    RAZORPAY_WEBHOOK_SECRET: z.string().default(''),
+    /** Signs FakeProvider test webhooks. Optional in development; a visible development value is used when empty. */
+    FAKE_PAYMENT_WEBHOOK_SECRET: z
+      .string()
+      .refine((v) => v === '' || v.length >= 32, 'must be at least 32 characters when set')
+      .default(''),
     /**
      * Timed background jobs (the nightly expiry run). "on" or "off"; when unset they are on except
      * when NODE_ENV is "test". Integration tests always force "off" (test/load-env.ts) and call the
@@ -83,6 +97,30 @@ export const envSchema = z
           path: ['SMTP_HOST'],
           message: 'must be a real mail server in production (Mailpit is development only)',
         });
+      }
+    }
+    // The test checkout must never run where real customers pay (DEC-054).
+    const paymentMode = env.PAYMENT_PROVIDER ?? (env.NODE_ENV === 'production' ? 'none' : 'fake');
+    if (env.NODE_ENV === 'production' && paymentMode === 'fake') {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['PAYMENT_PROVIDER'],
+        message:
+          'fake is for development and tests only; use none until a real provider is configured',
+      });
+    }
+    const providerKeys = {
+      stripe: ['STRIPE_SECRET_KEY', 'STRIPE_WEBHOOK_SECRET'],
+      razorpay: ['RAZORPAY_KEY_ID', 'RAZORPAY_KEY_SECRET', 'RAZORPAY_WEBHOOK_SECRET'],
+    } as const;
+    if (paymentMode === 'stripe' || paymentMode === 'razorpay') {
+      for (const key of providerKeys[paymentMode]) {
+        if (!env[key])
+          ctx.addIssue({
+            code: 'custom',
+            path: [key],
+            message: `is required when PAYMENT_PROVIDER=${paymentMode}`,
+          });
       }
     }
     if (env.SMS_PROVIDER === 'twilio') {

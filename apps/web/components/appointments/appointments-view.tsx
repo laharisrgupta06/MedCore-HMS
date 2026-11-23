@@ -116,7 +116,7 @@ export function AppointmentsView() {
             />
             <Select
               aria-label="Filter by status"
-              className="h-8 w-44"
+              className="h-8 w-full sm:w-44"
               value={status}
               onChange={(e) => {
                 setStatus(e.target.value as AppointmentStatus | '');

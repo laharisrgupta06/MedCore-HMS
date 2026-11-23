@@ -4,6 +4,7 @@ import type { DependencyStatus, HealthStatus } from '@medcore/types';
 import { useQuery } from '@tanstack/react-query';
 import { ApiClientError } from '@/lib/api-client';
 import { getHealth, healthQueryKey } from '@/services/health';
+import { buttonVariants } from '@/components/ui/button';
 
 const LABELS: Record<'db' | 'redis' | 'queue', string> = {
   db: 'PostgreSQL',
@@ -57,9 +58,9 @@ export function SystemStatus() {
           type="button"
           onClick={() => void refetch()}
           disabled={isFetching}
-          className="mt-4 inline-flex h-9 items-center rounded-md border border-border-strong bg-surface px-4 text-body-sm font-medium hover:bg-sage-50 disabled:text-ink-disabled"
+          className={buttonVariants({ variant: 'secondary', className: 'mt-4' })}
         >
-          {isFetching ? 'Retrying...' : 'Retry'}
+          {isFetching ? 'Retrying' : 'Retry'}
         </button>
       </section>
     );

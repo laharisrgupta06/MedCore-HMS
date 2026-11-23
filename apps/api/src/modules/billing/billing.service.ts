@@ -29,6 +29,10 @@ import { notFound } from '../../common/http/prisma-errors';
 import { TenantPrismaService } from '../../common/tenancy/tenant-prisma.service';
 import { localDate } from '../../common/time/zoned';
 import { mapInvoiceDbError } from './invoice-db-errors';
+import { DomainEvents } from '../../common/events/domain-events';
+import { NotificationWriter, type StagedDeliveries } from '../notifications/notification.writer';
+import { CONTENT } from '../notifications/notification-content';
+import { patientOfInvoice } from '../notifications/notification-recipients';
 
 /**
  * Invoices (BILL-001..003, tasks 8-B3, 8-B4). The database (M-11b) is the authority for every rule;
@@ -54,7 +58,11 @@ const conflict = (code: string, message: string) => new ConflictException({ code
 
 @Injectable()
 export class BillingService {
-  constructor(private readonly db: TenantPrismaService) {}
+  constructor(
+    private readonly db: TenantPrismaService,
+    private readonly events: DomainEvents,
+    private readonly notifications: NotificationWriter,
+  ) {}
 
   // ------------------------------------------------------------------ locks and context
 
@@ -692,6 +700,7 @@ export class BillingService {
   }
 
   async finalise(actor: AuthPrincipal, invoiceId: string): Promise<InvoiceView> {
+    let staged: StagedDeliveries | undefined;
     await this.write(actor, async (tx, ctx) => {
       await this.draftOf(tx, invoiceId);
       // Share the discount again over the current lines, then explain anything that still blocks.
@@ -714,6 +723,22 @@ export class BillingService {
         where: { id: invoiceId },
         data: { status: 'FINALISED', finalisedById: actor.userId },
       });
+      // NOTIF-006: issued with the document, under the same invoice lock.
+      const patient = await patientOfInvoice(tx, invoiceId);
+      staged = await this.notifications.stage(tx, {
+        hospitalId: actor.hospitalId!,
+        recipientIds: patient ? [patient] : [],
+        content: CONTENT.invoiceIssued(),
+        entityType: 'Invoice',
+        entityId: invoiceId,
+      });
+    });
+    await this.notifications.dispatch(staged);
+    // NOTIF-006, after commit.
+    await this.events.publish({
+      type: 'invoice.finalised',
+      hospitalId: actor.hospitalId!,
+      invoiceId,
     });
     return this.get(actor, invoiceId);
   }

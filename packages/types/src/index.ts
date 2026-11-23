@@ -13,3 +13,8 @@ export * from './tax';
 export * from './invoice-snapshot';
 export * from './invoice-plan';
 export * from './invoices';
+export * from './payments';
+export * from './claims';
+export * from './notifications';
+export * from './portal';
+export * from './analytics';

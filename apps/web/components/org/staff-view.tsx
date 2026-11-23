@@ -23,6 +23,7 @@ import { email, personName, phone } from '@/lib/validation';
 import { departmentsApi, staffApi } from '@/services/org';
 import { usersApi } from '@/services/users';
 import { useAuth } from '@/store/auth';
+import { EmailLink } from '@/components/ui/contact';
 
 const optionalText = (max: number) => z.string().trim().max(max, `At most ${max} characters.`);
 
@@ -122,7 +123,7 @@ export function StaffView() {
             {
               key: 'email',
               header: 'Email',
-              cell: (s) => <span className="break-all">{s.user.email}</span>,
+              cell: (s) => <EmailLink value={s.user.email} />,
               hideOnMobile: true,
             },
             {
@@ -158,7 +159,7 @@ export function StaffView() {
               {s.user.id !== me.user.id && (
                 <Button
                   size="compact"
-                  variant="ghost"
+                  variant={s.user.isActive ? 'danger' : 'ghost'}
                   loading={toggle.isPending && toggle.variables?.user.id === s.user.id}
                   onClick={() => toggle.mutate(s)}
                 >
@@ -383,11 +384,7 @@ function StaffDialog({ member, onClose }: { member: StaffMember | null; onClose:
         </Field>
         {role === 'LAB_TECHNICIAN' && (
           <label className="flex items-start gap-3 text-body-sm sm:col-span-2">
-            <input
-              type="checkbox"
-              className="mt-1 size-4 accent-[#52714D]"
-              {...reg('isSeniorLabTechnician')}
-            />
+            <input type="checkbox" className="mt-1 size-4" {...reg('isSeniorLabTechnician')} />
             <span>
               <span className="font-medium">Senior lab technician</span>
               <span className="block text-ink-secondary">Can approve laboratory reports.</span>

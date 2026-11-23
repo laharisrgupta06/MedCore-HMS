@@ -3,6 +3,9 @@ import { isLowStock } from '@medcore/types';
 import { DomainEvents } from '../../common/events/domain-events';
 import { localDate } from '../../common/time/zoned';
 import { PrismaService } from '../../infra/prisma/prisma.service';
+import { NotificationWriter, type StagedDeliveries } from '../notifications/notification.writer';
+import { CONTENT } from '../notifications/notification-content';
+import { STOCK_ALERT_ROLES, activeStaff } from '../notifications/notification-recipients';
 
 /** A YYYY-MM-DD hospital-local date as the value Prisma stores in a DATE column. */
 export const dateValue = (d: string): Date => new Date(`${d}T00:00:00Z`);
@@ -19,6 +22,7 @@ export class LowStock {
   constructor(
     private readonly prisma: PrismaService,
     private readonly events: DomainEvents,
+    private readonly notifications: NotificationWriter,
   ) {}
 
   /**
@@ -52,14 +56,29 @@ export class LowStock {
     for (const b of batches)
       available.set(b.medicineId, (available.get(b.medicineId) ?? 0) + b.quantity);
     const alerted: string[] = [];
+    const staged: StagedDeliveries = [];
     for (const m of meds) {
       const low = m.isActive && isLowStock(available.get(m.id) ?? 0, m.reorderLevel);
       if (low && !m.lowStockSince) {
-        const u = await this.prisma.medicine.updateMany({
-          where: { id: m.id, hospitalId, lowStockSince: null },
-          data: { lowStockSince: now },
+        // NOTIF-008: the crossing and its staff alert commit together; the conditional update
+        // means only one writer wins the crossing.
+        await this.prisma.$transaction(async (tx) => {
+          const u = await tx.medicine.updateMany({
+            where: { id: m.id, hospitalId, lowStockSince: null },
+            data: { lowStockSince: now },
+          });
+          if (u.count !== 1) return;
+          alerted.push(m.id);
+          staged.push(
+            ...(await this.notifications.stage(tx, {
+              hospitalId,
+              recipientIds: await activeStaff(tx, hospitalId, STOCK_ALERT_ROLES),
+              content: CONTENT.stockLow(),
+              entityType: 'Medicine',
+              entityId: m.id,
+            })),
+          );
         });
-        if (u.count === 1) alerted.push(m.id);
       } else if (!low && m.lowStockSince) {
         await this.prisma.medicine.updateMany({
           where: { id: m.id, hospitalId, lowStockSince: { not: null } },
@@ -67,6 +86,7 @@ export class LowStock {
         });
       }
     }
+    await this.notifications.dispatch(staged);
     for (const medicineId of alerted)
       await this.events.publish({ type: 'stock.low', hospitalId, medicineId });
     return alerted;

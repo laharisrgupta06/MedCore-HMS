@@ -17,7 +17,7 @@ import {
   PrescriptionTimeline,
 } from '@/components/prescriptions/prescription-card';
 import { Alert } from '@/components/ui/alert';
-import { Button } from '@/components/ui/button';
+import { Button, buttonVariants } from '@/components/ui/button';
 import { DataTable, Pagination } from '@/components/ui/data-table';
 import { Field, Input, Select } from '@/components/ui/field';
 import { Panel, Skeleton } from '@/components/ui/misc';
@@ -54,7 +54,7 @@ export function PharmacyQueueView() {
         actions={
           <Select
             aria-label="Show"
-            className="h-9 w-72"
+            className="h-9 w-full sm:w-72"
             value={status}
             onChange={(e) => {
               setStatus(e.target.value as '' | PrescriptionStatus);
@@ -133,7 +133,7 @@ export function PharmacyQueueView() {
           actions={(p) => (
             <Link
               href={`/dashboard/pharmacy/prescriptions/${p.id}`}
-              className="inline-flex h-8 items-center rounded-md bg-sage-600 px-3 text-body-sm font-medium text-white hover:bg-sage-700"
+              className={buttonVariants({ size: 'compact' })}
             >
               Open
             </Link>
@@ -201,6 +201,7 @@ export function PharmacyPrescriptionView({ id }: { id: string }) {
   return (
     <>
       <PageHeader
+        crumbs={[{ label: 'Pharmacy queue', href: '/dashboard/pharmacy' }]}
         title={`${p.patient.firstName} ${p.patient.lastName}`}
         description={
           <span>
@@ -211,9 +212,6 @@ export function PharmacyPrescriptionView({ id }: { id: string }) {
         actions={
           <span className="flex flex-wrap items-center gap-2">
             <PrescriptionStatusBadge status={p.status} />
-            <Link href="/dashboard/pharmacy" className="text-body-sm text-sage-700 underline">
-              Back to queue
-            </Link>
           </span>
         }
       />

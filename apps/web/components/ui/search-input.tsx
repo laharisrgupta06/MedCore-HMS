@@ -31,7 +31,7 @@ export function SearchInput({
         placeholder={placeholder}
         value={value}
         onChange={(e) => setValue(e.target.value)}
-        className="pl-9"
+        className="pl-9 [&::-webkit-search-cancel-button]:cursor-pointer"
       />
     </div>
   );

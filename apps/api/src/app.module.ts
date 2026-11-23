@@ -31,6 +31,15 @@ import { LabModule } from './modules/lab/lab.module';
 import { TaxModule } from './modules/tax/tax.module';
 import { BillingModule } from './modules/billing/billing.module';
 import { ChargesModule } from './modules/billing/charges';
+import { PaymentsModule } from './modules/payments/payments.module';
+import { InsuranceModule } from './modules/insurance/insurance.module';
+import { NotificationsModule } from './modules/notifications/notifications.module';
+import { PortalModule } from './modules/portal/portal.module';
+import { AnalyticsModule } from './modules/analytics/analytics.module';
+import {
+  NotificationsDeliveryModule,
+  notificationSweep,
+} from './modules/notifications/delivery/notifications-delivery.module';
 import { pharmacyJobs } from './modules/pharmacy/pharmacy-jobs.module';
 import { PharmacyModule } from './modules/pharmacy/pharmacy.module';
 import { RemindersModule, SchedulingModule } from './modules/appointments/appointments.module';
@@ -80,6 +89,13 @@ export { buildThrottlerOptions, isAuthRateLimited } from './infra/throttler/thro
     TaxModule,
     BillingModule,
     ChargesModule,
+    PaymentsModule,
+    InsuranceModule,
+    NotificationsModule,
+    PortalModule,
+    AnalyticsModule,
+    NotificationsDeliveryModule,
+    notificationSweep(),
     PharmacyModule,
     // The nightly expiry worker and its schedule exist only where timed jobs are enabled (never in
     // integration tests); ExpirySweep itself stays available through PharmacyModule.

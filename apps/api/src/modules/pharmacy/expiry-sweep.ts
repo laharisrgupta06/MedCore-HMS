@@ -7,6 +7,9 @@ import { localDate, zonedToUtc } from '../../common/time/zoned';
 import { PrismaService } from '../../infra/prisma/prisma.service';
 import { dateText, dateValue, LowStock } from '../medicines/low-stock';
 import { StockLevels } from '../medicines/medicines.module';
+import { NotificationWriter } from '../notifications/notification.writer';
+import { CONTENT } from '../notifications/notification-content';
+import { STOCK_ALERT_ROLES, activeStaff } from '../notifications/notification-recipients';
 
 export const PHARMACY_QUEUE = 'pharmacy';
 /** Hospital-local start of the nightly run (owner decision 23:17): 02:00. */
@@ -28,6 +31,7 @@ export class ExpirySweep {
     private readonly stock: StockLevels,
     private readonly lowStock: LowStock,
     private readonly events: DomainEvents,
+    private readonly notifications: NotificationWriter,
   ) {}
 
   /** Hourly tick: every VERIFIED hospital past 02:00 local time without today's report. */
@@ -151,13 +155,22 @@ export class ExpirySweep {
               expiryReportId: report.id,
             },
           });
-        return { report, medicineIds: [...medicineIds] };
+        // NOTIF-008: the report and its staff alert commit together (one report per hospital and day).
+        const staged = await this.notifications.stage(tx, {
+          hospitalId,
+          recipientIds: await activeStaff(tx, hospitalId, STOCK_ALERT_ROLES),
+          content: CONTENT.stockExpiring(),
+          entityType: 'ExpiryReport',
+          entityId: report.id,
+        });
+        return { report, medicineIds: [...medicineIds], staged };
       })
       .catch((e) => {
         if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === 'P2002') return null;
         throw e;
       });
     if (!result) return null;
+    await this.notifications.dispatch(result.staged);
     await this.stock.invalidate(result.medicineIds);
     // Re-check every medicine: expiry lowers availability, and medicines that were already low
     // before M-07 get their state on the first run.

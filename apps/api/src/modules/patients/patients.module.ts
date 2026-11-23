@@ -23,7 +23,7 @@ import {
 import { BLOOD_GROUPS, Gender, type BloodGroup, type PatientSummary } from '@medcore/types';
 import { Prisma } from '@prisma/client';
 import { IsEnum, IsIn, IsISO8601, IsOptional, Matches, ValidateIf } from 'class-validator';
-import { Audit } from '../../common/audit/audit.decorators';
+import { Audit, AuditRead } from '../../common/audit/audit.decorators';
 import { CurrentUser, Roles, type AuthPrincipal } from '../../common/auth/decorators';
 import { Email, PageQuery, PersonName, Phone, Text } from '../../common/dto/fields';
 import { PaginatedResult } from '../../common/http/paginated-result';
@@ -291,6 +291,7 @@ export class PatientsController {
 
   @Get()
   @Roles(...PATIENT_READERS)
+  @AuditRead('patient.search', 'Patient')
   @ApiOperation({ summary: 'Search patients by name, MRN, email or phone' })
   list(@Query() q: PageQuery): Promise<PaginatedResult<PatientSummary>> {
     return this.patients.list(q);
@@ -318,6 +319,7 @@ export class PatientsController {
 
   @Get(':id')
   @Roles(...PATIENT_READERS, 'PATIENT')
+  @AuditRead('patient.view', 'Patient')
   @ApiOperation({ summary: 'One patient (a patient may read only their own)' })
   get(@CurrentUser() actor: AuthPrincipal, @Param('id', uuid) id: string): Promise<PatientSummary> {
     return this.patients.get(actor, id);

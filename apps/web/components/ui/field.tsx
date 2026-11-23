@@ -5,11 +5,19 @@ import {
   type InputHTMLAttributes,
   type ReactNode,
   type SelectHTMLAttributes,
+  type TextareaHTMLAttributes,
 } from 'react';
 import { cn } from '@/lib/utils';
 
-const control =
-  'h-9 w-full rounded-sm border border-border-strong bg-surface px-3 text-body text-ink placeholder:text-ink-muted transition-colors duration-150 hover:border-ink-secondary disabled:bg-surface-muted disabled:text-ink-disabled aria-[invalid=true]:border-error max-sm:h-11';
+/** Shared look of every text control: 36 px (44 px on touch), radius 4, sage border on focus. */
+export const controlClass =
+  'h-9 w-full rounded-sm border border-border-strong bg-surface px-3 text-body text-ink shadow-[inset_0_1px_1px_rgba(30,36,32,0.04)] placeholder:text-ink-muted transition-[border-color,box-shadow,background-color] duration-150 ease-[var(--ease-standard)] hover:border-ink-secondary focus-visible:border-sage-600 disabled:cursor-not-allowed disabled:bg-surface-muted disabled:text-ink-disabled aria-[invalid=true]:border-error aria-[invalid=true]:bg-error-bg/40 max-sm:h-11';
+const control = controlClass;
+/** Multi-line text: same border and focus as inputs, at least three lines tall, resizable vertically. */
+export const textareaClass = cn(
+  controlClass,
+  'h-auto min-h-24 resize-y py-2 leading-6 max-sm:h-auto',
+);
 
 export interface FieldProps {
   label: string;
@@ -30,7 +38,7 @@ export function Field({ label, hint, error, required, children, className }: Fie
     <div className={cn('flex flex-col gap-1.5', className)}>
       <label htmlFor={id} className="text-label font-medium text-ink">
         {label}
-        {required && <span className="text-ink-muted"> (required)</span>}
+        {required && <span className="font-normal text-ink-muted"> (required)</span>}
       </label>
       {children({ id, describedBy, invalid: Boolean(error) })}
       {error && (
@@ -62,6 +70,14 @@ export const Select = forwardRef<HTMLSelectElement, SelectHTMLAttributes<HTMLSel
 );
 Select.displayName = 'Select';
 
+export const Textarea = forwardRef<
+  HTMLTextAreaElement,
+  TextareaHTMLAttributes<HTMLTextAreaElement>
+>(({ className, ...props }, ref) => (
+  <textarea ref={ref} className={cn(textareaClass, className)} {...props} />
+));
+Textarea.displayName = 'Textarea';
+
 /** A labelled group for composite controls (pickers, slot grids) that are not a single input. */
 export function FieldGroup({
   label,
@@ -79,7 +95,7 @@ export function FieldGroup({
     <div role="group" aria-labelledby={id} className={cn('flex flex-col gap-1.5', className)}>
       <span id={id} className="text-label font-medium text-ink">
         {label}
-        {required && <span className="text-ink-muted"> (required)</span>}
+        {required && <span className="font-normal text-ink-muted"> (required)</span>}
       </span>
       {children}
     </div>

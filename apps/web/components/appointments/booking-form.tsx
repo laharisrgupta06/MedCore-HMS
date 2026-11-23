@@ -6,7 +6,7 @@ import { Siren } from 'lucide-react';
 import { useState } from 'react';
 import { Alert } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
-import { Field, FieldGroup, Input, Select } from '@/components/ui/field';
+import { Field, FieldGroup, Input, Select, textareaClass } from '@/components/ui/field';
 import { toast } from '@/components/ui/toast';
 import { ApiClientError } from '@/lib/api-client';
 import { errorMessage } from '@/lib/forms';
@@ -188,7 +188,7 @@ export function BookingForm({
           <textarea
             id={p.id}
             aria-describedby={p.describedBy}
-            className="min-h-20 w-full rounded-md border border-border-strong bg-surface px-3 py-2 text-body-sm"
+            className={textareaClass}
             maxLength={500}
             value={reason}
             onChange={(e) => setReason(e.target.value)}

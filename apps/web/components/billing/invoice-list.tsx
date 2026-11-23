@@ -36,7 +36,7 @@ export function InvoiceList({ patient = false }: { patient?: boolean }) {
       <Panel
         actions={
           !patient && (
-            <Field label="Status" className="w-48">
+            <Field label="Status" className="w-full sm:w-48">
               {({ id }) => (
                 <Select
                   id={id}
@@ -75,10 +75,7 @@ export function InvoiceList({ patient = false }: { patient?: boolean }) {
               header: 'Document',
               primary: true,
               cell: (r) => (
-                <Link
-                  href={`${base}/${r.id}`}
-                  className="font-medium text-sage-700 hover:underline"
-                >
+                <Link href={`${base}/${r.id}`} className="mc-link">
                   {documentTitle(r)}
                 </Link>
               ),

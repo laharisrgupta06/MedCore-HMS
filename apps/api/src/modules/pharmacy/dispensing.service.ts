@@ -23,6 +23,9 @@ import { dateText, dateValue, LowStock } from '../medicines/low-stock';
 import { MedicinesService, StockLevels } from '../medicines/medicines.module';
 import { prescriptionInclude, toView } from '../prescriptions/prescriptions.service';
 import type { DispenseDto, QueueQuery } from './pharmacy.dto';
+import { NotificationWriter } from '../notifications/notification.writer';
+import { CONTENT } from '../notifications/notification-content';
+import { patientOfRecord } from '../notifications/notification-recipients';
 
 const WAITING: PrescriptionStatus[] = ['ISSUED', 'PARTIALLY_DISPENSED'];
 
@@ -40,6 +43,7 @@ export class DispensingService {
     private readonly lowStock: LowStock,
     private readonly events: DomainEvents,
     @Inject(CHARGE_RECORDER) private readonly charges: ChargeRecorder,
+    private readonly notifications: NotificationWriter,
   ) {}
 
   async queue(actor: AuthPrincipal, q: QueueQuery): Promise<PaginatedResult<PrescriptionView>> {
@@ -114,7 +118,7 @@ export class DispensingService {
         message: 'Each item may appear once.',
       });
     const today = localDate(new Date(), await this.medicines.timezone(hospitalId));
-    const { status, medicineIds } = await this.db.client.$transaction(async (tx) => {
+    const { status, medicineIds, staged } = await this.db.client.$transaction(async (tx) => {
       // Lock the prescription first: a concurrent cancel or dispense waits, then sees the result.
       const locked = await tx.prescription.updateMany({
         where: { id, hospitalId, status: { in: WAITING } },
@@ -261,8 +265,22 @@ export class DispensingService {
           actorId: actor.userId,
         },
       });
-      return { status: next, medicineIds: [...touched] };
+      // NOTIF-005: "ready for pickup" is written with the dispense that completed the prescription.
+      const staged =
+        next === 'READY_FOR_PICKUP'
+          ? await this.notifications.stage(tx, {
+              hospitalId,
+              recipientIds: [await patientOfRecord(tx, p.medicalRecordId)].filter(
+                (u): u is string => !!u,
+              ),
+              content: CONTENT.prescriptionReady(),
+              entityType: 'Prescription',
+              entityId: id,
+            })
+          : [];
+      return { status: next, medicineIds: [...touched], staged };
     });
+    await this.notifications.dispatch(staged);
     await this.stock.invalidate(medicineIds);
     await this.lowStock.evaluate(hospitalId, medicineIds);
     if (status === 'READY_FOR_PICKUP')

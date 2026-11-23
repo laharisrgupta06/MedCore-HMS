@@ -134,10 +134,10 @@ function LabOrderForm({ record, onClose }: { record: MedicalRecord; onClose: () 
                 <button
                   type="button"
                   aria-label={`Remove ${t.name}`}
-                  className="text-ink-secondary hover:text-ink"
+                  className="-mr-1 rounded-sm p-0.5 text-ink-secondary transition-colors duration-150 hover:bg-sage-100 hover:text-ink"
                   onClick={() => setTests(tests.filter((x) => x.id !== t.id))}
                 >
-                  <X className="size-3.5" />
+                  <X className="size-3.5" aria-hidden="true" />
                 </button>
               </li>
             ))}

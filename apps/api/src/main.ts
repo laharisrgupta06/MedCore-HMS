@@ -10,7 +10,11 @@ import { AppLogger } from './common/logger/app-logger';
 import type { Env } from './config/env';
 
 async function bootstrap(): Promise<void> {
-  const app = await NestFactory.create<NestExpressApplication>(AppModule, { bufferLogs: true });
+  // rawBody keeps the exact bytes of each request, so payment webhooks can be verified (task 8-B6).
+  const app = await NestFactory.create<NestExpressApplication>(AppModule, {
+    bufferLogs: true,
+    rawBody: true,
+  });
   app.useLogger(new AppLogger());
   const config = app.get(ConfigService<Env, true>);
 

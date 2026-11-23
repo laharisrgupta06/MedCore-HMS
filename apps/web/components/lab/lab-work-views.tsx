@@ -15,7 +15,7 @@ import { useRouter } from 'next/navigation';
 import { useRef, useState } from 'react';
 import { PageHeader } from '@/components/app/app-shell';
 import { Alert } from '@/components/ui/alert';
-import { Button } from '@/components/ui/button';
+import { Button, buttonVariants } from '@/components/ui/button';
 import { DataTable, Pagination } from '@/components/ui/data-table';
 import { Field, Input, Select } from '@/components/ui/field';
 import { Badge, Panel, Skeleton } from '@/components/ui/misc';
@@ -154,7 +154,7 @@ export function WorklistView() {
         actions={
           <Select
             aria-label="Show orders that are"
-            className="h-9 w-56"
+            className="h-9 w-full sm:w-56"
             value={status}
             onChange={(e) => {
               setStatus(e.target.value as LabOrderStatus);
@@ -181,7 +181,7 @@ export function WorklistView() {
           actions={(o) => (
             <Link
               href={`/dashboard/lab/orders/${o.id}`}
-              className="inline-flex h-8 items-center rounded-md bg-sage-600 px-3 text-body-sm font-medium text-white hover:bg-sage-700"
+              className={buttonVariants({ size: 'compact' })}
             >
               Open
             </Link>
@@ -248,6 +248,7 @@ export function LabOrderWork({ id }: { id: string }) {
   return (
     <>
       <PageHeader
+        crumbs={[{ label: 'Lab worklist', href: '/dashboard/lab' }]}
         title={`${o.patient.firstName} ${o.patient.lastName}`}
         description={
           <span>
@@ -260,9 +261,6 @@ export function LabOrderWork({ id }: { id: string }) {
           <span className="flex flex-wrap items-center gap-2">
             <LabStatusBadge status={o.status} />
             {o.priority === 'URGENT' && <Badge tone="error">Urgent</Badge>}
-            <Link href="/dashboard/lab" className="text-body-sm text-sage-700 underline">
-              Back to worklist
-            </Link>
           </span>
         }
       />

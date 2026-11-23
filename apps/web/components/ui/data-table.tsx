@@ -47,9 +47,9 @@ export function DataTable<T>({
     return (
       <div className="p-5">
         <Alert tone="error" title="Could not load the list">
-          {error}{' '}
+          <p>{error}</p>
           {onRetry && (
-            <Button variant="link" onClick={onRetry}>
+            <Button variant="secondary" size="compact" className="mt-2" onClick={onRetry}>
               Try again
             </Button>
           )}
@@ -76,13 +76,16 @@ export function DataTable<T>({
     <>
       <table className="hidden w-full text-body-sm md:table">
         <caption className="sr-only">{caption}</caption>
-        <thead className="bg-surface-muted text-left">
+        <thead className="border-b border-border bg-surface-muted text-left">
           <tr>
             {columns.map((c) => (
               <th
                 key={c.key}
                 scope="col"
-                className={cn('px-5 py-2.5 text-label font-medium text-ink-secondary', c.className)}
+                className={cn(
+                  'whitespace-nowrap px-5 py-2.5 text-label font-medium text-ink-secondary',
+                  c.className,
+                )}
               >
                 {c.header}
               </th>
@@ -142,7 +145,7 @@ export function Pagination({
   return (
     <nav
       aria-label="Pagination"
-      className="flex items-center justify-between gap-3 border-t border-border px-5 py-3 text-body-sm text-ink-secondary"
+      className="flex flex-wrap items-center justify-between gap-3 border-t border-border px-5 py-3 text-body-sm text-ink-secondary"
     >
       <span>
         {from} to {to} of {meta.total}

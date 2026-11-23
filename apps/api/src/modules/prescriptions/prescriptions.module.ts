@@ -41,6 +41,7 @@ export class PrescriptionsController {
 
   @Get()
   @Roles(...READERS)
+  @AuditRead('prescription.list', 'Prescription')
   @ApiOperation({ summary: 'Prescriptions; patients see only their own' })
   list(@CurrentUser() a: AuthPrincipal, @Query() q: PrescriptionQuery) {
     return this.rx.list(a, q);

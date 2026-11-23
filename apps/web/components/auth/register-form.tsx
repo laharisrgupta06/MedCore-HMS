@@ -92,11 +92,11 @@ export function RegisterForm() {
           {failure.code === 'EMAIL_IN_USE' && (
             <>
               {' '}
-              <Link className="font-medium text-sage-700 underline" href="/login">
+              <Link className="mc-link" href="/login">
                 Sign in
               </Link>{' '}
               or{' '}
-              <Link className="font-medium text-sage-700 underline" href="/forgot-password">
+              <Link className="mc-link" href="/forgot-password">
                 reset your password
               </Link>
               .
@@ -253,11 +253,11 @@ export function RegisterForm() {
       </Field>
       <p className="text-caption text-ink-muted">
         By creating an account you agree to the{' '}
-        <Link href="/terms" className="text-sage-700 underline">
+        <Link href="/terms" className="mc-link">
           Terms and Conditions
         </Link>{' '}
         and acknowledge the{' '}
-        <Link href="/privacy" className="text-sage-700 underline">
+        <Link href="/privacy" className="mc-link">
           Privacy Policy
         </Link>
         .
@@ -267,7 +267,7 @@ export function RegisterForm() {
       </Button>
       <p className="text-center text-body-sm text-ink-secondary">
         Already registered?{' '}
-        <Link href="/login" className="font-medium text-sage-700 hover:underline">
+        <Link href="/login" className="mc-link">
           Sign in
         </Link>
       </p>

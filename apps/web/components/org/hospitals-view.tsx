@@ -20,6 +20,7 @@ import { applyServerFieldErrors, errorMessage } from '@/lib/forms';
 import { useList } from '@/lib/use-list';
 import { email, personName, phone } from '@/lib/validation';
 import { hospitalsApi } from '@/services/org';
+import { EmailLink } from '@/components/ui/contact';
 
 const STATUS: Record<HospitalStatus, { label: string; tone: 'warning' | 'success' | 'error' }> = {
   PENDING: { label: 'Pending verification', tone: 'warning' },
@@ -102,7 +103,12 @@ export function HospitalsView() {
               header: 'Code',
               cell: (h) => <span className="font-mono">{h.code}</span>,
             },
-            { key: 'email', header: 'Contact', cell: (h) => h.email, hideOnMobile: true },
+            {
+              key: 'email',
+              header: 'Contact',
+              cell: (h) => <EmailLink value={h.email} />,
+              hideOnMobile: true,
+            },
             {
               key: 'status',
               header: 'Status',

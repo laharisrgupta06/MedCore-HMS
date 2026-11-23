@@ -157,7 +157,7 @@ export function RoomsView() {
                   <AddBed room={room} onDone={invalidate} />
                   <Button
                     size="compact"
-                    variant="ghost"
+                    variant="danger"
                     onClick={() => setDeleting(room)}
                     aria-label={`Delete room ${room.number}`}
                   >

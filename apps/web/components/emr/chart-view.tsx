@@ -48,6 +48,7 @@ export function ChartView({ patientId, portal }: { patientId?: string; portal?: 
   return (
     <>
       <PageHeader
+        crumbs={portal ? undefined : [{ label: 'Patients', href: '/dashboard/patients' }]}
         title={
           portal
             ? 'My health record'

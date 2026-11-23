@@ -86,7 +86,7 @@ export function DepartmentsView() {
               </Button>
               <Button
                 size="compact"
-                variant="ghost"
+                variant="danger"
                 onClick={() => setDeleting(d)}
                 aria-label={`Delete ${d.name}`}
               >

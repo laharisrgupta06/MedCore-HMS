@@ -10,7 +10,7 @@ import { useForm } from 'react-hook-form';
 import { z } from 'zod';
 import { PageHeader } from '@/components/app/app-shell';
 import { Alert } from '@/components/ui/alert';
-import { Button } from '@/components/ui/button';
+import { Button, buttonVariants } from '@/components/ui/button';
 import { DataTable, Pagination } from '@/components/ui/data-table';
 import { Dialog } from '@/components/ui/dialog';
 import { Field, Input, Select } from '@/components/ui/field';
@@ -22,6 +22,7 @@ import { useList } from '@/lib/use-list';
 import { email, personName, phone } from '@/lib/validation';
 import { patientsApi } from '@/services/org';
 import { useAuth } from '@/store/auth';
+import { PhoneLink } from '@/components/ui/contact';
 
 export const BLOOD_LABEL: Record<string, string> = {
   A_POSITIVE: 'A+',
@@ -117,7 +118,12 @@ export function PatientsView() {
             {
               key: 'phone',
               header: 'Phone',
-              cell: (p) => p.phone ?? <span className="text-ink-muted">None</span>,
+              cell: (p) =>
+                p.phone ? (
+                  <PhoneLink value={p.phone} />
+                ) : (
+                  <span className="text-ink-muted">None</span>
+                ),
               hideOnMobile: true,
             },
             {
@@ -139,7 +145,11 @@ export function PatientsView() {
                     {clinical && (
                       <Link
                         href={`/dashboard/patients/${p.id}`}
-                        className="inline-flex h-8 items-center px-3 text-body-sm font-medium text-sage-700 hover:underline"
+                        className={buttonVariants({
+                          variant: 'ghost',
+                          size: 'compact',
+                          className: 'text-sage-700',
+                        })}
                       >
                         Chart
                         <span className="sr-only">

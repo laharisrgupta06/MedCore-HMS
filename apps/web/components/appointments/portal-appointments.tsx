@@ -8,7 +8,7 @@ import { useRouter } from 'next/navigation';
 import { useState } from 'react';
 import { PageHeader } from '@/components/app/app-shell';
 import { Alert } from '@/components/ui/alert';
-import { Button } from '@/components/ui/button';
+import { Button, buttonVariants } from '@/components/ui/button';
 import { Pagination } from '@/components/ui/data-table';
 import { EmptyState, Panel, Skeleton } from '@/components/ui/misc';
 import { errorMessage } from '@/lib/forms';
@@ -75,10 +75,7 @@ function List({ when, tz }: { when: 'upcoming' | 'past'; tz: string }) {
         icon={CalendarDays}
         title="No upcoming appointments"
         action={
-          <Link
-            href="/portal/book"
-            className="inline-flex h-9 items-center gap-2 rounded-md bg-sage-600 px-4 text-body-sm font-medium text-white hover:bg-sage-700"
-          >
+          <Link href="/portal/book" className={buttonVariants()}>
             <CalendarPlus className="size-4" aria-hidden="true" />
             Book an appointment
           </Link>
@@ -108,10 +105,7 @@ export function PortalAppointments() {
         title="My appointments"
         description={`Times are in the hospital's time zone (${tz}). You will get reminders a day and an hour before.`}
         actions={
-          <Link
-            href="/portal/book"
-            className="inline-flex h-9 items-center gap-2 rounded-md bg-sage-600 px-4 text-body-sm font-medium text-white hover:bg-sage-700 max-sm:h-11"
-          >
+          <Link href="/portal/book" className={buttonVariants()}>
             <CalendarPlus className="size-4" aria-hidden="true" />
             Book appointment
           </Link>

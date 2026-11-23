@@ -83,6 +83,7 @@ export class LabOrdersController {
 
   @Get()
   @Roles('DOCTOR', 'NURSE', 'RECEPTIONIST', 'LAB_TECHNICIAN', 'PATIENT')
+  @AuditRead('lab_order.list', 'LabOrder')
   @ApiOperation({ summary: 'Worklists and lists; patients see their own approved reports' })
   list(@CurrentUser() a: AuthPrincipal, @Query() q: LabOrderQuery) {
     return this.lab.list(a, q);

@@ -125,7 +125,7 @@ export function MedicineStockView({
                     {b.status === 'ACTIVE' && (
                       <Button
                         size="compact"
-                        variant="ghost"
+                        variant="danger"
                         onClick={() => setDialog({ kind: 'quarantine', batch: b })}
                       >
                         Quarantine

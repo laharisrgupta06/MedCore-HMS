@@ -35,10 +35,7 @@ export function ResetPasswordForm() {
         <Alert tone="error" title="This reset link cannot be used">
           It is invalid, already used or expired. Request a new link to continue.
         </Alert>
-        <Link
-          href="/forgot-password"
-          className="text-body-sm font-medium text-sage-700 hover:underline"
-        >
+        <Link href="/forgot-password" className="mc-link text-body-sm">
           Request a new link
         </Link>
       </div>

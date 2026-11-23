@@ -37,6 +37,9 @@ import type {
   ResultsDto,
   UpdateLabTestDto,
 } from './lab.dto';
+import { NotificationWriter } from '../notifications/notification.writer';
+import { CONTENT } from '../notifications/notification-content';
+import { patientOfRecord } from '../notifications/notification-recipients';
 
 const bad = (code: string, message: string) => new BadRequestException({ code, message });
 const transition = (message: string) =>
@@ -79,6 +82,7 @@ export class LabService {
     private readonly storage: StorageService,
     private readonly pdf: PdfService,
     @Inject(CHARGE_RECORDER) private readonly charges: ChargeRecorder,
+    private readonly notifications: NotificationWriter,
   ) {}
 
   // ------------------------------------------------------------------ catalogue
@@ -482,11 +486,25 @@ export class LabService {
   async approve(actor: AuthPrincipal, id: string): Promise<LabOrderView> {
     const o = await this.load(actor, id);
     await this.assertReviewer(actor, o);
-    await this.move(o, ['RESULT_UPLOADED'], 'Only reports waiting for review can be approved.', {
-      status: 'APPROVED',
-      approvedAt: new Date(),
-      approvedById: actor.userId,
+    // NOTIF-004: the approval and the patient's notification commit together.
+    const staged = await this.db.client.$transaction(async (tx) => {
+      await this.move(
+        o,
+        ['RESULT_UPLOADED'],
+        'Only reports waiting for review can be approved.',
+        { status: 'APPROVED', approvedAt: new Date(), approvedById: actor.userId },
+        tx,
+      );
+      const patient = await patientOfRecord(tx, o.medicalRecordId);
+      return this.notifications.stage(tx, {
+        hospitalId: o.hospitalId,
+        recipientIds: patient ? [patient] : [],
+        content: CONTENT.labReportReady(),
+        entityType: 'LabOrder',
+        entityId: o.id,
+      });
     });
+    await this.notifications.dispatch(staged);
     await this.events.publish({
       type: 'lab.report.approved',
       hospitalId: o.hospitalId,
@@ -702,9 +720,10 @@ export class LabService {
     from: string[],
     message: string,
     data: Prisma.LabOrderUncheckedUpdateManyInput,
+    tx?: Prisma.TransactionClient,
   ): Promise<void> {
     if (!from.includes(o.status)) throw transition(message);
-    const u = await this.db.client.labOrder.updateMany({
+    const u = await (tx ?? this.db.client).labOrder.updateMany({
       where: { id: o.id, status: { in: from as never } },
       data,
     });

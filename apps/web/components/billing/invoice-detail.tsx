@@ -6,7 +6,7 @@ import {
   type InvoiceView,
 } from '@medcore/types';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { ArrowLeft, Plus, ReceiptText } from 'lucide-react';
+import { Plus, ReceiptText } from 'lucide-react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useState, type ReactNode } from 'react';
@@ -30,6 +30,8 @@ import {
   rupees,
   treatmentText,
 } from './invoice-format';
+import { PaymentsPanel } from './payments-panel';
+import { ClaimsPanel } from './claims-panel';
 
 /**
  * One invoice (BILL-001..003). Staff act on it by role (receptionist, accountant); the hospital admin
@@ -94,15 +96,8 @@ export function InvoiceDetail({ id, patient = false }: { id: string; patient?: b
 
   return (
     <>
-      <div className="mb-2">
-        <Link
-          href={base}
-          className="inline-flex items-center gap-1 text-body-sm text-sage-700 hover:underline"
-        >
-          <ArrowLeft className="size-4" aria-hidden="true" /> {patient ? 'My bills' : 'Invoices'}
-        </Link>
-      </div>
       <PageHeader
+        crumbs={[{ label: patient ? 'My bills' : 'Invoices', href: base }]}
         title={documentTitle(inv)}
         description={`${inv.patient.name} (${inv.patient.mrn}), visit of ${fmtDate(inv.appointment.scheduledAt, tz)} with Dr ${inv.appointment.doctorName}`}
       />
@@ -131,17 +126,14 @@ export function InvoiceDetail({ id, patient = false }: { id: string; patient?: b
               {inv.relatedInvoiceId && (
                 <p>
                   Follows{' '}
-                  <Link
-                    className="text-sage-700 hover:underline"
-                    href={`${base}/${inv.relatedInvoiceId}`}
-                  >
+                  <Link className="mc-link" href={`${base}/${inv.relatedInvoiceId}`}>
                     the original invoice
                   </Link>
                 </p>
               )}
               {inv.lateChargeInvoiceIds.map((lid, i) => (
                 <p key={lid}>
-                  <Link className="text-sage-700 hover:underline" href={`${base}/${lid}`}>
+                  <Link className="mc-link" href={`${base}/${lid}`}>
                     Late charges {i + 1}
                   </Link>
                 </p>
@@ -179,7 +171,7 @@ export function InvoiceDetail({ id, patient = false }: { id: string; patient?: b
                         Discount
                       </Button>
                     )}
-                    <Button size="compact" variant="ghost" onClick={() => setDialog('void')}>
+                    <Button size="compact" variant="danger" onClick={() => setDialog('void')}>
                       Void draft
                     </Button>
                     <Button
@@ -356,6 +348,10 @@ export function InvoiceDetail({ id, patient = false }: { id: string; patient?: b
             </p>
           )}
         </Panel>
+
+        {issued && <PaymentsPanel invoiceId={inv.id} patient={patient} />}
+
+        {issued && !patient && <ClaimsPanel invoiceId={inv.id} />}
 
         {!patient && (inv.correctionRequests.length > 0 || inv.events.length > 0) && (
           <div className="grid gap-6 xl:grid-cols-2">

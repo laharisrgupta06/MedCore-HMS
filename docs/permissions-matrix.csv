@@ -143,3 +143,30 @@ PATCH,/api/invoices/:id/finalise,DENY,DENY,DENY,DENY,ALLOW,DENY,DENY,ALLOW,DENY,
 PATCH,/api/invoices/:id/void,DENY,DENY,DENY,DENY,ALLOW,DENY,DENY,ALLOW,DENY,Drafts only; releases their charges (DEC-066)
 POST,/api/invoices/:id/correction-requests,DENY,DENY,DENY,DENY,ALLOW,DENY,DENY,ALLOW,DENY,Issued documents only (DEC-053)
 POST,/api/invoices/:id/correction-requests/:rid/notes,DENY,DENY,DENY,DENY,DENY,DENY,DENY,ALLOW,DENY,Accountant outcome note (DEC-053)
+GET,/api/invoices/:id/payments,DENY,ALLOW,DENY,DENY,ALLOW,DENY,DENY,ALLOW,OWN,Payments and balance; patients see received payments of their own issued invoice (8-B5)
+POST,/api/invoices/:id/payments/cash,DENY,DENY,DENY,DENY,ALLOW,DENY,DENY,ALLOW,DENY,Cash received; partial payments allowed (8-B5)
+POST,/api/invoices/:id/payments/checkout,DENY,DENY,DENY,DENY,ALLOW,DENY,DENY,DENY,DENY,Online checkout for the whole balance (DEC-054 Q9, Q12)
+GET,/api/payments/:id,DENY,ALLOW,DENY,DENY,ALLOW,DENY,DENY,ALLOW,DENY,One payment (staff)
+POST,/api/payments/:id/cancel,DENY,DENY,DENY,DENY,ALLOW,DENY,DENY,DENY,DENY,Open online checkout only; a later success is held (DEC-064)
+POST,/api/payments/:id/simulate,DENY,DENY,DENY,DENY,ALLOW,DENY,DENY,DENY,DENY,Test checkout only (FakeProvider, development)
+POST,/api/payments/webhooks/:provider,PUBLIC,PUBLIC,PUBLIC,PUBLIC,PUBLIC,PUBLIC,PUBLIC,PUBLIC,PUBLIC,Provider webhook; signature verified; idempotent
+POST,/api/payments/:id/reverse,DENY,DENY,DENY,DENY,DENY,DENY,DENY,ALLOW,DENY,Reverse a received payment; refused once reconciled; needs M-12
+GET,/api/payments/:id/receipt,DENY,ALLOW,DENY,DENY,ALLOW,DENY,DENY,ALLOW,OWN,Receipt PDF rendered from the payment record; patients: own received payments only
+POST,/api/payments/:id/receipt/email,DENY,DENY,DENY,DENY,ALLOW,DENY,DENY,ALLOW,DENY,Email the receipt to the patient account address
+GET,/api/reconciliation,DENY,ALLOW,DENY,DENY,DENY,DENY,DENY,ALLOW,DENY,Received payments in a date range with totals (8-B5)
+POST,/api/reconciliation/mark,DENY,DENY,DENY,DENY,DENY,DENY,DENY,ALLOW,DENY,Mark received payments as reconciled
+GET,/api/billing/summary,DENY,ALLOW,DENY,DENY,DENY,DENY,DENY,ALLOW,DENY,Accountant day view: collections outstanding reconciliation claims
+GET,/api/invoices/:id/claims,DENY,ALLOW,DENY,DENY,ALLOW,DENY,DENY,ALLOW,DENY,Insurance claims on an invoice (PRD 7.7)
+POST,/api/invoices/:id/claims,DENY,DENY,DENY,DENY,ALLOW,DENY,DENY,ALLOW,DENY,Submit an insurance claim on an issued invoice
+GET,/api/claims,DENY,ALLOW,DENY,DENY,DENY,DENY,DENY,ALLOW,DENY,Claims queue by status
+PATCH,/api/claims/:id/decision,DENY,DENY,DENY,DENY,DENY,DENY,DENY,ALLOW,DENY,Approve or reject a submitted claim
+POST,/api/claims/:id/settle,DENY,DENY,DENY,DENY,DENY,DENY,DENY,ALLOW,DENY,Record settled amount; tracking only until M-13
+GET,/api/payments/mine,DENY,DENY,DENY,DENY,DENY,DENY,DENY,DENY,ALLOW,The signed-in patient's received payments (self-scoped)
+GET,/api/notifications,ALLOW,ALLOW,ALLOW,ALLOW,ALLOW,ALLOW,ALLOW,ALLOW,ALLOW,My own notifications (filtered by recipient)
+GET,/api/notifications/unread-count,ALLOW,ALLOW,ALLOW,ALLOW,ALLOW,ALLOW,ALLOW,ALLOW,ALLOW,My unread count
+PATCH,/api/notifications/:id/read,OWN,OWN,OWN,OWN,OWN,OWN,OWN,OWN,OWN,Mark one of my notifications read; others are not found
+POST,/api/notifications/read-all,ALLOW,ALLOW,ALLOW,ALLOW,ALLOW,ALLOW,ALLOW,ALLOW,ALLOW,Mark all my notifications read
+GET,/api/portal/summary,DENY,DENY,DENY,DENY,DENY,DENY,DENY,DENY,ALLOW,Patient dashboard summary (self-scoped)
+GET,/api/analytics/overview,DENY,ALLOW,DENY,DENY,DENY,DENY,DENY,DENY,DENY,Hospital overview analytics (Phase 11)
+GET,/api/analytics/operations,DENY,ALLOW,DENY,DENY,DENY,DENY,DENY,DENY,DENY,Operational analytics (Phase 11)
+GET,/api/search,DENY,ALLOW,ALLOW,ALLOW,ALLOW,ALLOW,ALLOW,ALLOW,DENY,Global search; each kind limited to roles that may open it

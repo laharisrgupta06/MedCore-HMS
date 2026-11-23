@@ -78,7 +78,7 @@ export function Picker<T extends { id: string }>({
                     type="button"
                     onClick={() => onSelect(row)}
                     className={cn(
-                      'flex w-full items-center justify-between gap-3 px-3 py-2 text-left hover:bg-sage-50 max-sm:py-3',
+                      'flex w-full items-center justify-between gap-3 px-3 py-2 text-left transition-colors duration-150 hover:bg-sage-50 max-sm:py-3',
                     )}
                   >
                     <span>

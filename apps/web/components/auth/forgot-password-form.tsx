@@ -30,7 +30,7 @@ export function ForgotPasswordForm() {
         <Alert tone="success" title="Check your email">
           {sent} The link expires in 30 minutes and works once.
         </Alert>
-        <Link href="/login" className="text-body-sm font-medium text-sage-700 hover:underline">
+        <Link href="/login" className="mc-link text-body-sm">
           Back to sign in
         </Link>
       </div>
@@ -66,7 +66,7 @@ export function ForgotPasswordForm() {
         Send reset link
       </Button>
       <p className="text-center text-body-sm">
-        <Link href="/login" className="font-medium text-sage-700 hover:underline">
+        <Link href="/login" className="mc-link">
           Back to sign in
         </Link>
       </p>

@@ -106,11 +106,11 @@ export function SlotPicker({
                   disabled={!free}
                   onClick={() => onChange(s)}
                   className={cn(
-                    'h-10 rounded-md border font-mono text-body-sm transition-colors max-sm:h-11',
+                    'h-10 rounded-md border font-mono text-body-sm transition-[background-color,border-color,color] duration-150 ease-[var(--ease-standard)] max-sm:h-11',
                     selected
-                      ? 'border-sage-700 bg-sage-600 text-white'
+                      ? 'border-sage-700 bg-sage-600 text-white shadow-1'
                       : free
-                        ? 'border-border-strong bg-surface hover:bg-sage-50'
+                        ? 'border-border-strong bg-surface hover:border-sage-600 hover:bg-sage-50'
                         : 'cursor-not-allowed border-transparent bg-surface-muted text-ink-disabled line-through',
                   )}
                 >

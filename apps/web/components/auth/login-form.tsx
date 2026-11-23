@@ -79,7 +79,7 @@ export function LoginForm() {
             <>
               {' '}
               <Link
-                className="font-medium text-sage-700 underline"
+                className="mc-link"
                 href={`/verify-email?email=${encodeURIComponent(getValues('email'))}`}
               >
                 Verify your email
@@ -113,10 +113,7 @@ export function LoginForm() {
         )}
       </Field>
       <div className="flex justify-end">
-        <Link
-          href="/forgot-password"
-          className="text-body-sm font-medium text-sage-700 hover:underline"
-        >
+        <Link href="/forgot-password" className="mc-link text-body-sm">
           Forgot your password?
         </Link>
       </div>
@@ -125,7 +122,7 @@ export function LoginForm() {
       </Button>
       <p className="text-center text-body-sm text-ink-secondary">
         New patient?{' '}
-        <Link href="/register" className="font-medium text-sage-700 hover:underline">
+        <Link href="/register" className="mc-link">
           Create an account
         </Link>
       </p>

@@ -61,6 +61,25 @@ export async function withRetry<T>(fn: () => Promise<T>, attempts = 3): Promise<
 }
 
 /**
+ * The text a constraint name is looked for in: PostgreSQL's own message and Prisma's structured
+ * metadata. Never the whole Prisma error message, which also prints lines of the calling source
+ * code; a nearby line naming a constraint (for example a pre-check that throws that constraint's
+ * error) would otherwise be taken for the database's reason.
+ */
+function databaseText(e: unknown, message: string | null): string {
+  const meta =
+    e instanceof Prisma.PrismaClientKnownRequestError && e.meta ? JSON.stringify(e.meta) : '';
+  if (message !== null) return `${message} ${meta}`;
+  const full = e instanceof Error ? e.message : '';
+  // No PostgreSQL message to read: drop Prisma's code frame ("  423 |  ...", "→ 426   ...").
+  const withoutCode = full
+    .split('\n')
+    .filter((line) => !/^\s*(→\s*)?\d+\s*(\||\s)/.test(line))
+    .join('\n');
+  return `${withoutCode} ${meta}`;
+}
+
+/**
  * Maps a database rule refusal. `checks` maps a CHECK constraint name to the 400 response for it.
  */
 export function mapDbRuleError(
@@ -69,7 +88,7 @@ export function mapDbRuleError(
 ): never {
   if (e instanceof HttpException) throw e;
   const { code, message } = dbError(e);
-  const text = e instanceof Error ? e.message : '';
+  const text = databaseText(e, message);
   if (code === '23P01' || text.includes('hospital_gst_registrations_gstin_one_hospital')) {
     throw new ConflictException({
       code: 'GSTIN_UNAVAILABLE',

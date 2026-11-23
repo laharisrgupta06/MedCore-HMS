@@ -22,6 +22,11 @@ import {
   BellRing,
   Receipt,
   ReceiptText,
+  Landmark,
+  ShieldCheck,
+  Wallet,
+  BarChart3,
+  Search,
 } from 'lucide-react';
 
 export interface NavItem {
@@ -126,6 +131,21 @@ export const STAFF_NAV: NavItem[] = [
     icon: FlaskConical,
     roles: ['HOSPITAL_ADMIN'],
   },
+  { href: '/dashboard/analytics', label: 'Analytics', icon: BarChart3, roles: ['HOSPITAL_ADMIN'] },
+  {
+    href: '/dashboard/search',
+    label: 'Search',
+    icon: Search,
+    roles: [
+      'HOSPITAL_ADMIN',
+      'DOCTOR',
+      'NURSE',
+      'RECEPTIONIST',
+      'LAB_TECHNICIAN',
+      'PHARMACIST',
+      'ACCOUNTANT',
+    ],
+  },
   { href: '/dashboard/staff', label: 'Staff', icon: Users, roles: ['HOSPITAL_ADMIN'] },
   { href: '/dashboard/departments', label: 'Departments', icon: Layers, roles: ['HOSPITAL_ADMIN'] },
   {
@@ -133,6 +153,24 @@ export const STAFF_NAV: NavItem[] = [
     label: 'Invoices',
     icon: Receipt,
     roles: ['RECEPTIONIST', 'ACCOUNTANT', 'HOSPITAL_ADMIN'],
+  },
+  {
+    href: '/dashboard/billing',
+    label: 'Accounts',
+    icon: Wallet,
+    roles: ['ACCOUNTANT', 'HOSPITAL_ADMIN'],
+  },
+  {
+    href: '/dashboard/payments/reconciliation',
+    label: 'Reconciliation',
+    icon: Landmark,
+    roles: ['ACCOUNTANT', 'HOSPITAL_ADMIN'],
+  },
+  {
+    href: '/dashboard/billing/claims',
+    label: 'Insurance claims',
+    icon: ShieldCheck,
+    roles: ['ACCOUNTANT', 'HOSPITAL_ADMIN'],
   },
   {
     href: '/dashboard/tax',
@@ -162,6 +200,8 @@ export const PATIENT_NAV: NavItem[] = [
   { href: '/portal/prescriptions', label: 'Prescriptions', icon: Pill, roles: ['PATIENT'] },
   { href: '/portal/lab-reports', label: 'Lab reports', icon: FileText, roles: ['PATIENT'] },
   { href: '/portal/invoices', label: 'My bills', icon: Receipt, roles: ['PATIENT'] },
+  { href: '/portal/payments', label: 'My payments', icon: Wallet, roles: ['PATIENT'] },
+  { href: '/portal/notifications', label: 'Notifications', icon: BellRing, roles: ['PATIENT'] },
   { href: '/portal/account', label: 'My account', icon: UserRound, roles: ['PATIENT'] },
 ];
 

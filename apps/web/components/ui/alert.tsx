@@ -25,12 +25,12 @@ export function Alert({
   return (
     <div
       role={tone === 'error' ? 'alert' : 'status'}
-      className={cn('flex gap-3 rounded-md border px-3 py-2.5 text-body-sm', box, className)}
+      className={cn('flex gap-3 rounded-md border px-4 py-3 text-body-sm', box, className)}
     >
       <Icon className="mt-0.5 size-4 shrink-0" aria-hidden="true" />
       <div className="min-w-0">
         {title && <p className="font-medium">{title}</p>}
-        {children && <div className="text-ink-secondary">{children}</div>}
+        {children && <div className={cn('text-ink-secondary', title && 'mt-0.5')}>{children}</div>}
       </div>
     </div>
   );

@@ -83,7 +83,7 @@ export function MedicinesView() {
             />
             <Select
               aria-label="Show"
-              className="h-9 w-40"
+              className="h-9 w-full sm:w-40"
               value={active}
               onChange={(e) => {
                 setActive(e.target.value as 'true' | 'false');
