@@ -69,4 +69,18 @@ jobs:
         run: pnpm --filter @medcore/api prisma:deploy
       - name: Integration tests (real PostgreSQL, Redis and Mailpit)
         run: pnpm test:int
+      - name: Script tests (E2E and integration database guards)
+        run: pnpm test:scripts
+      # Database behaviour suites (M-11b invoice rules, M-12 payment rules, M-13, M-15) in a separate
+      # throwaway database of the same CI service: every committed migration, the M-11b fixtures,
+      # then both suites. The CI database the tests above use is not touched.
+      - name: Database rule behaviour tests on a scratch database
+        env:
+          PGPASSWORD: medcore_ci_only
+        run: |
+          PSQL="psql -h localhost -U medcore -v ON_ERROR_STOP=1 -q"
+          $PSQL -d medcore_ci -c "CREATE DATABASE medcore_proposals"
+          for f in apps/api/prisma/migrations/*/migration.sql; do $PSQL -d medcore_proposals -f "$f" > /dev/null; done
+          $PSQL -d medcore_proposals -f apps/api/prisma/proposed/20261119220000_invoice_integrity/validation/seed.sql > /dev/null
+          PSQL="psql -h localhost -U medcore" python3 apps/api/prisma/proposed/20261122100000_payment_integrity/validation/m12_behaviour_tests.py medcore_proposals --with-m11b
       - run: pnpm build

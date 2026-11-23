@@ -9,3 +9,10 @@ allowBuilds:
   '@scarf/scarf': false
   msgpackr-extract: true
   prisma: true
+# Phase 13 dependency-security pass (advisories GHSA-6g55-p6wh-862q, GHSA-r28c-9q8g-f849,
+# GHSA-fxqj-rqcc-2cmp, GHSA-qx2v-qp2m-jg93 for postcss; GHSA-7589-6fvf-x4pw for effect).
+# Same major versions as the packages that pin them (Next.js 15.5.29 and @prisma/config 6.19.3).
+# Remove each override once the parent package ships the fixed version itself.
+overrides:
+  'next>postcss': 8.5.33
+  'effect@<3.22.1': 3.22.5

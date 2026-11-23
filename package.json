@@ -23,9 +23,11 @@
     "e2e:db:prepare": "node scripts/e2e/db.mjs prepare",
     "e2e:db:migrate": "node scripts/e2e/db.mjs migrate",
     "e2e:db:seed": "node scripts/e2e/db.mjs seed",
+    "int:db:prepare": "node scripts/int/db.mjs prepare",
+    "int:db:migrate": "node scripts/int/db.mjs migrate",
     "e2e:check": "node scripts/e2e/check.mjs",
     "test:e2e": "node scripts/e2e/check.mjs && pnpm --filter @medcore/e2e test:e2e",
-    "test:scripts": "node --test scripts/e2e/env.test.mjs"
+    "test:scripts": "node --test scripts/e2e/env.test.mjs scripts/int/env.test.mjs"
   },
   "devDependencies": {
     "@eslint/js": "^9.39.5",
