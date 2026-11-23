@@ -1,0 +1,2365 @@
+# M-11a revision 3: proposal folder vs commit fc76ded (revision 1). Working tree only; nothing committed.
+diff --git a/apps/api/prisma/proposed/20261117200000_tax_configuration/README.md b/apps/api/prisma/proposed/20261117200000_tax_configuration/README.md
+index 18f85ac..7d9e39b 100644
+--- a/apps/api/prisma/proposed/20261117200000_tax_configuration/README.md
++++ b/apps/api/prisma/proposed/20261117200000_tax_configuration/README.md
+@@ -1,6 +1,6 @@
+ # Proposed migration M-11a: tax configuration (not applied)
+ 
+-Status: **drafted and validated on PostgreSQL 16 only. Not in `prisma/migrations`, not applied to any
++Status: **revision 3, drafted and validated on PostgreSQL 16 only. Not in `prisma/migrations`, not applied to any
+ owner database.** Approved for drafting and validation by the owner on 2026-11-17 19:09 (DEC-055);
+ applying it needs a separate approval.
+ 
+@@ -8,15 +8,17 @@ Prisma reads migrations only from `prisma/migrations` and the schema only from `
+ nothing in this folder affects the application, `prisma migrate`, the integration tests or the drift check
+ until it is moved into place.
+ 
+-| File                                  | Becomes, on approval                                                                                                                               |
+-| ------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
+-| `migration.sql`                       | `apps/api/prisma/migrations/20261117200000_tax_configuration/migration.sql`                                                                        |
+-| `schema.prisma`                       | `apps/api/prisma/schema.prisma` (the change is shown in `schema.diff`)                                                                             |
+-| `tests/constraints.int-spec.ts`       | `apps/api/test/constraints.int-spec.ts` (counts 51 tables, 50 triggers, 3 exclusions, plus M-11a names; diff in `tests/constraints.int-spec.diff`) |
+-| `tests/tax-configuration.int-spec.ts` | `apps/api/test/tax-configuration.int-spec.ts` (new)                                                                                                |
+-| `tests/tenant-scope.spec.ts`          | `apps/api/src/common/tenancy/tenant-scope.spec.ts` (47 scoped models, 4 global; diff in `tests/tenant-scope.spec.diff`)                            |
+-| `rollback.sql`                        | Stays here. Manual reversal for review only; never run without approval                                                                            |
+-| `validation/`                         | Stays here. Record of the PostgreSQL 16 validation                                                                                                 |
++| File                                  | Becomes, on approval                                                                                                                                  |
++| ------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
++| `migration.sql`                       | `apps/api/prisma/migrations/20261117200000_tax_configuration/migration.sql`                                                                           |
++| `schema.prisma`                       | `apps/api/prisma/schema.prisma` (the change is shown in `schema.diff`)                                                                                |
++| `tests/constraints.int-spec.ts`       | `apps/api/test/constraints.int-spec.ts` (counts 51 tables, 53 triggers, 3 exclusions, plus M-11a names; diff in `tests/constraints.int-spec.diff`)    |
++| `tests/tax-configuration.int-spec.ts` | `apps/api/test/tax-configuration.int-spec.ts` (new)                                                                                                   |
++| `tests/tenant-scope.spec.ts`          | `apps/api/src/common/tenancy/tenant-scope.spec.ts` (47 scoped models, 4 global; diff in `tests/tenant-scope.spec.diff`)                               |
++| `tests/schema-tenancy.spec.ts`        | `apps/api/src/infra/prisma/schema-tenancy.spec.ts` (51 models; `StatutoryRoomTaxRule` documented as global; diff in `tests/schema-tenancy.spec.diff`) |
++| `rollback.sql`                        | Stays here. Manual reversal for review only; never run without approval                                                                               |
++| `validation/`                         | Stays here. Record of the PostgreSQL 16 validation (`results-rev3.txt`, `gstin_reference.md`)                                                         |
++| `docs.patch`                          | Proposed changes to `docs/` for revisions 2 and 3 (DEC-056..058, TASKS, SECURITY R-15, TEST_PLAN, migration-review section 11). Not applied           |
+ 
+ The test changes are kept here because they describe the database after M-11a: moved early, they would
+ fail on a database without it.
+diff --git a/apps/api/prisma/proposed/20261117200000_tax_configuration/migration.sql b/apps/api/prisma/proposed/20261117200000_tax_configuration/migration.sql
+index 0a5be52..c034a45 100644
+--- a/apps/api/prisma/proposed/20261117200000_tax_configuration/migration.sql
++++ b/apps/api/prisma/proposed/20261117200000_tax_configuration/migration.sql
+@@ -1,33 +1,72 @@
+ -- M-11a (Phase 8, BILL-008, DEC-045 to DEC-050; review record DEC-055): tax configuration.
+--- Adds four enums, five tables, three nullable columns on existing tables, two columns on hospitals,
++-- Adds four enums, five tables, three nullable columns on existing tables, three columns on hospitals,
+ -- helper functions, CHECKs, an exclusion constraint and triggers, and one row of platform reference
+ -- data (the statutory room rule). Changes no existing row. The file runs as one implicit
+ -- transaction: if any statement fails, nothing is created.
+ --
+ -- Nothing here is used by application code yet; invoices and their tax snapshots come in M-11b.
++--
++-- Revision 2 (owner review 2026-11-18 22:24): effective dates are checked against the actual clock
++-- when each statement runs and again at commit, with a 10-minute freeze margin before midnight; a
++-- hospital's time zone is fixed once it has tax versions or GST registrations; GSTIN validation also
++-- checks the PAN holder type and sequence.
++--
++-- Revision 3 (owner review 2026-11-18 22:47): writers of effective-dated rows hold row locks until
++-- they commit (lock order: hospital row, then classification row), so that readers taking shared
++-- locks in the same order (required of M-11b) always see a writer's final, committed values. The
++-- time checks alone cannot guarantee this: a commit can become visible long after its last check
++-- (storage or synchronous-replication stalls), and SET CONSTRAINTS ALL IMMEDIATE moves the
++-- commit-time check earlier. See docs/migration-review.md section 11 for the guarantees.
+ 
+ CREATE TYPE "TaxSupplyType" AS ENUM ('GOODS', 'SERVICE');
+ CREATE TYPE "TaxTreatment" AS ENUM ('EXEMPT', 'NIL_RATED', 'TAXABLE');
+ CREATE TYPE "GstRegistrationType" AS ENUM ('REGULAR', 'COMPOSITION', 'UNREGISTERED');
+ CREATE TYPE "CriticalCareUnit" AS ENUM ('ICU', 'CCU', 'ICCU', 'NICU');
+ 
+--- Today's date in the hospital's own time zone (hospitals.timezone). now() is the transaction's
+--- start time, so every check in one transaction sees the same date.
+-CREATE FUNCTION medcore_hospital_today(h uuid) RETURNS date LANGUAGE sql STABLE AS $$
+-  SELECT (now() AT TIME ZONE timezone)::date FROM hospitals WHERE id = h
++-- The clock of the tax rules: the actual time of the check. now() would be the transaction's start
++-- time, which a transaction open across midnight would still see as yesterday. One function, so the
++-- validation can simulate any time of day.
++CREATE FUNCTION medcore_tax_clock() RETURNS timestamptz LANGUAGE sql VOLATILE AS $$
++  SELECT clock_timestamp()
++$$;
++
++-- The hospital's tax date: its local date ten minutes from now. Rows dated on or before it have
++-- taken effect (or are about to) and can no longer change. The ten minutes cover the gap between a
++-- check and the end of the commit that follows it, so from 23:50 local time the next day already
++-- counts as in force.
++--
++-- The first call for a hospital also stamps hospitals."taxTimezoneLockedAt", after which its time
++-- zone cannot change (medcore_tax_timezone_rules). The stamp is a write to the hospital row, so a
++-- concurrent time-zone change either waits and is then refused (READ COMMITTED) or fails with a
++-- serialization error (REPEATABLE READ, SERIALIZABLE); it can never slip in between.
++CREATE FUNCTION medcore_tax_date(h uuid) RETURNS date LANGUAGE plpgsql VOLATILE AS $$
++DECLARE
++  tz text;
++BEGIN
++  UPDATE hospitals SET "taxTimezoneLockedAt" = medcore_tax_clock()
++   WHERE id = h AND "taxTimezoneLockedAt" IS NULL;
++  SELECT timezone INTO tz FROM hospitals WHERE id = h;
++  IF tz IS NULL THEN
++    RAISE EXCEPTION 'Unknown hospital %', h USING ERRCODE = 'foreign_key_violation';
++  END IF;
++  RETURN ((medcore_tax_clock() + interval '10 minutes') AT TIME ZONE tz)::date;
++END;
+ $$;
+ 
+--- GSTIN structure and check character (DEC-048): 2-digit state code 01..38, PAN (5 letters,
+--- 4 digits, 1 letter), entity character, 'Z', and a mod-36 check character over the first 14.
+--- This proves a number is well formed, not that the registration is active; the hospital admin
+--- attests to that (hospital_gst_registrations.attestedById).
++-- GSTIN structure and check character (DEC-048) for the registrations a hospital supplies under
++-- (normal taxpayer or composition): 2-digit state code 01..38; PAN of 5 letters, 4 digits and
++-- 1 letter, whose fourth letter is an Income Tax Department holder type (A, B, C, F, G, H, J, L, P,
++-- T) and whose digits are not 0000; entity character 1-9 or A-Z; 'Z'; and the Luhn mod-36 check
++-- character over the first 14. Tax deductor, tax collector, UIN and non-resident formats are refused
++-- by design: a hospital does not invoice patients under them. This proves a number is well formed,
++-- not that the registration is active; the hospital admin attests to that (attestedById).
+ CREATE FUNCTION medcore_gstin_valid(g text) RETURNS boolean LANGUAGE plpgsql IMMUTABLE STRICT AS $$
+ DECLARE
+   alphabet constant text := '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ';
+   s integer := 0;
+   p integer;
+ BEGIN
+-  IF g !~ '^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z][1-9A-Z]Z[0-9A-Z]$' THEN
++  IF g !~ '^[0-9]{2}[A-Z]{3}[ABCFGHJLPT][A-Z][0-9]{4}[A-Z][1-9A-Z]Z[0-9A-Z]$' OR substr(g, 8, 4) = '0000' THEN
+     RETURN false;
+   END IF;
+   IF substr(g, 1, 2)::integer NOT BETWEEN 1 AND 38 THEN
+@@ -70,9 +109,11 @@ ALTER TABLE "tax_classifications" ADD CONSTRAINT "tax_classifications_createdByI
+ 
+ -- What the law says for a classification from a date (DEC-045). The version in force on a date is
+ -- the one with the latest effectiveFrom on or before it, so a new version closes the previous one
+--- without editing it. No version takes effect before today (hospital time), and a version can be
+--- edited or deleted only while it has not yet taken effect, so a version that applied to any day
+--- can never change. (M-11b adds invoice-line references with ON DELETE RESTRICT on top of this.)
++-- without editing it. Against the hospital's tax date (medcore_tax_date), checked when each
++-- statement runs and again at commit: no version starts before it; once a version is in force,
++-- later versions start after it, so what applied on any day already begun never changes; and a
++-- version can be edited or deleted only while it starts after it. (M-11b adds invoice-line
++-- references with ON DELETE RESTRICT on top of this.)
+ CREATE TABLE "tax_classification_versions" (
+     "id" UUID NOT NULL,
+     "hospitalId" UUID NOT NULL,
+@@ -136,9 +177,31 @@ ALTER TABLE "hospitals" ADD CONSTRAINT "hospitals_taxSetupConfirmedById_id_fkey"
+   FOREIGN KEY ("taxSetupConfirmedById", "id") REFERENCES "users"("id", "hospitalId")
+   ON DELETE RESTRICT ON UPDATE NO ACTION;
+ 
++-- Effective dates are calendar dates in the hospital's time zone, so changing the zone would move
++-- "today" and could reopen a version or registration that has already taken effect (moving west) or
++-- allow one to be backdated. Once the hospital has any tax version or GST registration
++-- (taxTimezoneLockedAt, stamped by medcore_tax_date), the time zone is fixed and the stamp cannot be
++-- cleared. A correction after that is a reviewed migration, not an application change.
++ALTER TABLE "hospitals" ADD COLUMN "taxTimezoneLockedAt" TIMESTAMPTZ(3);
++CREATE FUNCTION medcore_tax_timezone_rules() RETURNS trigger LANGUAGE plpgsql AS $$
++BEGIN
++  IF OLD."taxTimezoneLockedAt" IS NOT NULL AND (
++       NEW.timezone IS DISTINCT FROM OLD.timezone
++       OR NEW."taxTimezoneLockedAt" IS DISTINCT FROM OLD."taxTimezoneLockedAt") THEN
++    RAISE EXCEPTION 'The time zone of a hospital with tax versions or GST registrations cannot change'
++      USING ERRCODE = 'integrity_constraint_violation';
++  END IF;
++  RETURN NEW;
++END;
++$$;
++CREATE TRIGGER hospitals_tax_timezone BEFORE UPDATE OF timezone, "taxTimezoneLockedAt" ON hospitals
++  FOR EACH ROW EXECUTE FUNCTION medcore_tax_timezone_rules();
++
+ -- GST registrations (DEC-047, DEC-048, DEC-050): dated rows; the registration in force on a date is
+--- the one with the latest effectiveFrom on or before it. No backdating, no edits; a row that has
+--- not yet taken effect may be deleted to correct a mistake. A hospital with no row is unregistered.
++-- the one with the latest effectiveFrom on or before it. Never edited. Against the hospital's tax
++-- date, at each statement and at commit: no row starts before it; once a registration is in force,
++-- later ones start after it; a row may be deleted only while it starts after it. A hospital with no
++-- row is unregistered.
+ -- A GSTIN can belong to only one MedCore hospital (Q1g A), enforced by the exclusion constraint;
+ -- the API turns its error into a message that names no hospital.
+ CREATE TABLE "hospital_gst_registrations" (
+@@ -176,7 +239,7 @@ ALTER TABLE "hospital_gst_registrations" ADD CONSTRAINT "hospital_gst_registrati
+ -- Statutory room rule (DEC-049): platform reference data, not tenant data. A non-ICU, CCU, ICCU or
+ -- NICU room whose charge per day per patient exceeds the threshold is taxed on the whole charge.
+ -- Rows change only through a reviewed migration; the application has no writer. Until separate
+--- database accounts exist (P14-09, SECURITY R-08) the database cannot tell a migration from the
++-- database accounts exist (P14-09, SECURITY R-11) the database cannot tell a migration from the
+ -- application, so "append-only" is what the trigger enforces and "no application writer" is
+ -- enforced by code review and a test.
+ CREATE TABLE "statutory_room_tax_rules" (
+@@ -248,57 +311,127 @@ $$;
+ CREATE TRIGGER tax_classifications_rules BEFORE UPDATE OR DELETE ON tax_classifications
+   FOR EACH ROW EXECUTE FUNCTION medcore_tax_classification_rules();
+ 
+--- Versions: start today or later; editable or deletable only before they take effect.
++-- Versions (DEC-045). The same function runs when each statement runs (BEFORE) and again at commit
++-- (deferred constraint trigger), with the clock read each time. When each statement runs it also
++-- locks the hospital row and then the classification row (FOR NO KEY UPDATE, which does not block
++-- foreign-key checks) until commit, so a reader that takes FOR SHARE on those rows in the same order
++-- waits for this transaction to finish. Every writer takes the hospital row first, so a transaction
++-- that mixes version and registration writes cannot deadlock with such a reader.
+ CREATE FUNCTION medcore_tax_classification_version_rules() RETURNS trigger LANGUAGE plpgsql AS $$
+ DECLARE
+-  today date;
++  r record;
++  d date;
+ BEGIN
+-  today := medcore_hospital_today(CASE WHEN TG_OP = 'DELETE' THEN OLD."hospitalId" ELSE NEW."hospitalId" END);
+-  IF TG_OP IN ('UPDATE', 'DELETE') AND OLD."effectiveFrom" <= today THEN
+-    RAISE EXCEPTION 'A tax classification version that has taken effect cannot change; add a new version instead'
++  IF TG_OP = 'DELETE' THEN
++    d := medcore_tax_date(OLD."hospitalId");
++  ELSE
++    IF TG_WHEN = 'AFTER' THEN
++      -- At commit, judge the row as it now stands; if it has since been deleted, its delete is judged.
++      SELECT * INTO r FROM tax_classification_versions WHERE id = NEW.id;
++      IF NOT FOUND THEN
++        RETURN NULL;
++      END IF;
++    ELSE
++      r := NEW;
++    END IF;
++    d := medcore_tax_date(r."hospitalId");
++  END IF;
++  IF TG_WHEN = 'BEFORE' THEN
++    -- Always hospital row first, then classification row, whatever else the transaction writes.
++    PERFORM 1 FROM hospitals
++     WHERE id = CASE WHEN TG_OP = 'DELETE' THEN OLD."hospitalId" ELSE NEW."hospitalId" END
++       FOR NO KEY UPDATE;
++    PERFORM 1 FROM tax_classifications
++     WHERE id = CASE WHEN TG_OP = 'DELETE' THEN OLD."classificationId" ELSE NEW."classificationId" END
++       FOR NO KEY UPDATE;
++  END IF;
++  IF TG_OP IN ('UPDATE', 'DELETE') AND OLD."effectiveFrom" <= d THEN
++    RAISE EXCEPTION 'A tax classification version in force from % cannot change (tax date %); add a new version instead', OLD."effectiveFrom", d
+       USING ERRCODE = 'integrity_constraint_violation';
+   END IF;
+   IF TG_OP = 'DELETE' THEN
+-    RETURN OLD;
++    RETURN CASE WHEN TG_WHEN = 'BEFORE' THEN OLD END;
++  END IF;
++  IF TG_OP = 'UPDATE' AND r."effectiveFrom" <= d THEN
++    RAISE EXCEPTION 'A future tax classification version can only be moved to a date after %', d
++      USING ERRCODE = 'integrity_constraint_violation';
++  END IF;
++  IF r."effectiveFrom" < d THEN
++    RAISE EXCEPTION 'A tax classification version cannot start before % (the hospital''s tax date)', d
++      USING ERRCODE = 'integrity_constraint_violation';
+   END IF;
+-  IF NEW."effectiveFrom" < today THEN
+-    RAISE EXCEPTION 'A tax classification version cannot start before today in the hospital time zone'
++  IF r."effectiveFrom" = d AND (EXISTS (
++       SELECT 1 FROM tax_classification_versions v
++        WHERE v."classificationId" = r."classificationId" AND v.id <> r.id AND v."effectiveFrom" <= d)) THEN
++    RAISE EXCEPTION 'This classification already has a version in force; a new version must start after %', d
+       USING ERRCODE = 'integrity_constraint_violation';
+   END IF;
+-  IF TG_OP = 'UPDATE' AND (NEW.id, NEW."hospitalId", NEW."classificationId", NEW."createdById", NEW."createdAt")
++  IF TG_WHEN = 'BEFORE' AND TG_OP = 'UPDATE' AND (NEW.id, NEW."hospitalId", NEW."classificationId", NEW."createdById", NEW."createdAt")
+        IS DISTINCT FROM (OLD.id, OLD."hospitalId", OLD."classificationId", OLD."createdById", OLD."createdAt") THEN
+     RAISE EXCEPTION 'Only the treatment, rate, price-includes-tax flag and start date of a future version can change'
+       USING ERRCODE = 'integrity_constraint_violation';
+   END IF;
+-  RETURN NEW;
++  RETURN CASE WHEN TG_WHEN = 'BEFORE' THEN NEW END;
+ END;
+ $$;
+ CREATE TRIGGER tax_classification_versions_rules BEFORE INSERT OR UPDATE OR DELETE ON tax_classification_versions
+   FOR EACH ROW EXECUTE FUNCTION medcore_tax_classification_version_rules();
++CREATE CONSTRAINT TRIGGER tax_classification_versions_rules_at_commit
++  AFTER INSERT OR UPDATE OR DELETE ON tax_classification_versions
++  DEFERRABLE INITIALLY DEFERRED FOR EACH ROW EXECUTE FUNCTION medcore_tax_classification_version_rules();
+ 
+--- Registrations: start today or later; never edited; deletable only before they take effect.
++-- Registrations (DEC-047). Same pattern: checked when each statement runs and again at commit.
++-- When each statement runs it first locks the hospital row (FOR NO KEY UPDATE) until commit, so a
++-- reader that takes FOR SHARE on the hospital row waits for this transaction to finish.
+ CREATE FUNCTION medcore_gst_registration_rules() RETURNS trigger LANGUAGE plpgsql AS $$
++DECLARE
++  r record;
++  d date;
+ BEGIN
+   IF TG_OP = 'UPDATE' THEN
+     RAISE EXCEPTION 'A GST registration is never edited; add a new registration from a later date'
+       USING ERRCODE = 'integrity_constraint_violation';
+   END IF;
++  IF TG_WHEN = 'BEFORE' THEN
++    PERFORM 1 FROM hospitals
++     WHERE id = CASE WHEN TG_OP = 'DELETE' THEN OLD."hospitalId" ELSE NEW."hospitalId" END
++       FOR NO KEY UPDATE;
++  END IF;
+   IF TG_OP = 'DELETE' THEN
+-    IF OLD."effectiveFrom" <= medcore_hospital_today(OLD."hospitalId") THEN
+-      RAISE EXCEPTION 'A GST registration that has taken effect cannot be deleted'
++    d := medcore_tax_date(OLD."hospitalId");
++    IF OLD."effectiveFrom" <= d THEN
++      RAISE EXCEPTION 'A GST registration in force from % cannot be deleted (tax date %)', OLD."effectiveFrom", d
+         USING ERRCODE = 'integrity_constraint_violation';
+     END IF;
+-    RETURN OLD;
++    RETURN CASE WHEN TG_WHEN = 'BEFORE' THEN OLD END;
++  END IF;
++  IF TG_WHEN = 'AFTER' THEN
++    SELECT * INTO r FROM hospital_gst_registrations WHERE id = NEW.id;
++    IF NOT FOUND THEN
++      RETURN NULL;
++    END IF;
++  ELSE
++    r := NEW;
+   END IF;
+-  IF NEW."effectiveFrom" < medcore_hospital_today(NEW."hospitalId") THEN
+-    RAISE EXCEPTION 'A GST registration cannot be backdated'
++  d := medcore_tax_date(r."hospitalId");
++  IF r."effectiveFrom" < d THEN
++    RAISE EXCEPTION 'A GST registration cannot be backdated: it cannot start before % (the hospital''s tax date)', d
+       USING ERRCODE = 'integrity_constraint_violation';
+   END IF;
+-  RETURN NEW;
++  IF r."effectiveFrom" = d AND EXISTS (
++       SELECT 1 FROM hospital_gst_registrations g
++        WHERE g."hospitalId" = r."hospitalId" AND g.id <> r.id AND g."effectiveFrom" <= d) THEN
++    RAISE EXCEPTION 'A GST registration is already in force; a new registration must start after %', d
++      USING ERRCODE = 'integrity_constraint_violation';
++  END IF;
++  RETURN CASE WHEN TG_WHEN = 'BEFORE' THEN NEW END;
+ END;
+ $$;
+ CREATE TRIGGER hospital_gst_registrations_rules BEFORE INSERT OR UPDATE OR DELETE ON hospital_gst_registrations
+   FOR EACH ROW EXECUTE FUNCTION medcore_gst_registration_rules();
++CREATE CONSTRAINT TRIGGER hospital_gst_registrations_rules_at_commit
++  AFTER INSERT OR DELETE ON hospital_gst_registrations
++  DEFERRABLE INITIALLY DEFERRED FOR EACH ROW EXECUTE FUNCTION medcore_gst_registration_rules();
+ 
+ -- A referenced classification must be active and of the right supply type. Arguments: the expected
+ -- supply type and the name of the referencing column. Fires only when that column is set or changed.
+diff --git a/apps/api/prisma/proposed/20261117200000_tax_configuration/rollback.sql b/apps/api/prisma/proposed/20261117200000_tax_configuration/rollback.sql
+index 355e778..b068cbf 100644
+--- a/apps/api/prisma/proposed/20261117200000_tax_configuration/rollback.sql
++++ b/apps/api/prisma/proposed/20261117200000_tax_configuration/rollback.sql
+@@ -2,24 +2,35 @@
+ -- explicit approval. Prisma has no down migrations; this script exists so the reversal is known and
+ -- tested in advance.
+ --
+--- It is safe only while no billing code depends on these objects and nothing has been recorded that
+--- must be kept: it DELETES all tax classifications, versions, defaults, GST registrations and the
+--- tax classification assigned to lab tests and medicines. It refuses to run if any of those holds a
+--- row, so it can never discard real configuration silently. After running it, the migration's row
+--- in _prisma_migrations must also be removed (last statement), or Prisma will believe it is applied.
+--- Runs as one implicit transaction: if anything fails, nothing changes.
++-- The guard below makes it refuse, changing nothing, if any tax configuration exists: a tax
++-- classification (and so any version, default or lab-test or medicine assignment, which all need
++-- one), a GST registration, a confirmed tax set-up, a critical-care unit on a room, or any statutory
++-- room rule other than the exact row M-11a seeded. Only when all of these are empty does it drop
++-- M-11a's objects, so it can never discard configuration or later statutory rules. A time-zone lock
++-- (hospitals."taxTimezoneLockedAt") left behind by future-dated rows that were since deleted is
++-- dropped with its column; it records no configuration. The migration's row in _prisma_migrations is
++-- removed last, or Prisma would believe it is still applied. Runs as one implicit transaction: if
++-- anything fails, nothing changes.
+ 
+ DO $$
+ BEGIN
+-  IF EXISTS (SELECT 1 FROM tax_classifications) OR EXISTS (SELECT 1 FROM hospital_gst_registrations)
++  IF EXISTS (SELECT 1 FROM tax_classifications)
++     OR EXISTS (SELECT 1 FROM hospital_gst_registrations)
+      OR EXISTS (SELECT 1 FROM hospitals WHERE "taxSetupConfirmedAt" IS NOT NULL)
+-     OR EXISTS (SELECT 1 FROM rooms WHERE "criticalCareUnit" IS NOT NULL) THEN
+-    RAISE EXCEPTION 'M-11a rollback refused: tax configuration data exists and would be lost';
++     OR EXISTS (SELECT 1 FROM rooms WHERE "criticalCareUnit" IS NOT NULL)
++     OR (SELECT count(*) FROM statutory_room_tax_rules) <> 1
++     OR NOT EXISTS (
++       SELECT 1 FROM statutory_room_tax_rules
++        WHERE "effectiveFrom" = '2022-07-18' AND "thresholdPerDay" = 5000.00 AND "ratePercent" = 5.00
++          AND "sacCode" = '9993' AND NOT "priceIncludesTax"
++          AND "legalReference" = 'Notification 04/2022-Central Tax (Rate) dated 13 July 2022, proviso to entry 74 of Notification 12/2017-Central Tax (Rate): room other than ICU/CCU/ICCU/NICU with room charges exceeding Rs. 5000 per day to a person receiving health care services; 5% without input tax credit') THEN
++    RAISE EXCEPTION 'M-11a rollback refused: tax configuration or statutory rules exist and would be lost';
+   END IF;
+ END $$;
+ 
+ DROP TRIGGER lab_tests_tax_classification ON lab_tests;
+ DROP TRIGGER medicines_tax_classification ON medicines;
++DROP TRIGGER hospitals_tax_timezone ON hospitals;
+ ALTER TABLE "lab_tests" DROP CONSTRAINT "lab_tests_taxClassificationId_hospitalId_fkey";
+ ALTER TABLE "lab_tests" DROP COLUMN "taxClassificationId";
+ ALTER TABLE "medicines" DROP CONSTRAINT "medicines_taxClassificationId_hospitalId_fkey";
+@@ -29,6 +40,7 @@ ALTER TABLE "hospitals" DROP CONSTRAINT "hospitals_taxSetupConfirmedById_id_fkey
+ ALTER TABLE "hospitals" DROP CONSTRAINT "hospitals_tax_setup_confirmed_chk";
+ ALTER TABLE "hospitals" DROP COLUMN "taxSetupConfirmedById";
+ ALTER TABLE "hospitals" DROP COLUMN "taxSetupConfirmedAt";
++ALTER TABLE "hospitals" DROP COLUMN "taxTimezoneLockedAt";
+ 
+ DROP TABLE "hospital_tax_defaults";
+ DROP TABLE "tax_classification_versions";
+@@ -41,8 +53,10 @@ DROP FUNCTION medcore_tax_classification_ref_chk();
+ DROP FUNCTION medcore_gst_registration_rules();
+ DROP FUNCTION medcore_tax_classification_version_rules();
+ DROP FUNCTION medcore_tax_classification_rules();
++DROP FUNCTION medcore_tax_timezone_rules();
++DROP FUNCTION medcore_tax_date(uuid);
++DROP FUNCTION medcore_tax_clock();
+ DROP FUNCTION medcore_gstin_valid(text);
+-DROP FUNCTION medcore_hospital_today(uuid);
+ 
+ DROP TYPE "CriticalCareUnit";
+ DROP TYPE "GstRegistrationType";
+diff --git a/apps/api/prisma/proposed/20261117200000_tax_configuration/schema.diff b/apps/api/prisma/proposed/20261117200000_tax_configuration/schema.diff
+index 4fb45c4..5813ff2 100644
+--- a/apps/api/prisma/proposed/20261117200000_tax_configuration/schema.diff
++++ b/apps/api/prisma/proposed/20261117200000_tax_configuration/schema.diff
+@@ -1,5 +1,5 @@
+ --- schema.before.prisma	2026-11-17 13:48:31.114530520 +0000
+-+++ schema.prisma	2026-11-17 13:49:13.068384301 +0000
+++++ schema.prisma	2026-11-18 17:05:32.537045812 +0000
+ @@ -263,6 +263,32 @@
+    OTHER
+  }
+@@ -33,16 +33,19 @@
+  /// PRD 7.7: Stripe card, Razorpay UPI/Netbanking, or cash at counter.
+  enum PaymentMethod {
+    STRIPE_CARD
+-@@ -354,6 +380,8 @@
++@@ -354,6 +380,11 @@
+    /// Billing configuration (PRD section 06: Hospital Admin "billing config").
+    taxRatePercent     Decimal            @default(0) @db.Decimal(5, 2)
+    invoicePrefix      String             @default("INV")
+ +  taxSetupConfirmedAt   DateTime?       @db.Timestamptz(3)
+ +  taxSetupConfirmedById String?         @db.Uuid
+++  /// Set when the hospital's first tax version or GST registration is written (M-11a); from then on
+++  /// the database refuses any change to `timezone`, so effective dates cannot move.
+++  taxTimezoneLockedAt   DateTime?       @db.Timestamptz(3)
+  
+    address             Address?             @relation("HospitalAddress", fields: [addressId], references: [id], onDelete: Restrict)
+    /// Same-tenant guarantee: the address must belong to this hospital (constraints.sql, DEC-031).
+-@@ -404,6 +432,13 @@
++@@ -404,6 +435,13 @@
+    addresses              Address[]              @relation("AddressTenant")
+    notificationDeliveries NotificationDelivery[]
+  
+@@ -56,7 +59,7 @@
+    @@index([status])
+    @@map("hospitals")
+  }
+-@@ -463,6 +498,11 @@
++@@ -463,6 +501,11 @@
+    notifications              Notification[]       @relation("NotificationRecipient")
+    notificationsSameTenant    Notification[]       @relation("NotificationRecipientSameTenant")
+    auditLogs                  AuditLog[]
+@@ -68,7 +71,7 @@
+  
+    @@unique([id, hospitalId])
+    @@index([hospitalId, role])
+-@@ -519,6 +559,7 @@
++@@ -519,6 +562,7 @@
+    floor        String?
+    /// Daily charge billed as a ROOM invoice item (PRD 7.7 "room charges").
+    dailyCharge  Decimal? @db.Decimal(12, 2)
+@@ -76,7 +79,7 @@
+    createdAt    DateTime @default(now()) @db.Timestamptz(3)
+    updatedAt    DateTime @updatedAt @db.Timestamptz(3)
+  
+-@@ -1058,6 +1099,7 @@
++@@ -1058,6 +1102,7 @@
+    /// Low-stock alert threshold (PRD 7.6, configurable per medicine).
+    reorderLevel  Int
+    isActive      Boolean      @default(true)
+@@ -84,7 +87,7 @@
+    /// PHARM-003 (M-07): set when available stock first falls below reorderLevel, cleared on restock,
+    /// so the low-stock alert is raised once per crossing.
+    lowStockSince DateTime?    @db.Timestamptz(3)
+-@@ -1067,6 +1109,7 @@
++@@ -1067,6 +1112,7 @@
+    hospital          Hospital           @relation(fields: [hospitalId], references: [id], onDelete: Restrict)
+    batches           MedicineBatch[]
+    prescriptionItems PrescriptionItem[]
+@@ -92,7 +95,7 @@
+  
+    @@unique([id, hospitalId])
+    @@unique([hospitalId, name, strength, form])
+-@@ -1284,12 +1327,14 @@
++@@ -1284,12 +1330,14 @@
+    sampleType String?
+    price      Decimal         @db.Decimal(12, 2)
+    isActive   Boolean         @default(true)
+@@ -107,7 +110,7 @@
+  
+    @@unique([id, hospitalId])
+    @@unique([hospitalId, code])
+-@@ -1612,3 +1657,106 @@
++@@ -1612,3 +1660,106 @@
+    @@index([actorId, createdAt])
+    @@map("audit_logs")
+  }
+diff --git a/apps/api/prisma/proposed/20261117200000_tax_configuration/schema.prisma b/apps/api/prisma/proposed/20261117200000_tax_configuration/schema.prisma
+index 4b41722..e9547b7 100644
+--- a/apps/api/prisma/proposed/20261117200000_tax_configuration/schema.prisma
++++ b/apps/api/prisma/proposed/20261117200000_tax_configuration/schema.prisma
+@@ -382,6 +382,9 @@ model Hospital {
+   invoicePrefix      String             @default("INV")
+   taxSetupConfirmedAt   DateTime?       @db.Timestamptz(3)
+   taxSetupConfirmedById String?         @db.Uuid
++  /// Set when the hospital's first tax version or GST registration is written (M-11a); from then on
++  /// the database refuses any change to `timezone`, so effective dates cannot move.
++  taxTimezoneLockedAt   DateTime?       @db.Timestamptz(3)
+ 
+   address             Address?             @relation("HospitalAddress", fields: [addressId], references: [id], onDelete: Restrict)
+   /// Same-tenant guarantee: the address must belong to this hospital (constraints.sql, DEC-031).
+diff --git a/apps/api/prisma/proposed/20261117200000_tax_configuration/tests/constraints.int-spec.diff b/apps/api/prisma/proposed/20261117200000_tax_configuration/tests/constraints.int-spec.diff
+index 6bc7ae1..150e049 100644
+--- a/apps/api/prisma/proposed/20261117200000_tax_configuration/tests/constraints.int-spec.diff
++++ b/apps/api/prisma/proposed/20261117200000_tax_configuration/tests/constraints.int-spec.diff
+@@ -1,11 +1,11 @@
+---- test/constraints.int-spec.ts	2026-11-17 09:20:34.676002288 +0000
+-+++ prisma/proposed/20261117200000_tax_configuration/tests/constraints.int-spec.ts	2026-11-17 13:54:24.011003559 +0000
++--- test/constraints.int-spec.ts	2026-11-17 13:56:21.658003615 +0000
+++++ ../../apps/api/prisma/proposed/20261117200000_tax_configuration/tests/constraints.int-spec.ts	2026-11-18 17:07:38.991494609 +0000
+ @@ -83,7 +83,7 @@
+  beforeAll(requireMigration);
+  
+  describe('T-MIG-001: database objects exist', () => {
+ -  it('has 46 tables, 42 triggers, both exclusion constraints and the extensions', async () => {
+-+  it('has 51 tables, 50 triggers, three exclusion constraints and the extensions', async () => {
+++  it('has 51 tables, 53 triggers, three exclusion constraints and the extensions', async () => {
+      const [tables] = await prisma.$queryRaw<{ c: bigint }[]>`
+        SELECT count(*) AS c FROM information_schema.tables
+        WHERE table_schema = 'public' AND table_name <> '_prisma_migrations'`;
+@@ -18,14 +18,14 @@
+ -    expect(Number(triggers!.c)).toBe(42);
+ -    expect(Number(exclusions!.c)).toBe(2);
+ +    // 11 triggers (counts measured on PostgreSQL 16 after each migration, T-MIG-PH-002). M-11a adds
+-+    // 5 tables, 8 triggers and 1 exclusion constraint (measured on PostgreSQL 16, T-MIG-TAX-001).
+++    // 5 tables, 11 triggers and 1 exclusion constraint (measured on PostgreSQL 16, T-MIG-TAX-001).
+ +    expect(Number(tables!.c)).toBe(51);
+-+    expect(Number(triggers!.c)).toBe(50);
+++    expect(Number(triggers!.c)).toBe(53);
+ +    expect(Number(exclusions!.c)).toBe(3);
+      expect(ext.map((e) => e.extname)).toEqual(expect.arrayContaining(['pgcrypto', 'btree_gist']));
+      // The Phase 7 objects by name, so a missing one cannot hide behind a correct total.
+      const names = await prisma.$queryRaw<{ n: string }[]>`
+-@@ -128,6 +129,36 @@
++@@ -128,6 +129,40 @@
+          'stock_movements_system_quarantine',
+        ].sort(),
+      );
+@@ -37,6 +37,7 @@
+ +      UNION ALL
+ +      SELECT tgname FROM pg_trigger WHERE NOT tgisinternal AND tgname IN (
+ +        'tax_classifications_rules', 'tax_classification_versions_rules', 'hospital_gst_registrations_rules',
+++        'tax_classification_versions_rules_at_commit', 'hospital_gst_registrations_rules_at_commit', 'hospitals_tax_timezone',
+ +        'statutory_room_tax_rules_append_only', 'lab_tests_tax_classification', 'medicines_tax_classification',
+ +        'hospital_tax_defaults_classification', 'hospital_tax_defaults_no_delete')
+ +      UNION ALL
+@@ -46,15 +47,18 @@
+ +        'hospital_gst_registrations',
+ +        'hospital_gst_registrations_gstin_one_hospital',
+ +        'hospital_gst_registrations_rules',
+++        'hospital_gst_registrations_rules_at_commit',
+ +        'hospital_tax_defaults',
+ +        'hospital_tax_defaults_classification',
+ +        'hospital_tax_defaults_no_delete',
+++        'hospitals_tax_timezone',
+ +        'lab_tests_tax_classification',
+ +        'medicines_tax_classification',
+ +        'statutory_room_tax_rules',
+ +        'statutory_room_tax_rules_append_only',
+ +        'tax_classification_versions',
+ +        'tax_classification_versions_rules',
+++        'tax_classification_versions_rules_at_commit',
+ +        'tax_classifications',
+ +        'tax_classifications_rules',
+ +      ].sort(),
+diff --git a/apps/api/prisma/proposed/20261117200000_tax_configuration/tests/constraints.int-spec.ts b/apps/api/prisma/proposed/20261117200000_tax_configuration/tests/constraints.int-spec.ts
+index 60b5a28..7f5c514 100644
+--- a/apps/api/prisma/proposed/20261117200000_tax_configuration/tests/constraints.int-spec.ts
++++ b/apps/api/prisma/proposed/20261117200000_tax_configuration/tests/constraints.int-spec.ts
+@@ -83,7 +83,7 @@ const at = (h: number, m = 0) => new Date(Date.UTC(2031, 0, 15, h, m));
+ beforeAll(requireMigration);
+ 
+ describe('T-MIG-001: database objects exist', () => {
+-  it('has 51 tables, 50 triggers, three exclusion constraints and the extensions', async () => {
++  it('has 51 tables, 53 triggers, three exclusion constraints and the extensions', async () => {
+     const [tables] = await prisma.$queryRaw<{ c: bigint }[]>`
+       SELECT count(*) AS c FROM information_schema.tables
+       WHERE table_schema = 'public' AND table_name <> '_prisma_migrations'`;
+@@ -96,9 +96,9 @@ describe('T-MIG-001: database objects exist', () => {
+     const ext = await prisma.$queryRaw<{ extname: string }[]>`SELECT extname FROM pg_extension`;
+     // 44 tables and 31 triggers through M-06; M-08 and M-10 add one table each, M-09 and M-10 add
+     // 11 triggers (counts measured on PostgreSQL 16 after each migration, T-MIG-PH-002). M-11a adds
+-    // 5 tables, 8 triggers and 1 exclusion constraint (measured on PostgreSQL 16, T-MIG-TAX-001).
++    // 5 tables, 11 triggers and 1 exclusion constraint (measured on PostgreSQL 16, T-MIG-TAX-001).
+     expect(Number(tables!.c)).toBe(51);
+-    expect(Number(triggers!.c)).toBe(50);
++    expect(Number(triggers!.c)).toBe(53);
+     expect(Number(exclusions!.c)).toBe(3);
+     expect(ext.map((e) => e.extname)).toEqual(expect.arrayContaining(['pgcrypto', 'btree_gist']));
+     // The Phase 7 objects by name, so a missing one cannot hide behind a correct total.
+@@ -137,6 +137,7 @@ describe('T-MIG-001: database objects exist', () => {
+       UNION ALL
+       SELECT tgname FROM pg_trigger WHERE NOT tgisinternal AND tgname IN (
+         'tax_classifications_rules', 'tax_classification_versions_rules', 'hospital_gst_registrations_rules',
++        'tax_classification_versions_rules_at_commit', 'hospital_gst_registrations_rules_at_commit', 'hospitals_tax_timezone',
+         'statutory_room_tax_rules_append_only', 'lab_tests_tax_classification', 'medicines_tax_classification',
+         'hospital_tax_defaults_classification', 'hospital_tax_defaults_no_delete')
+       UNION ALL
+@@ -146,15 +147,18 @@ describe('T-MIG-001: database objects exist', () => {
+         'hospital_gst_registrations',
+         'hospital_gst_registrations_gstin_one_hospital',
+         'hospital_gst_registrations_rules',
++        'hospital_gst_registrations_rules_at_commit',
+         'hospital_tax_defaults',
+         'hospital_tax_defaults_classification',
+         'hospital_tax_defaults_no_delete',
++        'hospitals_tax_timezone',
+         'lab_tests_tax_classification',
+         'medicines_tax_classification',
+         'statutory_room_tax_rules',
+         'statutory_room_tax_rules_append_only',
+         'tax_classification_versions',
+         'tax_classification_versions_rules',
++        'tax_classification_versions_rules_at_commit',
+         'tax_classifications',
+         'tax_classifications_rules',
+       ].sort(),
+diff --git a/apps/api/prisma/proposed/20261117200000_tax_configuration/tests/tax-configuration.int-spec.ts b/apps/api/prisma/proposed/20261117200000_tax_configuration/tests/tax-configuration.int-spec.ts
+index 8246a90..d524e9f 100644
+--- a/apps/api/prisma/proposed/20261117200000_tax_configuration/tests/tax-configuration.int-spec.ts
++++ b/apps/api/prisma/proposed/20261117200000_tax_configuration/tests/tax-configuration.int-spec.ts
+@@ -2,7 +2,7 @@ import { randomBytes } from 'node:crypto';
+ import { PrismaClient } from '@prisma/client';
+ 
+ /**
+- * M-11a tax configuration rules on real PostgreSQL (T-MIG-TAX-002..008, DEC-045 to DEC-050).
++ * M-11a tax configuration rules on real PostgreSQL (T-MIG-TAX-002..011, DEC-045 to DEC-050).
+  * Requires migration 20261117200000_tax_configuration. Creates rows prefixed "int-" in the local
+  * database. Tax classifications and GST registrations can never be deleted (by design), so every
+  * run uses fresh names and a freshly generated GSTIN.
+@@ -65,10 +65,13 @@ async function hospitalWithAdmin() {
+   return { h, admin };
+ }
+ 
+-/** Today and other days in the hospital's time zone (new hospitals default to Asia/Kolkata). */
++/**
++ * The hospital's tax date (its local date ten minutes from now, as medcore_tax_date computes it) plus
++ * an offset. New hospitals default to Asia/Kolkata.
++ */
+ async function day(offset: number): Promise<Date> {
+   const [r] = await prisma.$queryRaw<{ d: Date }[]>`
+-    SELECT ((now() AT TIME ZONE 'Asia/Kolkata')::date + ${offset}::integer) AS d`;
++    SELECT (((clock_timestamp() + interval '10 minutes') AT TIME ZONE 'Asia/Kolkata')::date + ${offset}::integer) AS d`;
+   return r!.d;
+ }
+ 
+@@ -143,9 +146,9 @@ describe('T-MIG-TAX-003: classification versions', () => {
+         where: { id: v.id },
+         data: { ratePercent: '12.00' },
+       }),
+-    ).rejects.toThrow(/has taken effect cannot change/);
++    ).rejects.toThrow(/cannot change \(tax date/);
+     await expect(prisma.taxClassificationVersion.delete({ where: { id: v.id } })).rejects.toThrow(
+-      /has taken effect cannot change/,
++      /cannot change \(tax date/,
+     );
+   });
+ 
+@@ -181,7 +184,7 @@ describe('T-MIG-TAX-003: classification versions', () => {
+           effectiveFrom: await day(-1),
+         },
+       }),
+-    ).rejects.toThrow(/cannot start before today/);
++    ).rejects.toThrow(/cannot start before/);
+     await expect(
+       prisma.taxClassificationVersion.create({
+         data: {
+@@ -398,3 +401,164 @@ describe('T-MIG-TAX-008: critical-care rooms', () => {
+     ).resolves.toBeDefined();
+   });
+ });
++
++describe('T-MIG-TAX-009: the time zone is fixed once tax dates exist (revision 2)', () => {
++  it('can change before, is stamped by the first version, and is then refused', async () => {
++    const { h, admin } = await hospitalWithAdmin();
++    await expect(
++      prisma.hospital.update({ where: { id: h.id }, data: { timezone: 'Asia/Dubai' } }),
++    ).resolves.toMatchObject({ timezone: 'Asia/Dubai', taxTimezoneLockedAt: null });
++    await prisma.hospital.update({ where: { id: h.id }, data: { timezone: 'Asia/Kolkata' } });
++    const c = await classification(h.id, admin.id, 'GOODS');
++    await prisma.taxClassificationVersion.create({
++      data: {
++        hospitalId: h.id,
++        classificationId: c.id,
++        createdById: admin.id,
++        treatment: 'TAXABLE',
++        ratePercent: '5.00',
++        priceIncludesTax: true,
++        effectiveFrom: await day(0),
++      },
++    });
++    const locked = await prisma.hospital.findUniqueOrThrow({ where: { id: h.id } });
++    expect(locked.taxTimezoneLockedAt).toBeInstanceOf(Date);
++    await expect(
++      prisma.hospital.update({ where: { id: h.id }, data: { timezone: 'America/Los_Angeles' } }),
++    ).rejects.toThrow(
++      /time zone of a hospital with tax versions or GST registrations cannot change/,
++    );
++    await expect(
++      prisma.hospital.update({ where: { id: h.id }, data: { taxTimezoneLockedAt: null } }),
++    ).rejects.toThrow(/cannot change/);
++    await expect(
++      prisma.hospital.update({ where: { id: h.id }, data: { phone: '+910000000001' } }),
++    ).resolves.toBeDefined();
++  });
++});
++
++describe('T-MIG-TAX-010: effective dates are checked again at commit (revision 2)', () => {
++  it('refuses an edit made before midnight whose commit lands after it', async () => {
++    const { h, admin } = await hospitalWithAdmin();
++    const c = await classification(h.id, admin.id, 'GOODS');
++    const v = await prisma.taxClassificationVersion.create({
++      data: {
++        hospitalId: h.id,
++        classificationId: c.id,
++        createdById: admin.id,
++        treatment: 'TAXABLE',
++        ratePercent: '12.00',
++        priceIncludesTax: true,
++        effectiveFrom: await day(2),
++      },
++    });
++    const start = v.effectiveFrom.toISOString().slice(0, 10);
++    // Inside one transaction that always rolls back: swap the tax clock for a simulated one, edit the
++    // version at 23:45 the evening before it starts (accepted), move the clock past midnight and run
++    // the commit-time checks. The swap is undone with the transaction.
++    const run = prisma.$transaction(async (tx) => {
++      await tx.$executeRawUnsafe(
++        "CREATE OR REPLACE FUNCTION medcore_tax_clock() RETURNS timestamptz LANGUAGE sql VOLATILE AS $$ SELECT current_setting('medcore_test.clock')::timestamptz $$",
++      );
++      await tx.$executeRawUnsafe(
++        `SELECT set_config('medcore_test.clock', (DATE '${start}' - 1 + TIME '23:45')::text || '+05:30', true)`,
++      );
++      await tx.taxClassificationVersion.update({
++        where: { id: v.id },
++        data: { ratePercent: '5.00' },
++      });
++      await tx.$executeRawUnsafe(
++        `SELECT set_config('medcore_test.clock', (DATE '${start}' + TIME '00:01')::text || '+05:30', true)`,
++      );
++      await tx.$executeRawUnsafe('SET CONSTRAINTS ALL IMMEDIATE');
++      throw new Error('commit-time check did not fire');
++    });
++    await expect(run).rejects.toThrow(/cannot change \(tax date/);
++    const after = await prisma.taxClassificationVersion.findUniqueOrThrow({ where: { id: v.id } });
++    expect(after.ratePercent.toFixed(2)).toBe('12.00');
++    const [clockFn] = await prisma.$queryRaw<{ src: string }[]>`
++      SELECT prosrc AS src FROM pg_proc WHERE proname = 'medcore_tax_clock'`;
++    expect(clockFn!.src).toContain('clock_timestamp()');
++  });
++});
++
++describe('T-MIG-TAX-011: writers hold row locks until they commit (revision 3)', () => {
++  // A second connection plays the reader. NOWAIT makes the checks independent of timing: a locked row
++  // fails at once with "could not obtain lock" instead of waiting.
++  const reader = new PrismaClient();
++  afterAll(() => reader.$disconnect());
++
++  it('a version writer locks its hospital and classification rows: locking readers wait, plain reads see the old value', async () => {
++    const { h, admin } = await hospitalWithAdmin();
++    const c = await classification(h.id, admin.id, 'GOODS');
++    const v = await prisma.taxClassificationVersion.create({
++      data: {
++        hospitalId: h.id,
++        classificationId: c.id,
++        createdById: admin.id,
++        treatment: 'TAXABLE',
++        ratePercent: '12.00',
++        priceIncludesTax: true,
++        effectiveFrom: await day(5),
++      },
++    });
++    const seen = await prisma.$transaction(async (tx) => {
++      await tx.taxClassificationVersion.update({
++        where: { id: v.id },
++        data: { ratePercent: '5.00' },
++      });
++      const locked = reader.$queryRaw`SELECT 1 FROM tax_classifications WHERE id = ${c.id}::uuid FOR SHARE NOWAIT`;
++      await expect(locked).rejects.toThrow(/could not obtain lock/);
++      // Every writer takes the hospital row first (fixed lock order).
++      await expect(
++        reader.$queryRaw`SELECT 1 FROM hospitals WHERE id = ${h.id}::uuid FOR SHARE NOWAIT`,
++      ).rejects.toThrow(/could not obtain lock/);
++      const plain = await reader.taxClassificationVersion.findUniqueOrThrow({
++        where: { id: v.id },
++      });
++      return plain.ratePercent.toFixed(2);
++    });
++    expect(seen).toBe('12.00');
++    await expect(
++      reader.$queryRaw`SELECT 1 FROM tax_classifications WHERE id = ${c.id}::uuid FOR SHARE NOWAIT`,
++    ).resolves.toHaveLength(1);
++  });
++
++  it('a registration writer locks its hospital row without blocking foreign-key inserts', async () => {
++    const { h, admin } = await hospitalWithAdmin();
++    // Stamp the time zone lock first, so the only hospital-row lock inside the transaction below is
++    // the one revision 3 adds.
++    const c = await classification(h.id, admin.id, 'GOODS');
++    await prisma.taxClassificationVersion.create({
++      data: {
++        hospitalId: h.id,
++        classificationId: c.id,
++        createdById: admin.id,
++        treatment: 'TAXABLE',
++        ratePercent: '5.00',
++        priceIncludesTax: true,
++        effectiveFrom: await day(5),
++      },
++    });
++    await prisma.$transaction(async (tx) => {
++      await tx.hospitalGstRegistration.create({
++        data: {
++          hospitalId: h.id,
++          attestedById: admin.id,
++          registrationType: 'UNREGISTERED',
++          effectiveFrom: await day(5),
++        },
++      });
++      await expect(
++        reader.$queryRaw`SELECT 1 FROM hospitals WHERE id = ${h.id}::uuid FOR SHARE NOWAIT`,
++      ).rejects.toThrow(/could not obtain lock/);
++      // Foreign-key checks take KEY SHARE, which FOR NO KEY UPDATE does not block.
++      await expect(
++        reader.department.create({ data: { hospitalId: h.id, name: `int-dept-${uid()}` } }),
++      ).resolves.toBeDefined();
++    });
++    await expect(
++      reader.$queryRaw`SELECT 1 FROM hospitals WHERE id = ${h.id}::uuid FOR SHARE NOWAIT`,
++    ).resolves.toHaveLength(1);
++  });
++});
+diff --git a/apps/api/prisma/proposed/20261117200000_tax_configuration/tests/tenant-scope.spec.diff b/apps/api/prisma/proposed/20261117200000_tax_configuration/tests/tenant-scope.spec.diff
+index d1f2d28..e7a114d 100644
+--- a/apps/api/prisma/proposed/20261117200000_tax_configuration/tests/tenant-scope.spec.diff
++++ b/apps/api/prisma/proposed/20261117200000_tax_configuration/tests/tenant-scope.spec.diff
+@@ -1,6 +1,6 @@
+---- /tmp/ts.orig	2026-11-17 13:54:02.892003549 +0000
+-+++ prisma/proposed/20261117200000_tax_configuration/tests/tenant-scope.spec.ts	2026-11-17 13:54:02.890003549 +0000
+-@@ -5,12 +5,16 @@
++--- src/common/tenancy/tenant-scope.spec.ts	2026-11-17 13:56:21.659003615 +0000
+++++ ../../apps/api/prisma/proposed/20261117200000_tax_configuration/tests/tenant-scope.spec.ts	2026-11-18 17:07:38.993157115 +0000
++@@ -5,12 +5,21 @@
+  const OTHER = '22222222-2222-4222-8222-222222222222';
+  
+  describe('tenant scoping of Prisma operations (TEN-002/003)', () => {
+@@ -13,7 +13,12 @@
+      expect(TENANT_MODELS.has('PrescriptionEvent')).toBe(true);
+ -    for (const global of ['Hospital', 'Icd10Code', 'WebhookEvent']) {
+ +    // M-11a: tax configuration is hospital data; the statutory room rule is platform reference data.
+-+    for (const scoped of ['TaxClassification', 'TaxClassificationVersion', 'HospitalTaxDefault', 'HospitalGstRegistration']) {
+++    for (const scoped of [
+++      'TaxClassification',
+++      'TaxClassificationVersion',
+++      'HospitalTaxDefault',
+++      'HospitalGstRegistration',
+++    ]) {
+ +      expect(TENANT_MODELS.has(scoped)).toBe(true);
+ +    }
+ +    for (const global of ['Hospital', 'Icd10Code', 'WebhookEvent', 'StatutoryRoomTaxRule']) {
+diff --git a/apps/api/prisma/proposed/20261117200000_tax_configuration/validation/README.md b/apps/api/prisma/proposed/20261117200000_tax_configuration/validation/README.md
+index 09df5ad..d4ce245 100644
+--- a/apps/api/prisma/proposed/20261117200000_tax_configuration/validation/README.md
++++ b/apps/api/prisma/proposed/20261117200000_tax_configuration/validation/README.md
+@@ -2,12 +2,20 @@
+ 
+ These scripts were used to validate M-11a in the build environment before approval. Paths refer to
+ that workspace (`/home/claude/m11a`, staged migrations under `/mnt/user-data/uploads`); they are kept
+-as a record of exactly what was run, not as project tooling.
++as a record of exactly what was run, not as project tooling. The last full run (revision 3) is in
++`results-rev3.txt`.
+ 
+-| Script                                  | What it checks                                                                                                                                                                                                                          |
+-| --------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+-| `rebuild.sh`                            | Fresh scratch database from the ten applied migrations plus `seed.sql` (two hospitals, admins, a lab test, a medicine, two rooms)                                                                                                       |
+-| `behaviour_tests.py`                    | 79 rule checks, each in its own rolled-back transaction                                                                                                                                                                                 |
+-| `rollback_checks.sh`                    | Atomicity (injected failure), re-apply refusal, manual reversal, reversal guard                                                                                                                                                         |
+-| `conform.js`                            | 195 comparisons between the proposed Prisma schema (via Prisma's own schema WebAssembly, engine c2990dca) and the migrated database: columns, types, nullability, defaults, keys, unique indexes, foreign keys and actions, enum values |
+-| `dataq.sql`, `dataq_old.sql`, `dump.sh` | Row hashes and schema dumps used for before/after comparisons                                                                                                                                                                           |
++| Script                                  | What it checks                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
++| --------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
++| `run_all.sh`                            | Runs everything below in order and writes `results-rev3.txt` (the record of the last full run)                                                                                                                                                                                                                                                                                                                                                                                                                |
++| `rebuild.sh`                            | Fresh scratch database from the eight migrations in `prisma/migrations` plus `seed.sql` (two hospitals, admins, a lab test, a medicine, two rooms)                                                                                                                                                                                                                                                                                                                                                            |
++| `behaviour_tests.py`                    | 113 rule checks, each in its own rolled-back transaction with a simulated clock (`medcore_tax_clock()` replaced inside that transaction only)                                                                                                                                                                                                                                                                                                                                                                 |
++| `commit_tests.sh`                       | Commit-time checks under a real `COMMIT`, on a throwaway database whose clock function is permanently simulated                                                                                                                                                                                                                                                                                                                                                                                               |
++| `concurrency_tests.sh`                  | Six two-session races between a time-zone change and the first tax version or registration (READ COMMITTED, REPEATABLE READ, SERIALIZABLE); real clock, run before 23:50 IST                                                                                                                                                                                                                                                                                                                                  |
++| `timing_tests.sh` (rev 3)               | What the time checks do not guarantee and what the row locks do: a commit stalled in a synchronous-replication wait after its commit-time check; the `SET CONSTRAINTS ALL IMMEDIATE` bypass; locking readers still see only final values; `idle_in_transaction_session_timeout`; no `transaction_timeout` on PostgreSQL 16; FK inserts not blocked; lock order without deadlock; a control without the writer locks. Test 1 changes `synchronous_standby_names` on the scratch cluster and always restores it |
++| `lock_nowait_tests.sh` (rev 3)          | SQL rehearsal of T-MIG-TAX-011 (`FOR SHARE NOWAIT` from a second session), against revision 3 and against the control                                                                                                                                                                                                                                                                                                                                                                                         |
++| `gstin_verification.py`                 | `medcore_gstin_valid()` against python-stdnum 2.2 and real GSTINs from published documents; mutation and random comparisons. Output: `gstin_verification-output.txt`                                                                                                                                                                                                                                                                                                                                          |
++| `gstin_reference.md`                    | Accepted and refused GSTIN formats, sources and every test vector                                                                                                                                                                                                                                                                                                                                                                                                                                             |
++| `rollback_checks.sh`                    | Atomicity (injected failure), re-apply refusal, manual reversal, reversal guard (configuration, later statutory rules, altered seed, lock-only)                                                                                                                                                                                                                                                                                                                                                               |
++| `conform.js`                            | 198 comparisons between the proposed Prisma schema (via Prisma's own schema WebAssembly, engine c2990dca) and the migrated database: columns, types, nullability, defaults, keys, unique indexes, foreign keys and actions, enum values                                                                                                                                                                                                                                                                       |
++| `dataq.sql`, `dataq_old.sql`, `dump.sh` | Row hashes and schema dumps used for before/after comparisons                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+diff --git a/apps/api/prisma/proposed/20261117200000_tax_configuration/validation/behaviour_tests.py b/apps/api/prisma/proposed/20261117200000_tax_configuration/validation/behaviour_tests.py
+index f205f5b..583f55e 100644
+--- a/apps/api/prisma/proposed/20261117200000_tax_configuration/validation/behaviour_tests.py
++++ b/apps/api/prisma/proposed/20261117200000_tax_configuration/validation/behaviour_tests.py
+@@ -3,6 +3,12 @@
+ Each case runs in its own transaction that is rolled back, so cases are independent. A case is a
+ list of statements: all but the last must succeed; the last must succeed (expect "ok") or fail with
+ an error containing the expected text.
++
++Revision 2: every case starts with a simulated clock (FIXTURE): medcore_tax_clock() is replaced,
++inside the case's own transaction, by a function reading the setting medcore_test.clock, set to
++2026-11-18 12:00 India time. A case moves time with clock(...). "SET CONSTRAINTS ALL IMMEDIATE" runs
++the deferred (commit-time) checks at that point, with the clock as it then stands, which is what a
++COMMIT at that moment would do. Cases marked REAL_CLOCK run without the fixture.
+ """
+ import subprocess
+ import sys
+@@ -15,7 +21,19 @@ UB = "bbbbbbbb-0000-0000-0000-0000000000b1"
+ LAB = "aaaaaaaa-0000-0000-0000-00000000c001"
+ MED = "aaaaaaaa-0000-0000-0000-00000000d001"
+ ROOM = "aaaaaaaa-0000-0000-0000-00000000e001"
+-TODAY = "(now() AT TIME ZONE 'Asia/Kolkata')::date"
++TODAY = "'2026-11-18'::date"
++FIXTURE = ("CREATE OR REPLACE FUNCTION medcore_tax_clock() RETURNS timestamptz LANGUAGE sql VOLATILE "
++           "AS $$ SELECT current_setting('medcore_test.clock')::timestamptz $$; "
++           "SET LOCAL medcore_test.clock = '2026-11-18 12:00:00+05:30'")
++REAL_CLOCK = "-- real clock"
++
++
++def clock(ts):
++    """Move the simulated clock (India time unless an offset is given)."""
++    return f"SET LOCAL medcore_test.clock = '{ts if '+' in ts else ts + '+05:30'}'"
++
++
++COMMIT_CHECK = "SET CONSTRAINTS ALL IMMEDIATE"
+ 
+ SVC = "11111111-0000-0000-0000-000000000001"   # service classification, hospital A
+ GDS = "11111111-0000-0000-0000-000000000002"   # goods classification, hospital A
+@@ -76,27 +94,63 @@ CASES = [
+     ("version: taxable at 0% refused", BASE + [ver(V1, GDS, "TAXABLE", 0, "true", TODAY)], "tax_classification_versions_rate_chk"),
+     ("version: taxable above 40% refused", BASE + [ver(V1, GDS, "TAXABLE", 41, "false", TODAY)], "tax_classification_versions_rate_chk"),
+     ("version: exempt with tax inside the price refused", BASE + [ver(V1, SVC, "EXEMPT", 0, "true", TODAY)], "tax_classification_versions_rate_chk"),
+-    ("version: backdated start refused", BASE + [ver(V1, GDS, "TAXABLE", 5, "true", TODAY + " - 1")], "cannot start before today"),
++    ("version: backdated start refused", BASE + [ver(V1, GDS, "TAXABLE", 5, "true", TODAY + " - 1")], "cannot start before 2026-11-18"),
+     ("version: two versions on one date refused",
+      BASE + [ver(V1, GDS, "TAXABLE", 5, "true", TODAY + " + 30"), ver(V2, GDS, "NIL_RATED", 0, "false", TODAY + " + 30")],
+      "tax_classification_versions_classificationId_effectiveFrom_key"),
+     ("version: in force today cannot be edited",
+-     BASE + [ver(V1, GDS, "TAXABLE", 5, "true", TODAY), f"UPDATE tax_classification_versions SET \"ratePercent\"=12 WHERE id='{V1}'"], "has taken effect cannot change"),
++     BASE + [ver(V1, GDS, "TAXABLE", 5, "true", TODAY), f"UPDATE tax_classification_versions SET \"ratePercent\"=12 WHERE id='{V1}'"], "cannot change (tax date 2026-11-18)"),
+     ("version: in force today cannot be deleted",
+-     BASE + [ver(V1, GDS, "TAXABLE", 5, "true", TODAY), f"DELETE FROM tax_classification_versions WHERE id='{V1}'"], "has taken effect cannot change"),
++     BASE + [ver(V1, GDS, "TAXABLE", 5, "true", TODAY), f"DELETE FROM tax_classification_versions WHERE id='{V1}'"], "cannot change (tax date 2026-11-18)"),
+     ("version: future version can be edited",
+      BASE + [ver(V1, GDS, "TAXABLE", 12, "true", TODAY + " + 30"), f"UPDATE tax_classification_versions SET \"ratePercent\"=5 WHERE id='{V1}'"], "ok"),
+     ("version: future version cannot be moved into the past",
+-     BASE + [ver(V1, GDS, "TAXABLE", 12, "true", TODAY + " + 30"), f"UPDATE tax_classification_versions SET \"effectiveFrom\"={TODAY} - 1 WHERE id='{V1}'"], "cannot start before today"),
++     BASE + [ver(V1, GDS, "TAXABLE", 12, "true", TODAY + " + 30"), f"UPDATE tax_classification_versions SET \"effectiveFrom\"={TODAY} - 1 WHERE id='{V1}'"], "can only be moved to a date after 2026-11-18"),
+     ("version: future version cannot change classification",
+      BASE + [ver(V1, GDS, "TAXABLE", 12, "true", TODAY + " + 30"), f"UPDATE tax_classification_versions SET \"classificationId\"='{SVC}' WHERE id='{V1}'"], "Only the treatment, rate"),
+     ("version: future version can be deleted",
+      BASE + [ver(V1, GDS, "TAXABLE", 12, "true", TODAY + " + 30"), f"DELETE FROM tax_classification_versions WHERE id='{V1}'"], "ok"),
+-    # Tomorrow in India is already today at UTC+14, so moving the hospital there makes the version take effect.
+-    ("version: becomes immutable once its date arrives in the hospital's time zone",
+-     BASE + [ver(V1, GDS, "TAXABLE", 12, "true", TODAY + " + 1"),
+-             f"UPDATE hospitals SET timezone='Pacific/Kiritimati' WHERE id='{A}'",
+-             f"DELETE FROM tax_classification_versions WHERE id='{V1}'"], "has taken effect cannot change"),
++    # --- Revision 2: the actual clock, the commit-time check and the freeze margin
++    ("clock: tomorrow's version can still be edited at 23:45",
++     BASE + [ver(V1, GDS, "TAXABLE", 12, "true", TODAY + " + 1"), clock("2026-11-18 23:45"),
++             f"UPDATE tax_classification_versions SET \"ratePercent\"=5 WHERE id='{V1}'"], "ok"),
++    ("clock: tomorrow's version is frozen from 23:50 (10-minute margin)",
++     BASE + [ver(V1, GDS, "TAXABLE", 12, "true", TODAY + " + 1"), clock("2026-11-18 23:52"),
++             f"UPDATE tax_classification_versions SET \"ratePercent\"=5 WHERE id='{V1}'"], "cannot change (tax date 2026-11-19)"),
++    ("clock: an edit made at 23:45 is refused when the commit lands after midnight",
++     BASE + [ver(V1, GDS, "TAXABLE", 12, "true", TODAY + " + 1"), clock("2026-11-18 23:45"),
++             f"UPDATE tax_classification_versions SET \"ratePercent\"=5 WHERE id='{V1}'",
++             clock("2026-11-19 00:01"), COMMIT_CHECK], "cannot change (tax date 2026-11-19)"),
++    ("clock: a delete made at 23:45 is refused when the commit lands after midnight",
++     BASE + [ver(V1, GDS, "TAXABLE", 12, "true", TODAY + " + 1"), clock("2026-11-18 23:45"),
++             f"DELETE FROM tax_classification_versions WHERE id='{V1}'",
++             clock("2026-11-19 00:01"), COMMIT_CHECK], "cannot change (tax date 2026-11-19)"),
++    ("clock: a version started 'today' at 23:40 is refused when the commit lands tomorrow (backdating)",
++     BASE + [clock("2026-11-18 23:40"), ver(V1, GDS, "TAXABLE", 5, "true", TODAY),
++             clock("2026-11-19 00:01"), COMMIT_CHECK], "cannot start before 2026-11-19"),
++    ("clock: the same insert committing before 23:50 is accepted",
++     BASE + [clock("2026-11-18 23:40"), ver(V1, GDS, "TAXABLE", 5, "true", TODAY),
++             clock("2026-11-18 23:41"), COMMIT_CHECK], "ok"),
++    ("clock: from 23:50 a first version must start tomorrow",
++     BASE + [clock("2026-11-18 23:55"), ver(V1, GDS, "TAXABLE", 5, "true", TODAY)], "cannot start before 2026-11-19"),
++    ("clock: a second version cannot start today once one is in force",
++     BASE + [ver(V1, GDS, "TAXABLE", 12, "true", TODAY), ver(V2, GDS, "TAXABLE", 5, "true", TODAY + " + 0")],
++     "already has a version in force"),
++    ("clock: a second version cannot start today once an earlier one is in force",
++     BASE + [ver(V1, GDS, "TAXABLE", 12, "true", TODAY), clock("2026-11-19 12:00"),
++             ver(V2, GDS, "TAXABLE", 5, "true", TODAY + " + 1")], "already has a version in force"),
++    ("clock: a second version can start tomorrow",
++     BASE + [ver(V1, GDS, "TAXABLE", 12, "true", TODAY), ver(V2, GDS, "TAXABLE", 5, "true", TODAY + " + 1")], "ok"),
++    ("clock: a future version cannot be moved to today",
++     BASE + [ver(V1, GDS, "TAXABLE", 12, "true", TODAY + " + 5"),
++             f"UPDATE tax_classification_versions SET \"effectiveFrom\"={TODAY} WHERE id='{V1}'"], "can only be moved to a date after"),
++    ("clock: a future version inserted and deleted in one transaction is not judged as an insert at commit",
++     BASE + [clock("2026-11-18 23:40"), ver(V1, GDS, "TAXABLE", 5, "true", TODAY + " + 1"),
++             f"DELETE FROM tax_classification_versions WHERE id='{V1}'", clock("2026-11-18 23:42"), COMMIT_CHECK], "ok"),
++    ("clock: a version in force cannot be deleted even in the transaction that inserted it",
++     BASE + [ver(V1, GDS, "TAXABLE", 5, "true", TODAY), f"DELETE FROM tax_classification_versions WHERE id='{V1}'"],
++     "cannot change (tax date 2026-11-18)"),
++
+     ("version: classification of another hospital refused",
+      BASE + [ver(V1, GDS, "TAXABLE", 5, "true", TODAY, hosp=B, user=UB)], "tax_classification_versions_classificationId_hospitalId_fkey"),
+ 
+@@ -156,19 +210,73 @@ CASES = [
+     ("registration: chosen state differs from the GSTIN refused", [reg(R1, A, UA, "REGULAR", GSTIN_A, "X", "29")], "hospital_gst_registrations_details_chk"),
+     ("registration: missing legal name refused", [reg(R1, A, UA, "REGULAR", GSTIN_A, None, "27")], "hospital_gst_registrations_details_chk"),
+     ("registration: malformed PAN refused", [reg(R1, A, UA, "REGULAR", "27AAPF10939F1ZV", "X", "27")], "hospital_gst_registrations_details_chk"),
++    ("registration: PAN holder type X refused (fourth PAN letter)", [reg(R1, A, UA, "REGULAR", "27AAPXU0939F1ZU", "X", "27")], "hospital_gst_registrations_details_chk"),
++    ("registration: PAN sequence 0000 refused", [reg(R1, A, UA, "REGULAR", "27AAPFU0000F1ZJ", "X", "27")], "hospital_gst_registrations_details_chk"),
++    ("registration: tax deductor format (D in place of Z) refused", [reg(R1, A, UA, "REGULAR", "08JDHA08253A1D4", "X", "08")], "hospital_gst_registrations_details_chk"),
+     ("registration: backdated refused", [reg(R1, A, UA, "REGULAR", GSTIN_A, "X", "27", TODAY + " - 1")], "cannot be backdated"),
+     ("registration: never edited", [reg(R1, A, UA, "REGULAR", GSTIN_A, "X", "27"), f"UPDATE hospital_gst_registrations SET \"legalName\"='Y' WHERE id='{R1}'"], "never edited"),
+     ("registration: in force cannot be deleted", [reg(R1, A, UA, "REGULAR", GSTIN_A, "X", "27"), f"DELETE FROM hospital_gst_registrations WHERE id='{R1}'"], "cannot be deleted"),
+     ("registration: future one can be deleted", [reg(R1, A, UA, "REGULAR", GSTIN_A, "X", "27", TODAY + " + 10"), f"DELETE FROM hospital_gst_registrations WHERE id='{R1}'"], "ok"),
+-    ("registration: two on one date refused", [reg(R1, A, UA, "UNREGISTERED", None, None, None), reg(R2, A, UA, "REGULAR", GSTIN_A, "X", "27")], "hospital_gst_registrations_hospitalId_effectiveFrom_key"),
++    ("registration: two starting today refused", [reg(R1, A, UA, "UNREGISTERED", None, None, None), reg(R2, A, UA, "REGULAR", GSTIN_A, "X", "27")], "already in force"),
++    ("registration: two on one future date refused", [reg(R1, A, UA, "UNREGISTERED", None, None, None, TODAY + " + 5"), reg(R2, A, UA, "REGULAR", GSTIN_A, "X", "27", TODAY + " + 5")], "hospital_gst_registrations_hospitalId_effectiveFrom_key"),
+     ("registration: same GSTIN later in the same hospital (composition to regular)",
+      [reg(R1, A, UA, "COMPOSITION", GSTIN_A, "X", "27"), reg(R2, A, UA, "REGULAR", GSTIN_A, "X", "27", TODAY + " + 1")], "ok"),
++    ("registration: started 'today' at 23:40, refused when the commit lands tomorrow",
++     [clock("2026-11-18 23:40"), reg(R1, A, UA, "REGULAR", GSTIN_A, "X", "27"), clock("2026-11-19 00:01"), COMMIT_CHECK],
++     "cannot start before 2026-11-19"),
++    ("registration: a future one deleted at 23:45 is refused when the commit lands after midnight",
++     [reg(R1, A, UA, "REGULAR", GSTIN_A, "X", "27", TODAY + " + 1"), clock("2026-11-18 23:45"),
++      f"DELETE FROM hospital_gst_registrations WHERE id='{R1}'", clock("2026-11-19 00:01"), COMMIT_CHECK],
++     "cannot be deleted (tax date 2026-11-19)"),
++    ("registration: tomorrow's one is frozen from 23:50",
++     [reg(R1, A, UA, "REGULAR", GSTIN_A, "X", "27", TODAY + " + 1"), clock("2026-11-18 23:55"),
++      f"DELETE FROM hospital_gst_registrations WHERE id='{R1}'"], "cannot be deleted"),
++    ("registration: a second one cannot start today once one is in force",
++     [reg(R1, A, UA, "UNREGISTERED", None, None, None), clock("2026-11-19 12:00"),
++      reg(R2, A, UA, "REGULAR", GSTIN_A, "X", "27", TODAY + " + 1")], "already in force"),
++    ("registration: a second one can start tomorrow",
++     [reg(R1, A, UA, "UNREGISTERED", None, None, None), reg(R2, A, UA, "REGULAR", GSTIN_A, "X", "27", TODAY + " + 1")], "ok"),
+     ("registration: Q1g A, same GSTIN in another hospital refused",
+      [reg(R1, A, UA, "REGULAR", GSTIN_A, "X", "27"), reg(R2, B, UB, "REGULAR", GSTIN_A, "Y", "27")], "hospital_gst_registrations_gstin_one_hospital"),
+     ("registration: Q1g A holds even for a future row", [reg(R1, A, UA, "REGULAR", GSTIN_A, "X", "27", TODAY + " + 5"), reg(R2, B, UB, "REGULAR", GSTIN_A, "Y", "27")], "hospital_gst_registrations_gstin_one_hospital"),
+     ("registration: different GSTINs in two hospitals", [reg(R1, A, UA, "REGULAR", GSTIN_A, "X", "27"), reg(R2, B, UB, "REGULAR", "29AAPFU0939F1ZR", "Y", "29")], "ok"),
+     ("registration: attested by another hospital's user refused", [reg(R1, A, UB, "REGULAR", GSTIN_A, "X", "27")], "hospital_gst_registrations_attestedById_hospitalId_fkey"),
+ 
++    # --- Revision 2: time zone fixed once tax versions or registrations exist
++    ("timezone: can change while the hospital has no tax versions or registrations",
++     BASE + [f"UPDATE hospitals SET timezone='Asia/Dubai' WHERE id='{A}'"], "ok"),
++    ("timezone: a classification alone does not fix it", BASE + [f"UPDATE hospitals SET timezone='Asia/Dubai' WHERE id='{A}'"], "ok"),
++    ("timezone: the first version stamps the lock",
++     BASE + [ver(V1, GDS, "TAXABLE", 5, "true", TODAY),
++             f"DO $$ BEGIN IF (SELECT \"taxTimezoneLockedAt\" FROM hospitals WHERE id='{A}') IS NULL THEN RAISE EXCEPTION 'not stamped'; END IF; END $$"], "ok"),
++    ("timezone: cannot change once a version exists",
++     BASE + [ver(V1, GDS, "TAXABLE", 5, "true", TODAY), f"UPDATE hospitals SET timezone='America/Los_Angeles' WHERE id='{A}'"],
++     "time zone of a hospital with tax versions or GST registrations cannot change"),
++    ("timezone: cannot change once a registration exists",
++     [reg(R1, A, UA, "UNREGISTERED", None, None, None, TODAY + " + 3"), f"UPDATE hospitals SET timezone='America/Los_Angeles' WHERE id='{A}'"],
++     "cannot change"),
++    ("timezone: stays fixed after the only (future) version is deleted",
++     BASE + [ver(V1, GDS, "TAXABLE", 5, "true", TODAY + " + 3"), f"DELETE FROM tax_classification_versions WHERE id='{V1}'",
++             f"UPDATE hospitals SET timezone='America/Los_Angeles' WHERE id='{A}'"], "cannot change"),
++    ("timezone: the lock cannot be cleared",
++     BASE + [ver(V1, GDS, "TAXABLE", 5, "true", TODAY), f"UPDATE hospitals SET \"taxTimezoneLockedAt\"=NULL WHERE id='{A}'"], "cannot change"),
++    ("timezone: writing the same zone again is allowed",
++     BASE + [ver(V1, GDS, "TAXABLE", 5, "true", TODAY), f"UPDATE hospitals SET timezone='Asia/Kolkata' WHERE id='{A}'"], "ok"),
++    ("timezone: other hospital settings still change",
++     BASE + [ver(V1, GDS, "TAXABLE", 5, "true", TODAY), f"UPDATE hospitals SET phone='9', \"defaultSlotMinutes\"=15 WHERE id='{A}'"], "ok"),
++    ("timezone: another hospital is unaffected",
++     BASE + [ver(V1, GDS, "TAXABLE", 5, "true", TODAY), f"UPDATE hospitals SET timezone='Asia/Dubai' WHERE id='{B}'"], "ok"),
++    ("timezone: a hospital locked in Kolkata cannot move west to reopen today's version",
++     BASE + [ver(V1, GDS, "TAXABLE", 5, "true", TODAY), clock("2026-11-18 09:00"),
++             f"UPDATE hospitals SET timezone='Pacific/Honolulu' WHERE id='{A}'"], "cannot change"),
++    ("real clock: the production clock path accepts a version from the hospital's real today",
++     [REAL_CLOCK] + BASE + ["INSERT INTO tax_classification_versions (id,\"hospitalId\",\"classificationId\",treatment,\"ratePercent\",\"priceIncludesTax\",\"effectiveFrom\",\"createdById\") "
++                            f"VALUES ('{V1}','{A}','{GDS}','TAXABLE',5,true,((clock_timestamp() + interval '10 minutes') AT TIME ZONE 'Asia/Kolkata')::date,'{UA}')",
++                            COMMIT_CHECK], "ok"),
++    ("real clock: and refuses yesterday",
++     [REAL_CLOCK] + BASE + ["INSERT INTO tax_classification_versions (id,\"hospitalId\",\"classificationId\",treatment,\"ratePercent\",\"priceIncludesTax\",\"effectiveFrom\",\"createdById\") "
++                            f"VALUES ('{V1}','{A}','{GDS}','TAXABLE',5,true,((clock_timestamp() + interval '10 minutes') AT TIME ZONE 'Asia/Kolkata')::date - 1,'{UA}')"], "cannot start before"),
++
+     # --- Statutory room rule
+     ("room rule: seeded row is the 18 July 2022 rule",
+      ["DO $$ BEGIN IF (SELECT count(*) FROM statutory_room_tax_rules WHERE \"effectiveFrom\"='2022-07-18' AND \"thresholdPerDay\"=5000.00 AND \"ratePercent\"=5.00 AND \"sacCode\"='9993' AND NOT \"priceIncludesTax\") <> 1 THEN RAISE EXCEPTION 'seed missing'; END IF; END $$"], "ok"),
+@@ -184,6 +292,7 @@ CASES = [
+ 
+ def run(case):
+     name, stmts, expect = case
++    stmts = stmts[1:] if stmts and stmts[0] == REAL_CLOCK else [FIXTURE] + stmts
+     sql = "BEGIN;\n" + ";\n".join(stmts) + ";\nROLLBACK;\n"
+     p = subprocess.run(["sudo", "-u", "postgres", "psql", "-v", "ON_ERROR_STOP=1", "-q", "-d", DB],
+                        input=sql, capture_output=True, text=True, cwd="/tmp")
+diff --git a/apps/api/prisma/proposed/20261117200000_tax_configuration/validation/conform.js b/apps/api/prisma/proposed/20261117200000_tax_configuration/validation/conform.js
+index 981c6be..aa7b3da 100644
+--- a/apps/api/prisma/proposed/20261117200000_tax_configuration/validation/conform.js
++++ b/apps/api/prisma/proposed/20261117200000_tax_configuration/validation/conform.js
+@@ -18,7 +18,7 @@ const NEW_MODELS = [
+   'StatutoryRoomTaxRule',
+ ];
+ const NEW_FIELDS = {
+-  Hospital: ['taxSetupConfirmedAt', 'taxSetupConfirmedById'],
++  Hospital: ['taxSetupConfirmedAt', 'taxSetupConfirmedById', 'taxTimezoneLockedAt'],
+   LabTest: ['taxClassificationId'],
+   Medicine: ['taxClassificationId'],
+   Room: ['criticalCareUnit'],
+diff --git a/apps/api/prisma/proposed/20261117200000_tax_configuration/validation/dataq_old.sql b/apps/api/prisma/proposed/20261117200000_tax_configuration/validation/dataq_old.sql
+index d8e23c0..4fe08bd 100644
+--- a/apps/api/prisma/proposed/20261117200000_tax_configuration/validation/dataq_old.sql
++++ b/apps/api/prisma/proposed/20261117200000_tax_configuration/validation/dataq_old.sql
+@@ -1,5 +1,5 @@
+ select md5(string_agg(t::text, '|' order by t::text)) from (
+- select to_jsonb(x) - 'taxSetupConfirmedAt' - 'taxSetupConfirmedById' t from hospitals x
++ select to_jsonb(x) - 'taxSetupConfirmedAt' - 'taxSetupConfirmedById' - 'taxTimezoneLockedAt' t from hospitals x
+  union all select to_jsonb(x) - 'taxClassificationId' from lab_tests x
+  union all select to_jsonb(x) - 'taxClassificationId' from medicines x
+  union all select to_jsonb(x) - 'criticalCareUnit' from rooms x
+diff --git a/apps/api/prisma/proposed/20261117200000_tax_configuration/validation/rebuild.sh b/apps/api/prisma/proposed/20261117200000_tax_configuration/validation/rebuild.sh
+index f8154be..9a2e314 100644
+--- a/apps/api/prisma/proposed/20261117200000_tax_configuration/validation/rebuild.sh
++++ b/apps/api/prisma/proposed/20261117200000_tax_configuration/validation/rebuild.sh
+@@ -1,5 +1,5 @@
+ #!/bin/bash
+-# Rebuild scratch DB $1 from the ten existing migrations plus seed rows.
++# Rebuild scratch DB $1 from the eight applied migrations plus seed rows.
+ set -e
+ DB=${1:-m11a}
+ M=/mnt/user-data/uploads/MedCore-HMS/apps/api/prisma/migrations
+diff --git a/apps/api/prisma/proposed/20261117200000_tax_configuration/validation/rollback_checks.sh b/apps/api/prisma/proposed/20261117200000_tax_configuration/validation/rollback_checks.sh
+index 8f118fb..240fc48 100644
+--- a/apps/api/prisma/proposed/20261117200000_tax_configuration/validation/rollback_checks.sh
++++ b/apps/api/prisma/proposed/20261117200000_tax_configuration/validation/rollback_checks.sh
+@@ -22,3 +22,27 @@ psqlq m11a_down "$MIG" >/dev/null
+ psqlq m11a_down "INSERT INTO tax_classifications (id,\"hospitalId\",name,\"supplyType\",\"hsnSac\",\"createdById\",\"updatedAt\") VALUES ('11111111-0000-0000-0000-000000000001','aaaaaaaa-0000-0000-0000-000000000001','S','SERVICE','9993','aaaaaaaa-0000-0000-0000-0000000000a1',now())" >/dev/null
+ $H/dump.sh m11a_down > /tmp/d1; psqlq m11a_down "$RB" | head -1; $H/dump.sh m11a_down > /tmp/d2
+ cmp -s /tmp/d1 /tmp/d2 && echo "PASS reversal refused with configuration present, nothing changed" || echo "FAIL reversal guard"
++# 5. Revision 2: a later statutory rule (as a future migration would add) blocks the reversal.
++$H/rebuild.sh m11a_down; psqlq m11a_down 'CREATE TABLE "_prisma_migrations" (migration_name text)' >/dev/null
++psqlq m11a_down "$MIG" >/dev/null
++psqlq m11a_down "INSERT INTO statutory_room_tax_rules (\"effectiveFrom\",\"thresholdPerDay\",\"ratePercent\",\"sacCode\",\"legalReference\") VALUES ('2027-04-01',7500,5,'9993','hypothetical later rule')" >/dev/null
++$H/dump.sh m11a_down > /tmp/e1; N1=$(cd /tmp; sudo -u postgres psql -d m11a_down -Atc "select count(*) from statutory_room_tax_rules")
++psqlq m11a_down "$RB" | head -1; $H/dump.sh m11a_down > /tmp/e2
++cmp -s /tmp/e1 /tmp/e2 && [ "$N1" = "2" ] && echo "PASS reversal refused with a later statutory rule; both rules kept" || echo "FAIL later-rule guard"
++# 6. A seed row altered behind the append-only trigger (only possible for a superuser) also blocks it.
++$H/rebuild.sh m11a_down; psqlq m11a_down 'CREATE TABLE "_prisma_migrations" (migration_name text)' >/dev/null
++psqlq m11a_down "$MIG" >/dev/null
++psqlq m11a_down 'ALTER TABLE statutory_room_tax_rules DISABLE TRIGGER statutory_room_tax_rules_append_only; UPDATE statutory_room_tax_rules SET "thresholdPerDay" = 6000; ALTER TABLE statutory_room_tax_rules ENABLE TRIGGER statutory_room_tax_rules_append_only;' >/dev/null
++$H/dump.sh m11a_down > /tmp/f1; psqlq m11a_down "$RB" | head -1; $H/dump.sh m11a_down > /tmp/f2
++cmp -s /tmp/f1 /tmp/f2 && echo "PASS reversal refused when the seed row differs from M-11a's" || echo "FAIL altered-seed guard"
++# 7. A time-zone lock left by a future version that was then deleted does not block the reversal.
++$H/rebuild.sh m11a_down; psqlq m11a_down 'CREATE TABLE "_prisma_migrations" (migration_name text)' >/dev/null
++$H/dump.sh m11a_down > /tmp/g1; D7=$(data m11a_down)
++psqlq m11a_down "INSERT INTO \"_prisma_migrations\" VALUES ('20261117200000_tax_configuration')" >/dev/null
++psqlq m11a_down "$MIG" >/dev/null
++psqlq m11a_down "INSERT INTO tax_classifications (id,\"hospitalId\",name,\"supplyType\",\"hsnSac\",\"createdById\",\"updatedAt\") VALUES ('11111111-0000-0000-0000-000000000002','aaaaaaaa-0000-0000-0000-000000000001','M','GOODS','3004','aaaaaaaa-0000-0000-0000-0000000000a1',now()); INSERT INTO hospital_gst_registrations (id,\"hospitalId\",\"registrationType\",\"effectiveFrom\",\"attestedById\") VALUES ('44444444-0000-0000-0000-000000000001','aaaaaaaa-0000-0000-0000-000000000001','UNREGISTERED',current_date + 30,'aaaaaaaa-0000-0000-0000-0000000000a1'); DELETE FROM hospital_gst_registrations;" >/dev/null
++L=$(cd /tmp; sudo -u postgres psql -d m11a_down -Atc "select \"taxTimezoneLockedAt\" is not null from hospitals where id='aaaaaaaa-0000-0000-0000-000000000001'")
++psqlq m11a_down "$RB" | head -1   # refused: the classification still exists
++psqlq m11a_down 'ALTER TABLE tax_classifications DISABLE TRIGGER tax_classifications_rules; DELETE FROM tax_classifications; ALTER TABLE tax_classifications ENABLE TRIGGER tax_classifications_rules;' >/dev/null
++psqlq m11a_down "$RB" >/dev/null
++$H/dump.sh m11a_down > /tmp/g2; [ "$L" = "t" ] && [ "$(data m11a_down)" = "$D7" ] && cmp -s /tmp/g1 /tmp/g2 && echo "PASS lock alone does not block; reversal restores the exact prior schema and data" || echo "FAIL lock-only reversal"
+diff --git a/apps/api/prisma/proposed/20261117200000_tax_configuration/docs.patch b/apps/api/prisma/proposed/20261117200000_tax_configuration/docs.patch
+new file mode 100644
+index 0000000..ab2c8c2
+--- /dev/null
++++ b/apps/api/prisma/proposed/20261117200000_tax_configuration/docs.patch
+@@ -0,0 +1,208 @@
++diff -ru a/docs/DECISIONS.md b/docs/DECISIONS.md
++--- a/docs/DECISIONS.md	2026-11-18 17:33:04.986001495 +0000
+++++ b/docs/DECISIONS.md	2026-11-18 17:46:38.474001883 +0000
++@@ -305,6 +305,12 @@
++   character, "Z", mod-36 check character; the registration's chosen state equals the GSTIN's state code.
++   This proves a number is well formed, not that it is active: the hospital admin attests to the details
++   (`attestedById`, `attestedAt`). No GST-portal lookup (outside service, out of scope).
+++- Revision 2 (owner review 2026-11-18): accepted format is a normal or composition taxpayer registration,
+++  `^[0-9]{2}[A-Z]{3}[ABCFGHJLPT][A-Z][0-9]{4}[A-Z][1-9A-Z]Z[0-9A-Z]$`, PAN serial not 0000, state 01 to 38,
+++  Luhn mod 36. Refused by design: tax deductor and tax collector registrations, UIN, non-resident and OIDAR
+++  formats, PAN holder type K, lower case (the API upper-cases input before saving). Verified against real
+++  issued GSTINs and an independent implementation (python-stdnum 2.2): sources, accepted and refused
+++  formats and every test vector are recorded in the proposal's `validation/gstin_reference.md`.
++ 
++ ### DEC-049: Statutory room rule
++ - Status: **Approved** (owner, 2026-11-17 19:09).
++@@ -392,4 +398,55 @@
++   T-TEN-001 model count, new T-MIG-TAX-002..008) are kept with it, since they would fail before it is applied.
++ - Contents: 4 enums, 5 tables, 3 nullable columns on `lab_tests`, `medicines`, `rooms`, 2 on `hospitals`,
++   7 functions, CHECKs, 1 exclusion constraint, 8 triggers, 1 seeded room-rule row; no existing row changed.
+++- Revision 2 (owner review 2026-11-18 22:24): rollback guard also requires the seeded room rule to be
+++  unchanged; effective dates use the hospital's tax date (DEC-058) and are checked again at commit; the
+++  hospital time zone is locked once tax data exists (DEC-057); GSTIN check verified independently (DEC-048).
+++- Revision 3 (owner review 2026-11-18 22:47): writers of effective-dated rows hold row locks until they
+++  commit, and the limits of the time checks are documented (DEC-058). Contents now: 4 enums, 5 tables,
+++  3 nullable columns on `lab_tests`, `medicines`, `rooms`, 3 on `hospitals` (adds `taxTimezoneLockedAt`),
+++  9 functions, CHECKs, 1 exclusion constraint, 11 triggers (2 of them deferred constraint triggers),
+++  1 seeded room-rule row; no existing row changed.
+++
+++### DEC-056: Same-day rule for effective-dated tax data
+++- Status: **Approved** (owner, 2026-11-18 22:47).
+++- The first classification version of a classification, and the first GST registration of a hospital,
+++  may start on the hospital's current tax date (today). Once a version or registration is in force,
+++  every later one must start after the tax date (tomorrow or later). This keeps an invoice issued earlier
+++  today from ever falling under different tax data than one issued later today.
+++- Enforced by the M-11a triggers (statement time and again at commit); behaviour tests and T-MIG-TAX-003,
+++  T-MIG-TAX-006 cover both cases.
+++
+++### DEC-057: Hospital time zone is locked once tax data exists
+++- Status: **Approved** (owner, 2026-11-18 22:47).
+++- The first tax date computed for a hospital stamps `hospitals.taxTimezoneLockedAt`; from then on the
+++  database refuses any change to `timezone` or to the stamp (trigger `hospitals_tax_timezone`).
+++- API (8-B2): an attempt to change a locked time zone returns **HTTP 409 `TIMEZONE_LOCKED`**, checked
+++  before the update and also mapped from the database error, with a message naming no other record.
+++- UI (8-B2): hospital settings show the time zone as locked (read-only field with the reason), never an
+++  editable control that then fails.
+++- Corrections: only by a reviewed migration (presented and approved like any other), never through normal
+++  application operations.
+++
+++### DEC-058: Commit-time checks, the freeze margin and the row-lock protocol
+++- Status: **Proposed with M-11a revision 3** (for owner review).
+++- Effective dates are judged against the hospital's *tax date*: its local date ten minutes ahead of the
+++  database clock (`clock_timestamp()`). Checks run when each statement runs and again at commit (deferred
+++  constraint triggers).
+++- What this does **not** guarantee: a transaction can pass its commit-time check and become visible later
+++  without limit (storage stall, synchronous-replication wait, demonstrated in `validation/timing_tests.sh`);
+++  `SET CONSTRAINTS ALL IMMEDIATE` (or `SET CONSTRAINTS ... IMMEDIATE`) moves the commit-time check earlier,
+++  which any client may do; a database superuser can disable triggers (R-11). So the ten-minute margin is a
+++  safety margin for normal operation, **not an absolute guarantee** about midnight.
+++- What does hold, independent of timing: every writer of a version or registration locks the hospital
+++  row, and a version writer then also locks the classification row (`FOR NO KEY UPDATE`, which does not
+++  block foreign-key checks), until it commits. The fixed order (hospital, then classification) means a
+++  transaction that writes both kinds cannot deadlock with a reader. Side effect, accepted because tax
+++  configuration changes are rare: tax configuration writes for one hospital run one at a time, and an
+++  update of that hospital's row (for example its settings) waits until such a writer commits. A reader that takes `FOR SHARE` in the same order (hospital row, then classification row)
+++  waits for any such writer and then sees its final committed values. M-11b's line trigger must take these
+++  locks before resolving and validating line snapshots (TASKS 8-A2), so an issued line always matches the
+++  final committed tax data even when the time checks were bypassed or a commit was stalled.
+++- Operational controls (P14-09): `idle_in_transaction_session_timeout` and `statement_timeout` for the
+++  application role, Prisma interactive-transaction timeouts, `transaction_timeout` once on PostgreSQL 17,
+++  no synchronous replication without review.
++   Review and macOS commands: [migration-review.md](migration-review.md) section 11.
++diff -ru a/docs/MEMORY.md b/docs/MEMORY.md
++--- a/docs/MEMORY.md	2026-11-18 17:33:04.994001495 +0000
+++++ b/docs/MEMORY.md	2026-11-18 17:33:05.001001495 +0000
++@@ -13,7 +13,7 @@
++ 
++ | Area | Status |
++ | --- | --- |
++-| Phase | **5: Done** (2026-11-16 22:42, M-05 applied). **6: Done** (2026-11-16 23:15; M-06 applied; DEC-041 queue fix verified on macOS). **7: Done** (2026-11-17 15:34; M-07..M-10 applied on macOS, drift empty, integration 19/19, Playwright 50/50). **8: In Progress** (plan approved 2026-11-17 19:09, DEC-045..054; M-11a tax configuration drafted and validated on PostgreSQL 16, kept in `apps/api/prisma/proposed/`, **not applied**, waiting for approval, DEC-055). P14-09 separate database accounts is mandatory. Branch `feat/phase-1-auth`; nothing pushed |
+++| Phase | **5: Done** (2026-11-16 22:42, M-05 applied). **6: Done** (2026-11-16 23:15; M-06 applied; DEC-041 queue fix verified on macOS). **7: Done** (2026-11-17 15:34; M-07..M-10 applied on macOS, drift empty, integration 19/19, Playwright 50/50). **8: In Progress** (plan approved 2026-11-17 19:09, DEC-045..054; M-11a tax configuration (revision 3, DEC-055..058) drafted and validated on PostgreSQL 16, kept in `apps/api/prisma/proposed/`, **not applied**, waiting for approval). P14-09 separate database accounts is mandatory. Branch `feat/phase-1-auth`; nothing pushed |
++ | Phase 0 | Done and verified (VM + macOS). Open: CI never run on GitHub; browser checks of status page and Swagger UI |
++ | Database | Schema revision 2 + DEC-031 declarations. Initial migration `20261116085814_init` **applied on macOS** by the owner; drift (4 SQL-only keys) fixed in schema.prisma (DEC-031), drift now empty. All unit + 4 integration suites pass on macOS (14:53). Migration 2 `20261116092500_hospital_id_db_default` (DEC-032, approved) created, not yet applied. No other migrations |
++ | Backend | Foundation + Phase 1B auth (register, email/phone OTP, login, refresh rotation, logout one/all, forgot/reset, me, CSRF, auth rate limit, RBAC guard, audit of auth events, create-super-admin CLI). Phase 1C: tenant context + scoped Prisma client, permissions matrix, audit interceptor, users endpoints. Verified only with in-memory Prisma/Redis. Phase 2 org modules. **Phase 3** `modules/appointments`: schedules, exceptions, cached slots, locked booking, lifecycle, emergency, reminders (DEC-038), `GET /doctors/me` |
++diff -ru a/docs/SECURITY.md b/docs/SECURITY.md
++--- a/docs/SECURITY.md	2026-11-18 17:33:04.990001495 +0000
+++++ b/docs/SECURITY.md	2026-11-18 17:33:05.001001495 +0000
++@@ -60,5 +60,6 @@
++ | R-11 (interim, until P14-09) | One database login for everything: any process holding the application's credentials could write a system quarantine row (M-09 Layer A guarantees only that it is a correct one: expired batch, true quantity, today's report, same transaction). In development the login is the Docker superuser, which can disable triggers | **Mandatory** Phase 14 task P14-09: separate accounts for migrations, application and jobs; application never owner or superuser |
++ | R-12 (Phase 8, open until the API exists) | The GSTIN exclusion constraint (DEC-050) is race-safe, but PostgreSQL's error detail names the other hospital's id and GSTIN | The registrations API must map the constraint to `409 GSTIN_UNAVAILABLE` with a message naming no hospital and must never return or log the database error text to the user; HTTP test that the response carries no foreign id (8-B2) |
++ | R-13 (interim, until P14-09) | Platform reference data (`statutory_room_tax_rules`) is append-only in the database, but the application's login could still insert a new rule row, because the database cannot tell a migration from the application (same reason as R-11) | No application writer exists (code review; test that the room-rule repository exposes only reads); separate database accounts in P14-09 remove insert rights from the application |
+++| R-15 (Phase 8, by design) | Effective-dated tax checks depend on time: a commit can become visible long after its last check (storage or replication stall), and any client can run `SET CONSTRAINTS ALL IMMEDIATE` to check early (DEC-058) | Writers hold row locks until commit; M-11b readers take `FOR SHARE` in the order hospital, then classification, so issued lines always match committed tax data (8-A2); idle and statement timeouts for application roles (P14-09); the ten-minute margin is documented as a margin, not a guarantee |
++ | R-14 (release gate) | Tax outcomes depend on each hospital's configuration and on law that changes; MedCore implements the rules but is not a tax adviser | Mandatory accountant review before production use (DEC-054, TASKS 8-G1); classifications versioned and invoices snapshotted so a correction never rewrites history |
++ | R-07 | CI workflow has never run on GitHub (nothing pushed) | Push only with owner approval; then verify CI |
++diff -ru a/docs/TASKS.md b/docs/TASKS.md
++--- a/docs/TASKS.md	2026-11-18 17:33:04.987001495 +0000
+++++ b/docs/TASKS.md	2026-11-18 17:33:05.001001495 +0000
++@@ -208,13 +208,13 @@
++ | Task ID | Req. | Task | Status | Tests |
++ | --- | --- | --- | --- | --- |
++ | 8-A0 | BILL-001..008 | Phase 8 plan and decisions Q1a–Q1g, Q2–Q19 | Done (approved 2026-11-17 19:09) | — |
++-| 8-A1 | DEC-045..050, DEC-055 | M-11a `tax_configuration`: classifications and versions, defaults and confirmation, GST registrations (one GSTIN per hospital), statutory room rule, item classifications, critical-care rooms | **Review**: drafted and validated on PostgreSQL 16 (T-MIG-TAX-001); kept in `prisma/proposed/`; awaiting approval to apply on macOS | T-MIG-TAX-001; on apply: T-MIG-TAX-002..008, T-MIG-001, T-TEN-001 |
++-| 8-A2 | DEC-051..053 | M-11b `invoice_integrity`: line tax snapshots, totals = sum of lines, document number series and uniqueness, issued-document immutability, draft-only void, correction requests, late-charge invoices | Not Started (separate approval) | — |
+++| 8-A1 | DEC-045..050, DEC-055 | M-11a `tax_configuration`: classifications and versions, defaults and confirmation, GST registrations (one GSTIN per hospital), statutory room rule, item classifications, critical-care rooms | **Review**: revision 3 drafted and validated on PostgreSQL 16 (T-MIG-TAX-001, T-MIG-TAX-TIME-001); kept in `prisma/proposed/`; awaiting approval to apply on macOS | T-MIG-TAX-001, T-MIG-TAX-TIME-001; on apply: T-MIG-TAX-002..011, T-MIG-001, T-TEN-001 |
+++| 8-A2 | DEC-051..053, DEC-058 | M-11b `invoice_integrity`: line tax snapshots, totals = sum of lines, document number series and uniqueness, issued-document immutability, draft-only void, correction requests, late-charge invoices. **Required (DEC-058):** the line trigger takes `FOR SHARE` on the hospital row, then the classification row, before resolving the version and registration in force and validating the line's snapshot against them; test that a line waits for an open version or registration writer and then matches its committed values | Not Started (separate approval) | — |
++ | 8-A3 | BILL-004/005/007, Q13 | M-12 `payment_integrity` | Not Started (separate approval) | — |
++ | 8-A4 | BILL-006, Q15 | M-13 `insurance_claim_events` (reimbursement only) | Not Started (separate approval) | — |
++ | 8-A5 | BILL-008 | M-14 `billing_settings` | Not Started (separate approval) | — |
++ | 8-B1 | DEC-051 | Shared types and money helpers: line tax, room rule, discount allocation, GSTIN validation, number formatting, totals, paise | Not Started | — |
++-| 8-B2 | BILL-008 | Tax settings API and screens | Not Started | — |
+++| 8-B2 | BILL-008, DEC-056, DEC-057 | Tax settings API and screens. **Required:** changing a locked hospital time zone returns `409 TIMEZONE_LOCKED` (checked first and mapped from the database error); settings show the time zone as locked with the reason; time zones validated against the IANA list (the current DTO checks only a pattern); same-day rule explained in the version and registration forms | Not Started | — |
++ | 8-B3 | BILL-001, BILL-003 | Invoices: drafts, late charges, re-resolve, accountant discount, finalise with numbering, draft void, correction requests | Not Started | — |
++ | 8-B4 | BILL-002 | Automatic lines from consultation, lab order and dispense, inside the existing transactions | Not Started | — |
++ | 8-B5 | BILL-004 | Cash, accountant reversal, row lock | Not Started | — |
++@@ -244,4 +244,4 @@
++ | P12-01..04 | SEC-001..015 | Security review against [SECURITY.md](SECURITY.md); upload scanning; dependency audit; audit viewer | LEAD, QA | High | Not Started |
++ | P13-01..03 | TEST-001..004, DEL-009 | Coverage to targets, E2E journeys, coverage report | QA | High | Not Started |
++ | P14-01..08 | SCOPE-021..023, DEP-001..006, DEL-001..011 | Production Compose, Dockerfile, Nginx TLS, AWS/Vercel, Sentry, seed data, README, report, video | LEAD | High | Not Started |
++-| P14-09 | SEC (DEC-044, R-11) | **Mandatory security requirement:** separate database accounts for migrations (owner), the application and background jobs. The application account is not owner or superuser and cannot insert `expiry_reports` or system quarantine rows; the job worker uses its own connection setting; the M-09 trigger additionally checks the job account; development, CI and deployment documented. Phase 14 cannot be marked Done without it | LEAD | Critical | Not Started |
+++| P14-09 | SEC (DEC-044, R-11) | **Mandatory security requirement:** separate database accounts for migrations (owner), the application and background jobs. The application account is not owner or superuser and cannot insert `expiry_reports` or system quarantine rows; the job worker uses its own connection setting; the M-09 trigger additionally checks the job account; development, CI and deployment documented. **Also (DEC-058):** `idle_in_transaction_session_timeout` and `statement_timeout` set for the application and job roles, Prisma interactive-transaction `timeout`/`maxWait` set explicitly, `transaction_timeout` added once on PostgreSQL 17, no synchronous replication without review. Phase 14 cannot be marked Done without it | LEAD | Critical | Not Started |
++diff -ru a/docs/TEST_PLAN.md b/docs/TEST_PLAN.md
++--- a/docs/TEST_PLAN.md	2026-11-18 17:33:04.991001495 +0000
+++++ b/docs/TEST_PLAN.md	2026-11-18 17:46:43.277001885 +0000
++@@ -128,7 +128,9 @@
++ Totals (Phase 4, 2026-11-16 22:10): API unit 919/919 and web 38/38 (VM); integration 15/15 in 7 suites and Playwright 30/30, desktop and mobile (Mac, owner report); ICD-10 starter list loaded (78 codes). CI: not run (nothing pushed).
++ All integration suites listed above as "Not run" in earlier revisions ran in the 14/14 macOS run (owner report, 17:17). Still open: browser checks of the status page and Swagger UI (Phase 0), CI on GitHub.
++ 
++-| T-MIG-TAX-001 | DEC-045..050, DEC-055 | Proposed M-11a on PostgreSQL 16.15, sent as one multi-statement query, after the ten applied migrations and seeded Phase 2/6/7 rows (two hospitals): existing rows identical by hash; 79 behaviour checks in rolled-back transactions (classifications 14, versions 16, item classifications 12, defaults and confirmation 11, GST registrations 20, room rule 4, existing tables 2); same GSTIN for two hospitals in two concurrent sessions; injected failure leaves no trace; re-run refused without change; `rollback.sql` restores the exact prior schema and data and refuses when configuration exists; counts 51 tables, 50 triggers, 3 exclusions | As specified | 79/79; race refused after wait; all rollback checks pass; migration md5 `2855e9de…` equals the repository copy | Pass | Build env (PG 16) | 2026-11-17 |
+++| T-MIG-TAX-001 | DEC-045..050, DEC-055 | Proposed M-11a on PostgreSQL 16.15, sent as one multi-statement query, after the eight migrations in `prisma/migrations` (earlier wording said ten) and seeded Phase 2/6/7 rows (two hospitals): existing rows identical by hash; 79 behaviour checks in rolled-back transactions (classifications 14, versions 16, item classifications 12, defaults and confirmation 11, GST registrations 20, room rule 4, existing tables 2); same GSTIN for two hospitals in two concurrent sessions; injected failure leaves no trace; re-run refused without change; `rollback.sql` restores the exact prior schema and data and refuses when configuration exists; counts 51 tables, 50 triggers, 3 exclusions | As specified | 79/79; race refused after wait; all rollback checks pass; migration md5 `2855e9de…` equals the repository copy | Pass | Build env (PG 16) | 2026-11-17 |
+++| T-MIG-TAX-001 (rev 3) | DEC-045..050, DEC-055..058 | Revision 3 on PostgreSQL 16.15 after the eight migrations in `prisma/migrations` and seeded rows: existing rows identical by hash; 113 behaviour checks; 198 schema conformance comparisons; 32 GSTIN checks against python-stdnum 2.2 and real issued GSTINs (`gstin_reference.md`); 3 real-COMMIT tests; 7 rollback checks; 6 concurrency races at READ COMMITTED, REPEATABLE READ and SERIALIZABLE; counts 51 tables, 53 triggers, 3 exclusions | As specified | See `validation/results-rev3.txt` | Pass | Build env (PG 16) | 2026-11-18 |
+++| T-MIG-TAX-TIME-001 | DEC-058 | `validation/timing_tests.sh` and `lock_nowait_tests.sh`: commit stalled in a synchronous-replication wait after its commit-time check (visible later; unlocked read stale, locking read waits for the final value); `SET CONSTRAINTS ALL IMMEDIATE` bypass reproduced; locking reader still sees only final values; idle-in-transaction timeout ends an idle writer; no `transaction_timeout` on PG 16; registration lock does not block FK inserts; no deadlock in the lock order, including one transaction that writes a version and then a registration (the first revision 3 draft deadlocked here); control without writer locks shows the gap | As specified | See `validation/results-rev3.txt` | Pass | Build env (PG 16) | 2026-11-18 |
++ | T-PRISMA-TAX-001 | DEC-055, R-10 | Proposed `schema.prisma` validated with Prisma's schema WebAssembly (engine `c2990dca`, as used by Prisma 6.19.3; CLI blocked); 195 comparisons with the migrated database: columns, types, nullability, defaults, primary keys, unique indexes, foreign keys and actions, enum values | Valid; all match | 51 models, 41 enums; 195/195 | Pass | Build env | 2026-11-17 |
++ | T-TEN-001c | TEN-002, DEC-055 | Client generated from the proposed schema: typecheck clean; proposed `tenant-scope.spec.ts` (47 hospital-scoped models including the four tax models; 4 global including `StatutoryRoomTaxRule`); full API unit suite; then VM restored to the current schema | All pass | 1277/1277 with the proposal; 1277/1277 after restoring | Pass | VM | 2026-11-17 |
++ 
++@@ -143,7 +145,9 @@
++ | T-MIG-005 | DEC-016, EMR-002 | Append-only, status-only, closed-record and approved-lab locks; corrections require reason and same parent | Triggers fire as designed | 1A | Written, not run |
++ | T-MIG-006 | BILL-001, TEST-015 | Invoice CHECKs: total = subtotal + tax − discount; line total; item links (to be revised with M-11b, which replaces both total CHECKs, DEC-051) | Violations rejected | 1A | Written, not run |
++ | T-MIG-TAX-002..008 | DEC-045..050 | `test/tax-configuration.int-spec.ts` (with M-11a): classification immutability and codes; versions in force immutable, future ones editable, no backdating, rate CHECK; cross-hospital and wrong-supply-type classifications refused; defaults (service only, not removable, stay active) and confirmation; GSTIN check character, backdating, edits, Q1g across hospitals and composition-to-regular in one hospital; room rule seeded once and append-only; critical-care rooms. Fresh names and GSTINs each run | As specified | 8 | Written, waits for M-11a on macOS |
++-| T-MIG-001 (M-11a) | DEC-055 | Proposed `test/constraints.int-spec.ts`: 51 tables, 50 triggers, 3 exclusions, plus the 14 M-11a objects by name | As specified | 8 | Written, waits for M-11a on macOS |
+++| T-TEN-001d | TEN-002, DEC-055 | Proposed `src/infra/prisma/schema-tenancy.spec.ts`: 51 models; `StatutoryRoomTaxRule` added to the documented global models; every other new model carries a required `hospitalId` and composite tenant foreign keys (found missing in revision 3 review: the current spec would fail once the proposed schema is in place) | As specified | 8 | Written; passes in the VM with M-11a moved into place (1278/1278) |
+++| T-MIG-TAX-009..011 | DEC-057, DEC-058 | Proposed `test/tax-configuration.int-spec.ts`: time zone locked by the first tax date (009); commit-time recheck refuses an edit whose checks pass at 23:45 but run after midnight (010, simulated clock in a rolled-back transaction); writers hold row locks until commit (hospital row for every writer, classification row for version writers), checked with `FOR SHARE NOWAIT` from a second connection, FK inserts not blocked (011) | As specified | 8 | Written, waits for M-11a on macOS |
+++| T-MIG-001 (M-11a) | DEC-055 | Proposed `test/constraints.int-spec.ts`: 51 tables, 53 triggers, 3 exclusions, plus the 17 M-11a objects by name | As specified | 8 | Written, waits for M-11a on macOS |
++ | T-AUTH-001 | TEST-013, SEC-004 | Refresh token reused after rotation → 401 and all sessions revoked | Rejected | 1B | Not run |
++ | T-AUTH-002..010 | AUTH-001..012 | Register, verify email/phone, login, me, refresh, logout one/all, forgot/reset, OTP attempt limit, auth rate limit 429, bcrypt cost, cookie flags, CSRF, no secrets in logs | As specified | 1B | Not run |
++ | T-RBAC-001 | ROLE-011 | Every endpoint × 9 roles matches `permissions-matrix.csv` | Allowed/denied per matrix | 1C | Not run |
++diff -ru a/docs/migration-review.md b/docs/migration-review.md
++--- a/docs/migration-review.md	2026-11-18 17:33:04.992001495 +0000
+++++ b/docs/migration-review.md	2026-11-18 17:36:07.413001582 +0000
++@@ -208,8 +208,9 @@
++ | `hospital_gst_registrations` | Per hospital; unique (id, hospitalId), (hospitalId, effectiveFrom); FKs hospital, (attestedById, hospitalId); CHECK details by type with `medcore_gstin_valid` and state code = GSTIN prefix; exclusion constraint: one GSTIN, one hospital |
++ | `statutory_room_tax_rules` | Platform data (no hospitalId); unique effectiveFrom; CHECK values; seeded: 18 July 2022, ₹5,000.00, 5%, SAC 9993, tax added on top |
++ | New columns | `lab_tests.taxClassificationId`, `medicines.taxClassificationId` (nullable, composite FK to the same hospital's classification), `rooms.criticalCareUnit` (nullable), `hospitals.taxSetupConfirmedAt/ById` (both or neither; same-tenant FK) |
++-| Functions | `medcore_hospital_today`, `medcore_gstin_valid`, and five trigger functions |
++-| Triggers (8) | `tax_classifications_rules` (no delete; only name and active flag change; a default's classification stays active); `tax_classification_versions_rules` (no start before today; change only before taking effect); `hospital_gst_registrations_rules` (never edited or backdated; delete only before taking effect); `statutory_room_tax_rules_append_only`; `lab_tests_tax_classification` and `hospital_tax_defaults_classification` (active service classification); `medicines_tax_classification` (active goods classification); `hospital_tax_defaults_no_delete` |
+++| New column (rev 2) | `hospitals.taxTimezoneLockedAt` (nullable; stamped by the first tax date, DEC-057) |
+++| Functions | `medcore_tax_clock`, `medcore_tax_date`, `medcore_gstin_valid`, and six trigger functions (including `medcore_tax_timezone_rules`) |
+++| Triggers (11; 8 from revision 1, plus `hospitals_tax_timezone` and the deferred `tax_classification_versions_rules_at_commit` and `hospital_gst_registrations_rules_at_commit`) | `tax_classifications_rules` (no delete; only name and active flag change; a default's classification stays active); `tax_classification_versions_rules` (no start before today; change only before taking effect); `hospital_gst_registrations_rules` (never edited or backdated; delete only before taking effect); `statutory_room_tax_rules_append_only`; `lab_tests_tax_classification` and `hospital_tax_defaults_classification` (active service classification); `medicines_tax_classification` (active goods classification); `hospital_tax_defaults_no_delete` |
++ 
++ No index is added for the two nullable lab test and medicine foreign keys: classification lookups go from
++ the item to the classification, and both tables are small per hospital. Revisit with M-11b if invoice
++@@ -227,7 +228,7 @@
++ 
++ ### Validation (build environment, PostgreSQL 16.15, T-MIG-TAX-001)
++ 
++-- Ten existing migrations applied to a scratch database, then rows of the kinds M-11a touches seeded (two
+++- The eight migrations in `prisma/migrations` applied to a scratch database, then rows of the kinds M-11a touches seeded (two
++   hospitals with admins and staff profiles, a lab test, a medicine, a private room and an ICU room).
++ - M-11a applied as one multi-statement query (as Prisma sends it): existing rows identical by hash
++   (excluding the new, empty columns); new columns empty; room rule seeded once.
++@@ -249,6 +250,29 @@
++ - Object counts after M-11a, measured with T-MIG-001's own queries: 51 tables, 50 triggers, 3 exclusion
++   constraints (before: 46, 42, 2).
++ 
+++### Revisions 2 and 3 (owner reviews 2026-11-18)
+++
+++Revision 2: tax date with a ten-minute margin and commit-time rechecks; same-day rule (DEC-056); time zone
+++lock (DEC-057); rollback guard checks the seeded room rule is unchanged; GSTIN verified independently
+++(DEC-048, `validation/gstin_reference.md`). Revision 3: writer row locks (DEC-058). Revalidated in full on
+++PostgreSQL 16.15: `validation/results-rev3.txt` (T-MIG-TAX-001 rev 3, T-MIG-TAX-TIME-001). Object counts after
+++M-11a: 51 tables, 53 triggers, 3 exclusion constraints.
+++
+++### What the time checks guarantee, and what they do not
+++
+++| Question | Answer (demonstrated in `validation/timing_tests.sh`) |
+++| --- | --- |
+++| Can a transaction pass its commit-time check and commit more than ten minutes later? | Yes. Deferred triggers run before the commit record is flushed and before any synchronous-replication wait; neither has a time limit. |
+++| What happens if the database stalls during commit? | The writer has passed every check and waits; its change is invisible until the stall ends, then visible at once. A reader without locks meanwhile sees the old data; a reader taking `FOR SHARE` waits and then sees the final data. |
+++| Does `SET CONSTRAINTS ALL IMMEDIATE` bypass the protection? | Yes, genuinely: it runs the commit-time check at that moment, and the transaction may commit any time later. |
+++| What timeout controls exist? | PostgreSQL 16: `statement_timeout`, `idle_in_transaction_session_timeout` (demonstrated), `lock_timeout`, plus Prisma transaction timeouts. No limit on total transaction time until PostgreSQL 17 (`transaction_timeout`). None bounds a commit stalled in storage or replication. |
+++| Can it be made stronger without unacceptable complexity? | Yes, by row locks (revision 3): consistency between issued lines and committed tax data no longer depends on timing. The midnight boundary itself remains best effort. |
+++
+++Guarantee, stated precisely: an issued invoice line always matches the tax data committed at the moment
+++its own transaction obtained its locks (provided M-11b takes them, 8-A2, and nobody bypasses triggers as a
+++superuser, R-11). Whether an edit that lands within minutes of midnight is accepted is a ten-minute safety
+++margin under normal operation, **not an absolute guarantee**.
+++
++ ### Rollback behaviour
++ 
++ 1. **During application:** automatic. One transaction; a failure rolls everything back and Prisma records the
++@@ -296,7 +320,7 @@
++ # 6. Read-only drift AFTER: expect "-- This is an empty migration."
++ pnpm --filter @medcore/api prisma:drift
++ 
++-# 7. Tests: unit, integration (12 suites including T-MIG-TAX-002..008), then Playwright with the stack running
+++# 7. Tests: unit, integration (12 suites including T-MIG-TAX-002..011), then Playwright with the stack running
++ pnpm test && pnpm test:int
++ pnpm --filter @medcore/e2e test:e2e
++ ```
+diff --git a/apps/api/prisma/proposed/20261117200000_tax_configuration/tests/schema-tenancy.spec.diff b/apps/api/prisma/proposed/20261117200000_tax_configuration/tests/schema-tenancy.spec.diff
+new file mode 100644
+index 0000000..1fd5809
+--- /dev/null
++++ b/apps/api/prisma/proposed/20261117200000_tax_configuration/tests/schema-tenancy.spec.diff
+@@ -0,0 +1,27 @@
++diff --git a/apps/api/src/infra/prisma/schema-tenancy.spec.ts b/apps/api/prisma/proposed/20261117200000_tax_configuration/tests/schema-tenancy.spec.ts
++index 0b84148..381f21d 100644
++--- a/apps/api/src/infra/prisma/schema-tenancy.spec.ts
+++++ b/apps/api/prisma/proposed/20261117200000_tax_configuration/tests/schema-tenancy.spec.ts
++@@ -20,8 +20,11 @@ const models: ModelInfo[] = [...schema.matchAll(/^model (\w+) \{\n([\s\S]*?)^\}/
++   return { name, body, hospitalId: !hid ? 'none' : hid[1] ? 'optional' : 'required' };
++ });
++ 
++-/** Tables that are deliberately not owned by one hospital. */
++-const GLOBAL_MODELS = ['Hospital', 'Icd10Code', 'WebhookEvent'];
+++/**
+++ * Tables that are deliberately not owned by one hospital. StatutoryRoomTaxRule (M-11a) is platform
+++ * reference data: the statutory room rule applies to every hospital and is append-only (R-13).
+++ */
+++const GLOBAL_MODELS = ['Hospital', 'Icd10Code', 'StatutoryRoomTaxRule', 'WebhookEvent'];
++ /** Platform-level rows (Super Admin activity) may have no hospital. */
++ const OPTIONAL_TENANT_MODELS = ['User', 'Notification', 'NotificationDelivery', 'AuditLog'];
++ /** Relations from required-tenant models that intentionally stay single-column. */
++@@ -29,7 +32,7 @@ const SINGLE_COLUMN_ALLOWED = ['Diagnosis.icd10 -> Icd10Code'];
++ 
++ describe('schema multi-tenancy rules', () => {
++   it('parses the expected number of models', () => {
++-    expect(models.length).toBe(46);
+++    expect(models.length).toBe(51);
++   });
++ 
++   it('every model carries hospitalId unless it is a documented global model', () => {
+diff --git a/apps/api/prisma/proposed/20261117200000_tax_configuration/tests/schema-tenancy.spec.ts b/apps/api/prisma/proposed/20261117200000_tax_configuration/tests/schema-tenancy.spec.ts
+new file mode 100644
+index 0000000..381f21d
+--- /dev/null
++++ b/apps/api/prisma/proposed/20261117200000_tax_configuration/tests/schema-tenancy.spec.ts
+@@ -0,0 +1,64 @@
++import { readFileSync } from 'node:fs';
++import { resolve } from 'node:path';
++
++/**
++ * Guards the multi-tenancy rules of prisma/schema.prisma (PRD section 03) so a future model
++ * or relation cannot silently weaken tenant isolation.
++ */
++const schema = readFileSync(resolve(__dirname, '../../../prisma/schema.prisma'), 'utf8');
++
++interface ModelInfo {
++  name: string;
++  body: string;
++  hospitalId: 'required' | 'optional' | 'none';
++}
++
++const models: ModelInfo[] = [...schema.matchAll(/^model (\w+) \{\n([\s\S]*?)^\}/gm)].map((m) => {
++  const name = m[1] as string;
++  const body = m[2] as string;
++  const hid = /^\s+hospitalId\s+String(\?)?/m.exec(body);
++  return { name, body, hospitalId: !hid ? 'none' : hid[1] ? 'optional' : 'required' };
++});
++
++/**
++ * Tables that are deliberately not owned by one hospital. StatutoryRoomTaxRule (M-11a) is platform
++ * reference data: the statutory room rule applies to every hospital and is append-only (R-13).
++ */
++const GLOBAL_MODELS = ['Hospital', 'Icd10Code', 'StatutoryRoomTaxRule', 'WebhookEvent'];
++/** Platform-level rows (Super Admin activity) may have no hospital. */
++const OPTIONAL_TENANT_MODELS = ['User', 'Notification', 'NotificationDelivery', 'AuditLog'];
++/** Relations from required-tenant models that intentionally stay single-column. */
++const SINGLE_COLUMN_ALLOWED = ['Diagnosis.icd10 -> Icd10Code'];
++
++describe('schema multi-tenancy rules', () => {
++  it('parses the expected number of models', () => {
++    expect(models.length).toBe(51);
++  });
++
++  it('every model carries hospitalId unless it is a documented global model', () => {
++    const missing = models.filter((m) => m.hospitalId === 'none').map((m) => m.name);
++    expect(missing.sort()).toEqual([...GLOBAL_MODELS].sort());
++  });
++
++  it('only documented platform-level models have an optional hospitalId', () => {
++    const optional = models.filter((m) => m.hospitalId === 'optional').map((m) => m.name);
++    expect(optional.sort()).toEqual([...OPTIONAL_TENANT_MODELS].sort());
++  });
++
++  it('every relation between hospital-owned tables is a composite (id, hospitalId) foreign key', () => {
++    const violations: string[] = [];
++    for (const model of models.filter((m) => m.hospitalId === 'required')) {
++      for (const line of model.body.split('\n')) {
++        const rel = /^\s+(\w+)\s+(\w+)\??\s+@relation\((.*)\)/.exec(line);
++        if (!rel || !line.includes('fields:')) continue;
++        const [, field, target] = rel;
++        if (target === 'Hospital') continue;
++        const id = `${model.name}.${field} -> ${target}`;
++        const composite = line.includes('hospitalId], references: [id, hospitalId]');
++        // Any single-column relation to another table must be explicitly allowed.
++        if (!composite && !SINGLE_COLUMN_ALLOWED.includes(id)) violations.push(id);
++      }
++    }
++    expect(violations).toEqual([]);
++  });
++});
+diff --git a/apps/api/prisma/proposed/20261117200000_tax_configuration/validation/commit_tests.sh b/apps/api/prisma/proposed/20261117200000_tax_configuration/validation/commit_tests.sh
+new file mode 100644
+index 0000000..1783a8c
+--- /dev/null
++++ b/apps/api/prisma/proposed/20261117200000_tax_configuration/validation/commit_tests.sh
+@@ -0,0 +1,22 @@
++#!/bin/bash
++# M-11a revision 2: the commit-time check under a real COMMIT, on a throwaway database whose
++# medcore_tax_clock() is permanently replaced by the simulated clock (never done outside this test).
++H=/home/claude/m11a; DB=m11a_commit
++A=aaaaaaaa-0000-0000-0000-000000000001; UA=aaaaaaaa-0000-0000-0000-0000000000a1
++q() { (cd /tmp; sudo -u postgres psql -X -q -d $DB "$@" 2>&1); }
++$H/rebuild.sh $DB && (cd /tmp; sudo -u postgres psql -v ON_ERROR_STOP=1 -q -d $DB -c "$(cat $H/migration.sql)")
++q -c "CREATE OR REPLACE FUNCTION medcore_tax_clock() RETURNS timestamptz LANGUAGE sql VOLATILE AS \$\$ SELECT current_setting('medcore_test.clock')::timestamptz \$\$" >/dev/null
++SETUP="SET medcore_test.clock = '2026-11-18 12:00+05:30';
++INSERT INTO tax_classifications (id,\"hospitalId\",name,\"supplyType\",\"hsnSac\",\"createdById\",\"updatedAt\") VALUES ('11111111-0000-0000-0000-000000000002','$A','Medicaments','GOODS','3004','$UA',now());
++INSERT INTO tax_classification_versions (id,\"hospitalId\",\"classificationId\",treatment,\"ratePercent\",\"priceIncludesTax\",\"effectiveFrom\",\"createdById\") VALUES ('33333333-0000-0000-0000-000000000001','$A','11111111-0000-0000-0000-000000000002','TAXABLE',12,true,'2026-11-19','$UA');"
++q -c "$SETUP" >/dev/null
++rate() { q -Atc "SELECT \"ratePercent\" FROM tax_classification_versions"; }
++echo "== Edit at 23:45, COMMIT at 00:01 the next day"
++q -c "BEGIN; SET LOCAL medcore_test.clock = '2026-11-18 23:45+05:30'; UPDATE tax_classification_versions SET \"ratePercent\" = 5; SELECT 'statement accepted at 23:45'; SET LOCAL medcore_test.clock = '2026-11-19 00:01+05:30'; COMMIT;" | grep -E "accepted|ERROR"
++r=$(rate); [ "$r" = "12.00" ] && echo "PASS refused at COMMIT; rate still $r" || echo "FAIL rate is $r"
++echo "== Edit at 23:45, COMMIT at 23:46"
++q -c "BEGIN; SET LOCAL medcore_test.clock = '2026-11-18 23:45+05:30'; UPDATE tax_classification_versions SET \"ratePercent\" = 5; SET LOCAL medcore_test.clock = '2026-11-18 23:46+05:30'; COMMIT;" | grep -E "ERROR" || true
++r=$(rate); [ "$r" = "5.00" ] && echo "PASS committed; rate now $r" || echo "FAIL rate is $r"
++echo "== Insert a first registration effective 18 Nov at 23:40, COMMIT at 00:01"
++q -c "BEGIN; SET LOCAL medcore_test.clock = '2026-11-18 23:40+05:30'; INSERT INTO hospital_gst_registrations (id,\"hospitalId\",\"registrationType\",\"effectiveFrom\",\"attestedById\") VALUES ('44444444-0000-0000-0000-000000000001','$A','UNREGISTERED','2026-11-18','$UA'); SET LOCAL medcore_test.clock = '2026-11-19 00:01+05:30'; COMMIT;" | grep -E "ERROR"
++n=$(q -Atc "SELECT count(*) FROM hospital_gst_registrations"); [ "$n" = "0" ] && echo "PASS refused at COMMIT; no registration stored" || echo "FAIL $n stored"
+diff --git a/apps/api/prisma/proposed/20261117200000_tax_configuration/validation/concurrency_tests.sh b/apps/api/prisma/proposed/20261117200000_tax_configuration/validation/concurrency_tests.sh
+new file mode 100644
+index 0000000..5f9cfa7
+--- /dev/null
++++ b/apps/api/prisma/proposed/20261117200000_tax_configuration/validation/concurrency_tests.sh
+@@ -0,0 +1,54 @@
++#!/bin/bash
++# M-11a revision 2: two-session races on scratch PostgreSQL 16, real clock (run well before 23:50 IST).
++# Each scenario starts from a freshly rebuilt database with M-11a applied, so committed rows from one
++# scenario cannot affect the next.
++H=/home/claude/m11a
++DB=m11a_race
++A=aaaaaaaa-0000-0000-0000-000000000001
++UA=aaaaaaaa-0000-0000-0000-0000000000a1
++B=bbbbbbbb-0000-0000-0000-000000000001
++UB=bbbbbbbb-0000-0000-0000-0000000000b1
++TODAY="((clock_timestamp() + interval '10 minutes') AT TIME ZONE 'Asia/Kolkata')::date"
++CLS="INSERT INTO tax_classifications (id,\"hospitalId\",name,\"supplyType\",\"hsnSac\",\"createdById\",\"updatedAt\") VALUES ('11111111-0000-0000-0000-000000000002','$A','Medicaments','GOODS','3004','$UA',now());"
++VER="INSERT INTO tax_classification_versions (id,\"hospitalId\",\"classificationId\",treatment,\"ratePercent\",\"priceIncludesTax\",\"effectiveFrom\",\"createdById\") VALUES ('33333333-0000-0000-0000-000000000001','$A','11111111-0000-0000-0000-000000000002','TAXABLE',5,true,$TODAY,'$UA');"
++TZCHANGE="UPDATE hospitals SET timezone='America/Los_Angeles' WHERE id='$A';"
++GST="INSERT INTO hospital_gst_registrations (id,\"hospitalId\",\"registrationType\",gstin,\"legalName\",\"stateCode\",\"effectiveFrom\",\"attestedById\") VALUES"
++
++q() { (cd /tmp; sudo -u postgres psql -X -q -d $DB "$@" 2>&1); }
++fresh() { $H/rebuild.sh $DB && (cd /tmp; sudo -u postgres psql -v ON_ERROR_STOP=1 -q -d $DB -c "$(cat $H/migration.sql)") && q -c "$CLS" >/dev/null; }
++state() { q -Atc "SELECT timezone, (\"taxTimezoneLockedAt\" IS NOT NULL), (SELECT count(*) FROM tax_classification_versions) FROM hospitals WHERE id='$A'"; }
++
++run_race() { # $1 name, $2 iso1, $3 sql1 (held 3 s), $4 iso2, $5 sql2 (starts after 1 s), $6 expected final state
++  fresh
++  (q -c "BEGIN ISOLATION LEVEL $2; $3 SELECT pg_sleep(3); COMMIT;" > /tmp/s1.out) &
++  sleep 1
++  local t0=$(date +%s.%N)
++  q -c "BEGIN ISOLATION LEVEL $4; $5 COMMIT;" > /tmp/s2.out
++  local waited=$(echo "$(date +%s.%N) - $t0" | bc | cut -c1-4)
++  wait
++  local s=$(state)
++  local ok=FAIL; [ "$s" = "$6" ] && ok=PASS
++  echo "$ok $1"
++  echo "     session 1: $(grep -m1 -E 'ERROR' /tmp/s1.out || echo committed)"
++  echo "     session 2 (waited ${waited}s): $(grep -m1 -E 'ERROR' /tmp/s2.out || echo committed)"
++  echo "     final: timezone|locked|versions = $s (expected $6)"
++}
++
++# 1. First version holds the hospital row; a time-zone change arrives meanwhile.
++run_race "RC: version first, then time-zone change: change waits, then is refused" \
++  "READ COMMITTED" "$VER" "READ COMMITTED" "$TZCHANGE" "Asia/Kolkata|t|1"
++# 2. Time-zone change holds the row; the first version arrives meanwhile.
++run_race "RC: time-zone change first, then version: version waits, then uses the new zone and locks it" \
++  "READ COMMITTED" "$TZCHANGE" "READ COMMITTED" "$VER" "America/Los_Angeles|t|1"
++# 3. and 4. The same under REPEATABLE READ for the second session.
++run_race "RR: version first, then time-zone change: change fails, zone unchanged" \
++  "READ COMMITTED" "$VER" "REPEATABLE READ" "$TZCHANGE" "Asia/Kolkata|t|1"
++run_race "RR: time-zone change first, then version: version fails with a serialization error" \
++  "READ COMMITTED" "$TZCHANGE" "REPEATABLE READ" "$VER" "America/Los_Angeles|f|0"
++# 5. A GST registration races a time-zone change.
++run_race "RC: registration first, then time-zone change: change refused" \
++  "READ COMMITTED" "$GST ('44444444-0000-0000-0000-000000000001','$A','UNREGISTERED',NULL,NULL,NULL,$TODAY,'$UA');" \
++  "READ COMMITTED" "$TZCHANGE" "Asia/Kolkata|t|0"
++# 6. SERIALIZABLE second session, version first.
++run_race "SERIALIZABLE: version first, then time-zone change: change fails, zone unchanged" \
++  "READ COMMITTED" "$VER" "SERIALIZABLE" "$TZCHANGE" "Asia/Kolkata|t|1"
+diff --git a/apps/api/prisma/proposed/20261117200000_tax_configuration/validation/gstin_reference.md b/apps/api/prisma/proposed/20261117200000_tax_configuration/validation/gstin_reference.md
+new file mode 100644
+index 0000000..1d896f9
+--- /dev/null
++++ b/apps/api/prisma/proposed/20261117200000_tax_configuration/validation/gstin_reference.md
+@@ -0,0 +1,110 @@
++# GSTIN validation reference (M-11a, DEC-048 revision 2)
++
++This records what `medcore_gstin_valid()` accepts and refuses, the sources each rule comes from, and
++the test vectors that `gstin_verification.py` checks against an independent implementation. The full
++output of the last run is in `gstin_verification-output.txt`.
++
++## What the function checks
++
++A GSTIN is accepted only if all of these hold:
++
++| Position | Rule                                                          | Pattern                                  |
++| -------- | ------------------------------------------------------------- | ---------------------------------------- |
++| 1-2      | State code 01 to 38                                           | `[0-9]{2}`, then 1..38                   |
++| 3-12     | The holder's PAN: 5 letters, 4 digits, 1 letter               | `[A-Z]{3}[ABCFGHJLPT][A-Z][0-9]{4}[A-Z]` |
++| 4        | PAN holder type: A, B, C, F, G, H, J, L, P or T               | `[ABCFGHJLPT]`                           |
++| 8-11     | PAN serial is not 0000                                        |                                          |
++| 13       | Registration number for that PAN in that state: 1-9, then A-Z | `[1-9A-Z]`                               |
++| 14       | Always `Z` for a normal or composition taxpayer               | `Z`                                      |
++| 15       | Check character: Luhn mod 36 over characters 1 to 14          | `[0-9A-Z]`                               |
++
++Full pattern: `^[0-9]{2}[A-Z]{3}[ABCFGHJLPT][A-Z][0-9]{4}[A-Z][1-9A-Z]Z[0-9A-Z]$`.
++
++Input must already be upper case. The function is IMMUTABLE and STRICT (NULL in, NULL out; the column
++check treats NULL according to the registration type, as before).
++
++## Accepted
++
++- Normal and composition taxpayer registrations (14th character `Z`), built on an individual,
++  company, firm, trust, association of persons, body of individuals, government, local authority,
++  artificial juridical person or Hindu undivided family PAN (holder types P, C, F, T, A, B, G, L, J, H).
++- Every state and union territory code from 01 to 38, including 38 (Ladakh).
++
++## Refused, and why
++
++| Format                                                                         | Example                          | Why a hospital invoice cannot carry it                                                               |
++| ------------------------------------------------------------------------------ | -------------------------------- | ---------------------------------------------------------------------------------------------------- |
++| Tax deductor (TDS) registration: TAN-based, or `D` in position 14              | 07DELS71442A1DD, 22AACAA7875J1DV | Issued to deduct tax, not to make supplies. Real hospitals hold these in addition to a normal GSTIN. |
++| Tax collector (TCS, e-commerce operator): `C` in position 14                   |                                  | Collects tax for others; not a supplier registration.                                                |
++| UIN (UN bodies, embassies)                                                     |                                  | Recipients, not suppliers.                                                                           |
++| Non-resident taxable person and OIDAR (state code 97 or 99, or a non-PAN base) |                                  | A hospital in India registers as a normal taxpayer.                                                  |
++| PAN holder type K (krish, a historical Income Tax category)                    | 27AAPKU0939F1ZK                  | Not in the Income Tax Department's current list of holder types. stdnum accepts it.                  |
++| State code 00 or above 38                                                      |                                  | No such state or union territory.                                                                    |
++| PAN serial 0000                                                                |                                  | Not issued.                                                                                          |
++| Lower case                                                                     | 37aahaa4036g1zy                  | Refused by the database; the API must upper-case input before saving (stdnum normalises).            |
++| Wrong length, wrong check character                                            | 27AAPFU0939F1Z, 27AAPFU0939F1ZO  | Malformed.                                                                                           |
++
++If MedCore ever needs to record one of the refused types (for example a hospital's own tax deductor
++registration), that is a new column or table and a new reviewed migration, not a relaxation of this check.
++
++## Sources
++
++| Rule                                            | Source                                                                                                                                                         |
++| ----------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
++| Structure (state, PAN, entity number, Z, check) | GST registration rules and GSTN's published format; the check algorithm is not formally published by GSTN, so it is verified against real issued numbers below |
++| PAN holder types                                | Income Tax Department, incometaxindia.gov.in (PAN structure, fourth character)                                                                                 |
++| Check character (Luhn mod 36)                   | python-stdnum 2.2, `stdnum.in_.gstin` (an independent implementation, used as the oracle)                                                                      |
++| State codes 01 to 38                            | GST state code list; 38 Ladakh added after the 2019 reorganisation                                                                                             |
++
++## Test vectors
++
++### Real GSTINs from published documents (all accepted, and accepted by stdnum)
++
++| GSTIN           | Holder                                                        | Source                                                          |
++| --------------- | ------------------------------------------------------------- | --------------------------------------------------------------- |
++| 37AAHAA4036G1ZY | AIIMS Mangalagiri                                             | GST registration certificate, aiimsmangalagiri.edu.in (primary) |
++| 24AADCB2295A1Z7 | Baroda Medicare Pvt Ltd (Sunshine Global Hospital)            | Gujarat AAR 106/2020, gstcouncil.gov.in (primary)               |
++| 24AAQFM2633M1ZY | M/s MJ Solanki                                                | Telangana AAR 04/2024 (AIIMS Bibinagar) (primary)               |
++| 07ADKPJ3897P1ZM | M/s Kore Security Services                                    | Telangana AAR 04/2024 (primary)                                 |
++| 36AAVFP9999G1ZZ | M/s P. Suresh & Associates                                    | Telangana AAR 04/2024 (primary)                                 |
++| 08AAAGA0038H1ZY | AIIMS Jodhpur                                                 | public GST record, knowyourgst.com                              |
++| 03AAAGA2223A1ZN | AIIMS Bathinda                                                | public GST record, knowyourgst.com                              |
++| 36AAAGA2453A1Z6 | AIIMS Bibinagar                                               | public GST record, piceapp.com                                  |
++| 18AAAGA2376L1ZB | AIIMS Guwahati                                                | public GST record, piceapp.com                                  |
++| 33AAACA5443N3ZN | Apollo Hospitals Enterprise Ltd, Tamil Nadu (entity number 3) | public GST record, piceapp.com                                  |
++| 07AAACA5443N1ZK | Apollo Hospitals Enterprise Ltd, Delhi                        | public GST record, piceapp.com                                  |
++| 19AAACA5443N1ZF | Apollo Hospitals Enterprise Ltd, West Bengal                  | public GST record, piceapp.com                                  |
++| 07AAATG2183J1ZO | Gujarmal Modi Hospital                                        | public GST record, knowyourgst.com                              |
++| 27AAPFU0939F1ZV | stdnum documented valid number                                | python-stdnum doctest                                           |
++
++### stdnum's documented invalid numbers (refused by both)
++
++27AAPFU0939F1ZO (check character), 27AAPFU0939F1AA (14th character not Z), 27AAPFU0939F1Z (length 14),
++369296450896540 (format).
++
++### Real tax deductor registrations (refused by design; stdnum also refuses them)
++
++08JDHA08253A1D4 (AIIMS Jodhpur), 20RCHA03549A1DF (AIIMS Deoghar), 07DELS71442A1DD (AIIMS New Delhi),
++07DELG00001B1DM (G.B. Pant Hospital), 37HYDR05893G1DJ (GGH Ongole), 19CALA25755C1D3 (AIIMS Kalyani),
++22AACAA7875J1DV (AIIMS Raipur, PAN-based with D), 07DELD20333F1D7 (Dr B.R.A. IRCH).
++
++### Generated vectors
++
++- 7,511 single-character substitutions and adjacent transpositions of the real valid GSTINs: the SQL
++  function and stdnum agree on all of them, and none is accepted.
++- 20,000 random well-formed candidates with a random check character: agreement on all 20,000; 564
++  valid against about 555 expected (1 in 36).
++
++### Deliberate differences from stdnum
++
++| GSTIN           | MedCore  | stdnum   | Reason                                         |
++| --------------- | -------- | -------- | ---------------------------------------------- |
++| 38AAPFU0939F1ZS | accepted | refused  | State 38 (Ladakh) is newer than stdnum's table |
++| 27AAPKU0939F1ZK | refused  | accepted | Holder type K is not a current PAN category    |
++| 37aahaa4036g1zy | refused  | accepted | Lower case; the API upper-cases first          |
++
++## Limits
++
++These checks establish that a number is well formed and carries a correct check character. They do
++not establish that it is registered, active, or belongs to this hospital. That needs the GST portal or
++a GSP, which is out of scope for Phase 8 (accountant review remains the release gate, DEC-054).
+diff --git a/apps/api/prisma/proposed/20261117200000_tax_configuration/validation/gstin_verification-output.txt b/apps/api/prisma/proposed/20261117200000_tax_configuration/validation/gstin_verification-output.txt
+new file mode 100644
+index 0000000..b166d94
+--- /dev/null
++++ b/apps/api/prisma/proposed/20261117200000_tax_configuration/validation/gstin_verification-output.txt
+@@ -0,0 +1,46 @@
++== 1. Real GSTINs from published documents (expected valid in both)
++PASS 37AAHAA4036G1ZY  AIIMS Mangalagiri  [AIIMS Mangalagiri GST registration certificate, aiimsmangalagiri.edu.in]  SQL=True stdnum=True
++PASS 24AADCB2295A1Z7  Baroda Medicare Pvt Ltd (Sunshine Global Hospital)  [Gujarat AAR 106/2020, gstcouncil.gov.in]  SQL=True stdnum=True
++PASS 24AAQFM2633M1ZY  M/s MJ Solanki  [Telangana AAR 04/2024 (AIIMS Bibinagar), taxmanagementindia.com / livelaw.in]  SQL=True stdnum=True
++PASS 07ADKPJ3897P1ZM  M/s Kore Security Services  [Telangana AAR 04/2024 (AIIMS Bibinagar)]  SQL=True stdnum=True
++PASS 36AAVFP9999G1ZZ  M/s P. Suresh & Associates  [Telangana AAR 04/2024 (AIIMS Bibinagar)]  SQL=True stdnum=True
++PASS 08AAAGA0038H1ZY  AIIMS Jodhpur  [public GST record, knowyourgst.com]  SQL=True stdnum=True
++PASS 03AAAGA2223A1ZN  AIIMS Bathinda  [public GST record, knowyourgst.com]  SQL=True stdnum=True
++PASS 36AAAGA2453A1Z6  AIIMS Bibinagar  [public GST record, piceapp.com (shown in lower case)]  SQL=True stdnum=True
++PASS 18AAAGA2376L1ZB  AIIMS Guwahati  [public GST record, piceapp.com (shown in lower case)]  SQL=True stdnum=True
++PASS 33AAACA5443N3ZN  Apollo Hospitals Enterprise Ltd, Tamil Nadu  [public GST record, piceapp.com]  SQL=True stdnum=True
++PASS 07AAACA5443N1ZK  Apollo Hospitals Enterprise Ltd, Delhi  [public GST record, piceapp.com]  SQL=True stdnum=True
++PASS 19AAACA5443N1ZF  Apollo Hospitals Enterprise Ltd, West Bengal  [public GST record, piceapp.com]  SQL=True stdnum=True
++PASS 07AAATG2183J1ZO  Gujarmal Modi Hospital  [public GST record, knowyourgst.com]  SQL=True stdnum=True
++PASS 27AAPFU0939F1ZV  stdnum documented valid number  [python-stdnum doctest]  SQL=True stdnum=True
++
++== 2. stdnum's documented invalid numbers (expected invalid in both)
++PASS 27AAPFU0939F1ZO  (check character)  SQL=False stdnum=False
++PASS 27AAPFU0939F1AA  (14th character not Z)  SQL=False stdnum=False
++PASS 27AAPFU0939F1Z  (length 14)  SQL=False stdnum=False
++PASS 369296450896540  (format)  SQL=False stdnum=False
++
++== 3. Real registrations of other types (refused by design: not a supplier registration)
++PASS 08JDHA08253A1D4  AIIMS Jodhpur, tax deductor (TAN-based)  SQL=False stdnum=False
++PASS 20RCHA03549A1DF  AIIMS Deoghar, tax deductor  SQL=False stdnum=False
++PASS 07DELS71442A1DD  AIIMS New Delhi, tax deductor  SQL=False stdnum=False
++PASS 07DELG00001B1DM  G.B. Pant Hospital, tax deductor  SQL=False stdnum=False
++PASS 37HYDR05893G1DJ  Government General Hospital Ongole, tax deductor  SQL=False stdnum=False
++PASS 19CALA25755C1D3  AIIMS Kalyani, tax deductor  SQL=False stdnum=False
++PASS 22AACAA7875J1DV  AIIMS Raipur, tax deductor (PAN-based, D in place of Z)  SQL=False stdnum=False
++PASS 07DELD20333F1D7  Dr B.R.A. Institute Rotary Cancer Hospital, tax deductor  SQL=False stdnum=False
++
++== 4. Every single substitution and adjacent transposition of the real valid GSTINs
++PASS 7511 mutants: SQL and stdnum agree on 7511
++     mutants accepted: SQL 0, stdnum 0 (single substitutions of the check-protected part are always caught by Luhn mod 36)
++PASS no single-character substitution of a real GSTIN is accepted (0 found)
++
++== 5. 20,000 random well-formed candidates with a random check character
++PASS 20000 candidates: SQL and stdnum agree on 20000; 564 valid (about 1 in 36 expected: 555)
++
++== 6. Deliberate differences from stdnum
++PASS 38AAPFU0939F1ZS state 38 (Ladakh, assigned after stdnum's table): SQL=True stdnum=False
++PASS 27AAPKU0939F1ZK PAN holder K (not in the Income Tax Department list): SQL=False stdnum=True
++PASS 37aahaa4036g1zy lower case: SQL=False (the API must upper-case input first); stdnum=True (normalises)
++
++32/32 checks passed
+diff --git a/apps/api/prisma/proposed/20261117200000_tax_configuration/validation/gstin_verification.py b/apps/api/prisma/proposed/20261117200000_tax_configuration/validation/gstin_verification.py
+new file mode 100644
+index 0000000..cf723bf
+--- /dev/null
++++ b/apps/api/prisma/proposed/20261117200000_tax_configuration/validation/gstin_verification.py
+@@ -0,0 +1,138 @@
++"""Independent verification of medcore_gstin_valid() (M-11a revision 2).
++
++Compares the SQL function with python-stdnum 2.2 (stdnum.in_.gstin, an independent implementation:
++generic Luhn mod-N over all 15 characters) on:
++  1. real GSTINs taken from published documents (primary sources first);
++  2. stdnum's own documented test numbers;
++  3. real registrations of other types (tax deductor), which a hospital does not invoice under;
++  4. every single-character substitution and adjacent transposition of each real valid GSTIN;
++  5. 20,000 random well-formed candidates with a random check character.
++Known, deliberate differences (state code 38, PAN holder type K) are reported separately.
++"""
++import random
++import subprocess
++import sys
++
++from stdnum.in_ import gstin as sd
++
++DB = sys.argv[1] if len(sys.argv) > 1 else "m11a"
++ALPHABET = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ"
++
++
++def sql_valid(numbers):
++    out = {}
++    for i in range(0, len(numbers), 2000):
++        chunk = numbers[i:i + 2000]
++        values = ",".join(f"({j},'{n}')" for j, n in enumerate(chunk))
++        q = f"SELECT j, coalesce(medcore_gstin_valid(g), false) FROM (VALUES {values}) v(j, g) ORDER BY j"
++        r = subprocess.run(["sudo", "-u", "postgres", "psql", "-d", DB, "-Atc", q],
++                           capture_output=True, text=True, cwd="/tmp", check=True)
++        for line in r.stdout.split():
++            j, ok = line.split("|")
++            out[chunk[int(j)]] = ok == "t"
++    return out
++
++
++REAL_VALID = [
++    # (gstin, holder, source) - primary sources first
++    ("37AAHAA4036G1ZY", "AIIMS Mangalagiri", "AIIMS Mangalagiri GST registration certificate, aiimsmangalagiri.edu.in"),
++    ("24AADCB2295A1Z7", "Baroda Medicare Pvt Ltd (Sunshine Global Hospital)", "Gujarat AAR 106/2020, gstcouncil.gov.in"),
++    ("24AAQFM2633M1ZY", "M/s MJ Solanki", "Telangana AAR 04/2024 (AIIMS Bibinagar), taxmanagementindia.com / livelaw.in"),
++    ("07ADKPJ3897P1ZM", "M/s Kore Security Services", "Telangana AAR 04/2024 (AIIMS Bibinagar)"),
++    ("36AAVFP9999G1ZZ", "M/s P. Suresh & Associates", "Telangana AAR 04/2024 (AIIMS Bibinagar)"),
++    ("08AAAGA0038H1ZY", "AIIMS Jodhpur", "public GST record, knowyourgst.com"),
++    ("03AAAGA2223A1ZN", "AIIMS Bathinda", "public GST record, knowyourgst.com"),
++    ("36AAAGA2453A1Z6", "AIIMS Bibinagar", "public GST record, piceapp.com (shown in lower case)"),
++    ("18AAAGA2376L1ZB", "AIIMS Guwahati", "public GST record, piceapp.com (shown in lower case)"),
++    ("33AAACA5443N3ZN", "Apollo Hospitals Enterprise Ltd, Tamil Nadu", "public GST record, piceapp.com"),
++    ("07AAACA5443N1ZK", "Apollo Hospitals Enterprise Ltd, Delhi", "public GST record, piceapp.com"),
++    ("19AAACA5443N1ZF", "Apollo Hospitals Enterprise Ltd, West Bengal", "public GST record, piceapp.com"),
++    ("07AAATG2183J1ZO", "Gujarmal Modi Hospital", "public GST record, knowyourgst.com"),
++    ("27AAPFU0939F1ZV", "stdnum documented valid number", "python-stdnum doctest"),
++]
++STDNUM_INVALID = [("27AAPFU0939F1ZO", "check character"), ("27AAPFU0939F1AA", "14th character not Z"),
++                  ("27AAPFU0939F1Z", "length 14"), ("369296450896540", "format")]
++REAL_OTHER_TYPES = [
++    ("08JDHA08253A1D4", "AIIMS Jodhpur, tax deductor (TAN-based)"),
++    ("20RCHA03549A1DF", "AIIMS Deoghar, tax deductor"),
++    ("07DELS71442A1DD", "AIIMS New Delhi, tax deductor"),
++    ("07DELG00001B1DM", "G.B. Pant Hospital, tax deductor"),
++    ("37HYDR05893G1DJ", "Government General Hospital Ongole, tax deductor"),
++    ("19CALA25755C1D3", "AIIMS Kalyani, tax deductor"),
++    ("22AACAA7875J1DV", "AIIMS Raipur, tax deductor (PAN-based, D in place of Z)"),
++    ("07DELD20333F1D7", "Dr B.R.A. Institute Rotary Cancer Hospital, tax deductor"),
++]
++
++results = []
++
++
++def check(label, ok):
++    results.append(ok)
++    print(("PASS " if ok else "FAIL ") + label)
++
++
++print("== 1. Real GSTINs from published documents (expected valid in both)")
++s = sql_valid([g for g, _, _ in REAL_VALID])
++for g, who, src in REAL_VALID:
++    check(f"{g}  {who}  [{src}]  SQL={s[g]} stdnum={sd.is_valid(g)}", s[g] and sd.is_valid(g))
++
++print("\n== 2. stdnum's documented invalid numbers (expected invalid in both)")
++s = sql_valid([g for g, _ in STDNUM_INVALID])
++for g, why in STDNUM_INVALID:
++    check(f"{g}  ({why})  SQL={s[g]} stdnum={sd.is_valid(g)}", not s[g] and not sd.is_valid(g))
++
++print("\n== 3. Real registrations of other types (refused by design: not a supplier registration)")
++s = sql_valid([g for g, _ in REAL_OTHER_TYPES])
++for g, who in REAL_OTHER_TYPES:
++    check(f"{g}  {who}  SQL={s[g]} stdnum={sd.is_valid(g)}", not s[g])
++
++print("\n== 4. Every single substitution and adjacent transposition of the real valid GSTINs")
++mutants = set()
++for g, _, _ in REAL_VALID:
++    for i in range(15):
++        for c in ALPHABET:
++            if c != g[i]:
++                mutants.add(g[:i] + c + g[i + 1:])
++        if i < 14 and g[i] != g[i + 1]:
++            mutants.add(g[:i] + g[i + 1] + g[i] + g[i + 2:])
++mutants = sorted(mutants)
++s = sql_valid(mutants)
++agree = sum(1 for m in mutants if s[m] == sd.is_valid(m))
++sql_accepts = [m for m in mutants if s[m]]
++check(f"{len(mutants)} mutants: SQL and stdnum agree on {agree}", agree == len(mutants))
++# A mutant can only pass if it changes a position the check character does not protect in a way
++# that still forms a valid number; report how many each validator accepts.
++print(f"     mutants accepted: SQL {len(sql_accepts)}, stdnum {sum(1 for m in mutants if sd.is_valid(m))}"
++      " (single substitutions of the check-protected part are always caught by Luhn mod 36)")
++subs_in_body = [m for m in sql_accepts if sum(a != b for a, b in zip(m, next(g for g, _, _ in REAL_VALID if sum(x != y for x, y in zip(g, m)) <= 2))) == 1]
++check(f"no single-character substitution of a real GSTIN is accepted ({len(subs_in_body)} found)", not subs_in_body)
++
++print("\n== 5. 20,000 random well-formed candidates with a random check character")
++random.seed(20261118)
++STATES = [f"{i:02d}" for i in range(1, 38)]          # 01..37: the codes both validators know
++HOLDERS = "ABCFGHJLPT"                                 # the Income Tax Department list
++cands = []
++for _ in range(20000):
++    pan = ("".join(random.choice(ALPHABET[10:]) for _ in range(3)) + random.choice(HOLDERS)
++           + random.choice(ALPHABET[10:]) + f"{random.randint(1, 9999):04d}" + random.choice(ALPHABET[10:]))
++    body = random.choice(STATES) + pan + random.choice(ALPHABET[1:]) + "Z"
++    cands.append(body + random.choice(ALPHABET))
++s = sql_valid(cands)
++agree = sum(1 for c in cands if s[c] == sd.is_valid(c))
++valid_n = sum(1 for c in cands if s[c])
++check(f"{len(cands)} candidates: SQL and stdnum agree on {agree}; {valid_n} valid (about 1 in 36 expected: {len(cands) // 36})",
++      agree == len(cands))
++
++print("\n== 6. Deliberate differences from stdnum")
++from stdnum import luhn
++ladakh = "38AAPFU0939F1Z" + luhn.calc_check_digit("38AAPFU0939F1Z", ALPHABET)
++k_type = "27AAPKU0939F1Z" + luhn.calc_check_digit("27AAPKU0939F1Z", ALPHABET)
++s = sql_valid([ladakh, k_type])
++check(f"{ladakh} state 38 (Ladakh, assigned after stdnum's table): SQL={s[ladakh]} stdnum={sd.is_valid(ladakh)}", s[ladakh])
++check(f"{k_type} PAN holder K (not in the Income Tax Department list): SQL={s[k_type]} stdnum={sd.is_valid(k_type)}", not s[k_type])
++low = REAL_VALID[0][0].lower()
++s = sql_valid([low])
++check(f"{low} lower case: SQL={s[low]} (the API must upper-case input first); stdnum={sd.is_valid(low)} (normalises)", not s[low])
++
++print(f"\n{sum(results)}/{len(results)} checks passed")
++sys.exit(0 if all(results) else 1)
+diff --git a/apps/api/prisma/proposed/20261117200000_tax_configuration/validation/lock_nowait_tests.sh b/apps/api/prisma/proposed/20261117200000_tax_configuration/validation/lock_nowait_tests.sh
+new file mode 100644
+index 0000000..2543a92
+--- /dev/null
++++ b/apps/api/prisma/proposed/20261117200000_tax_configuration/validation/lock_nowait_tests.sh
+@@ -0,0 +1,20 @@
++#!/bin/bash
++# Rehearses T-MIG-TAX-011 in SQL: run against a database built from the given migration file.
++# Expected with revision 3: both writer locks present (NOWAIT refused) and the FK insert not blocked.
++H=/home/claude/m11a; MIG=${1:-$H/migration.sql}; DB=m11a_nw
++A=aaaaaaaa-0000-0000-0000-000000000001; UA=aaaaaaaa-0000-0000-0000-0000000000a1
++C=11111111-0000-0000-0000-000000000002; V=33333333-0000-0000-0000-000000000001
++q() { (cd /tmp; sudo -u postgres psql -X -q -d $DB "$@" 2>&1); }
++$H/rebuild.sh $DB && (cd /tmp; sudo -u postgres psql -v ON_ERROR_STOP=1 -q -d $DB -c "$(cat $MIG)")
++q -c "INSERT INTO tax_classifications (id,\"hospitalId\",name,\"supplyType\",\"hsnSac\",\"createdById\",\"updatedAt\") VALUES ('$C','$A','Medicaments','GOODS','3004','$UA',now());
++      INSERT INTO tax_classification_versions (id,\"hospitalId\",\"classificationId\",treatment,\"ratePercent\",\"priceIncludesTax\",\"effectiveFrom\",\"createdById\") VALUES ('$V','$A','$C','TAXABLE',12,true,current_date + 30,'$UA');" >/dev/null
++hold() { ( (echo "BEGIN; $1"; sleep 3; echo "ROLLBACK;") | (cd /tmp; sudo -u postgres psql -X -q -d $DB) >/dev/null 2>&1 ) & sleep 1; }
++hold "UPDATE tax_classification_versions SET \"ratePercent\" = 5 WHERE id='$V';"
++echo "version writer open -> FOR SHARE NOWAIT on classification: $(q -Atc "SELECT 1 FROM tax_classifications WHERE id='$C' FOR SHARE NOWAIT" | head -1)"
++echo "                    -> FOR SHARE NOWAIT on hospital: $(q -Atc "SELECT 1 FROM hospitals WHERE id='$A' FOR SHARE NOWAIT" | head -1)"
++echo "                    -> plain read of the rate: $(q -Atc "SELECT \"ratePercent\" FROM tax_classification_versions WHERE id='$V'")"
++wait
++hold "INSERT INTO hospital_gst_registrations (id,\"hospitalId\",\"registrationType\",\"effectiveFrom\",\"attestedById\") VALUES (gen_random_uuid(),'$A','UNREGISTERED',current_date + 30,'$UA');"
++echo "registration writer open -> FOR SHARE NOWAIT on hospital: $(q -Atc "SELECT 1 FROM hospitals WHERE id='$A' FOR SHARE NOWAIT" | head -1)"
++echo "                         -> department insert (FK check): $(q -c "INSERT INTO departments (id,\"hospitalId\",name,\"updatedAt\") VALUES (gen_random_uuid(),'$A','Cardiology',now())" -c "SET lock_timeout='1s'" ; echo done)"
++wait
+diff --git a/apps/api/prisma/proposed/20261117200000_tax_configuration/validation/results-rev3.txt b/apps/api/prisma/proposed/20261117200000_tax_configuration/validation/results-rev3.txt
+new file mode 100644
+index 0000000..842bfaf
+--- /dev/null
++++ b/apps/api/prisma/proposed/20261117200000_tax_configuration/validation/results-rev3.txt
+@@ -0,0 +1,283 @@
++M-11a revision 3 validation, PostgreSQL 16.15
++started 2026-11-18 23:14:28 IST; migration.sql md5 ada51b5f23da889a358af8356533c06b; rollback.sql md5 40d796cc681eae9565f2ef2506ba8b32; schema.prisma md5 2c5e81a5f193ecee252b72798446303f
++
++######## concurrency_tests.sh (real clock)
++PASS RC: version first, then time-zone change: change waits, then is refused
++     session 1: committed
++     session 2 (waited 2.05s): ERROR:  The time zone of a hospital with tax versions or GST registrations cannot change
++     final: timezone|locked|versions = Asia/Kolkata|t|1 (expected Asia/Kolkata|t|1)
++PASS RC: time-zone change first, then version: version waits, then uses the new zone and locks it
++     session 1: committed
++     session 2 (waited 2.05s): committed
++     final: timezone|locked|versions = America/Los_Angeles|t|1 (expected America/Los_Angeles|t|1)
++PASS RR: version first, then time-zone change: change fails, zone unchanged
++     session 1: committed
++     session 2 (waited 2.05s): ERROR:  could not serialize access due to concurrent update
++     final: timezone|locked|versions = Asia/Kolkata|t|1 (expected Asia/Kolkata|t|1)
++PASS RR: time-zone change first, then version: version fails with a serialization error
++     session 1: committed
++     session 2 (waited 2.04s): ERROR:  could not serialize access due to concurrent update
++     final: timezone|locked|versions = America/Los_Angeles|f|0 (expected America/Los_Angeles|f|0)
++PASS RC: registration first, then time-zone change: change refused
++     session 1: committed
++     session 2 (waited 2.05s): ERROR:  The time zone of a hospital with tax versions or GST registrations cannot change
++     final: timezone|locked|versions = Asia/Kolkata|t|0 (expected Asia/Kolkata|t|0)
++PASS SERIALIZABLE: version first, then time-zone change: change fails, zone unchanged
++     session 1: committed
++     session 2 (waited 2.07s): ERROR:  could not serialize access due to concurrent update
++     final: timezone|locked|versions = Asia/Kolkata|t|1 (expected Asia/Kolkata|t|1)
++
++######## existing rows and migration application (fresh scratch database m11a)
++applied as one multi-statement query: ok
++PASS existing rows identical by hash before and after (new columns excluded): e07f3e84f4b4667de499360943dfb7d7
++applied migrations used: 8 (last 20261117100000_prescription_events)
++object counts: 51 tables, 53 triggers, 3 exclusions
++
++######## behaviour_tests.py
++PASS classification: service with SAC 9993
++PASS classification: goods with HSN 30049099
++PASS classification: service code must start with 99
++PASS classification: goods code must not start with 99
++PASS classification: code of 5 digits refused
++PASS classification: blank name refused
++PASS classification: duplicate name in one hospital refused
++PASS classification: same name in another hospital allowed
++PASS classification: creator from another hospital refused
++PASS classification: rename allowed
++PASS classification: code change refused
++PASS classification: supply type change refused
++PASS classification: move to another hospital refused
++PASS classification: delete refused
++PASS version: taxable 5% price-inclusive from today
++PASS version: nil-rated 0% from today
++PASS version: exempt with a rate refused
++PASS version: taxable at 0% refused
++PASS version: taxable above 40% refused
++PASS version: exempt with tax inside the price refused
++PASS version: backdated start refused
++PASS version: two versions on one date refused
++PASS version: in force today cannot be edited
++PASS version: in force today cannot be deleted
++PASS version: future version can be edited
++PASS version: future version cannot be moved into the past
++PASS version: future version cannot change classification
++PASS version: future version can be deleted
++PASS clock: tomorrow's version can still be edited at 23:45
++PASS clock: tomorrow's version is frozen from 23:50 (10-minute margin)
++PASS clock: an edit made at 23:45 is refused when the commit lands after midnight
++PASS clock: a delete made at 23:45 is refused when the commit lands after midnight
++PASS clock: a version started 'today' at 23:40 is refused when the commit lands tomorrow (backdating)
++PASS clock: the same insert committing before 23:50 is accepted
++PASS clock: from 23:50 a first version must start tomorrow
++PASS clock: a second version cannot start today once one is in force
++PASS clock: a second version cannot start today once an earlier one is in force
++PASS clock: a second version can start tomorrow
++PASS clock: a future version cannot be moved to today
++PASS clock: a future version inserted and deleted in one transaction is not judged as an insert at commit
++PASS clock: a version in force cannot be deleted even in the transaction that inserted it
++PASS version: classification of another hospital refused
++PASS lab test: service classification accepted
++PASS lab test: goods classification refused
++PASS lab test: another hospital's classification refused
++PASS lab test: inactive classification refused
++PASS lab test: Phase 6 price update unaffected
++PASS medicine: goods classification accepted
++PASS medicine: service classification refused
++PASS medicine: Phase 7 reorder update unaffected
++PASS medicine: classification can be cleared
++PASS room: NICU critical-care unit accepted
++PASS room: unknown critical-care unit refused
++PASS classification: referenced by a lab test cannot be deleted
++PASS default: consultation with a service classification
++PASS default: pharmacy kind refused
++PASS default: goods classification refused
++PASS default: another hospital's classification refused
++PASS default: second default for the same kind refused
++PASS default: can point at another classification
++PASS default: cannot be removed
++PASS default: its classification cannot be deactivated
++PASS confirmation: by the hospital's own admin
++PASS confirmation: by another hospital's user refused
++PASS confirmation: time without a user refused
++PASS registration: regular with a valid GSTIN
++PASS registration: unregistered without details
++PASS registration: unregistered with a GSTIN refused
++PASS registration: wrong check character refused
++PASS registration: lower case refused
++PASS registration: state code 39 refused even with a valid check character
++PASS registration: state code 00 refused
++PASS registration: chosen state differs from the GSTIN refused
++PASS registration: missing legal name refused
++PASS registration: malformed PAN refused
++PASS registration: PAN holder type X refused (fourth PAN letter)
++PASS registration: PAN sequence 0000 refused
++PASS registration: tax deductor format (D in place of Z) refused
++PASS registration: backdated refused
++PASS registration: never edited
++PASS registration: in force cannot be deleted
++PASS registration: future one can be deleted
++PASS registration: two starting today refused
++PASS registration: two on one future date refused
++PASS registration: same GSTIN later in the same hospital (composition to regular)
++PASS registration: started 'today' at 23:40, refused when the commit lands tomorrow
++PASS registration: a future one deleted at 23:45 is refused when the commit lands after midnight
++PASS registration: tomorrow's one is frozen from 23:50
++PASS registration: a second one cannot start today once one is in force
++PASS registration: a second one can start tomorrow
++PASS registration: Q1g A, same GSTIN in another hospital refused
++PASS registration: Q1g A holds even for a future row
++PASS registration: different GSTINs in two hospitals
++PASS registration: attested by another hospital's user refused
++PASS timezone: can change while the hospital has no tax versions or registrations
++PASS timezone: a classification alone does not fix it
++PASS timezone: the first version stamps the lock
++PASS timezone: cannot change once a version exists
++PASS timezone: cannot change once a registration exists
++PASS timezone: stays fixed after the only (future) version is deleted
++PASS timezone: the lock cannot be cleared
++PASS timezone: writing the same zone again is allowed
++PASS timezone: other hospital settings still change
++PASS timezone: another hospital is unaffected
++PASS timezone: a hospital locked in Kolkata cannot move west to reopen today's version
++PASS real clock: the production clock path accepts a version from the hospital's real today
++PASS real clock: and refuses yesterday
++PASS room rule: seeded row is the 18 July 2022 rule
++PASS room rule: cannot be edited
++PASS room rule: cannot be deleted
++PASS room rule: bad SAC refused
++PASS hospitals: ordinary update unaffected
++PASS hospitals: delete still refused by existing foreign keys
++
++113/113 passed
++
++######## conform.js (proposed schema.prisma vs migrated database)
++198/198 checks match
++
++######## gstin_verification.py
++== 1. Real GSTINs from published documents (expected valid in both)
++PASS 37AAHAA4036G1ZY  AIIMS Mangalagiri  [AIIMS Mangalagiri GST registration certificate, aiimsmangalagiri.edu.in]  SQL=True stdnum=True
++PASS 24AADCB2295A1Z7  Baroda Medicare Pvt Ltd (Sunshine Global Hospital)  [Gujarat AAR 106/2020, gstcouncil.gov.in]  SQL=True stdnum=True
++PASS 24AAQFM2633M1ZY  M/s MJ Solanki  [Telangana AAR 04/2024 (AIIMS Bibinagar), taxmanagementindia.com / livelaw.in]  SQL=True stdnum=True
++PASS 07ADKPJ3897P1ZM  M/s Kore Security Services  [Telangana AAR 04/2024 (AIIMS Bibinagar)]  SQL=True stdnum=True
++PASS 36AAVFP9999G1ZZ  M/s P. Suresh & Associates  [Telangana AAR 04/2024 (AIIMS Bibinagar)]  SQL=True stdnum=True
++PASS 08AAAGA0038H1ZY  AIIMS Jodhpur  [public GST record, knowyourgst.com]  SQL=True stdnum=True
++PASS 03AAAGA2223A1ZN  AIIMS Bathinda  [public GST record, knowyourgst.com]  SQL=True stdnum=True
++PASS 36AAAGA2453A1Z6  AIIMS Bibinagar  [public GST record, piceapp.com (shown in lower case)]  SQL=True stdnum=True
++PASS 18AAAGA2376L1ZB  AIIMS Guwahati  [public GST record, piceapp.com (shown in lower case)]  SQL=True stdnum=True
++PASS 33AAACA5443N3ZN  Apollo Hospitals Enterprise Ltd, Tamil Nadu  [public GST record, piceapp.com]  SQL=True stdnum=True
++PASS 07AAACA5443N1ZK  Apollo Hospitals Enterprise Ltd, Delhi  [public GST record, piceapp.com]  SQL=True stdnum=True
++PASS 19AAACA5443N1ZF  Apollo Hospitals Enterprise Ltd, West Bengal  [public GST record, piceapp.com]  SQL=True stdnum=True
++PASS 07AAATG2183J1ZO  Gujarmal Modi Hospital  [public GST record, knowyourgst.com]  SQL=True stdnum=True
++PASS 27AAPFU0939F1ZV  stdnum documented valid number  [python-stdnum doctest]  SQL=True stdnum=True
++
++== 2. stdnum's documented invalid numbers (expected invalid in both)
++PASS 27AAPFU0939F1ZO  (check character)  SQL=False stdnum=False
++PASS 27AAPFU0939F1AA  (14th character not Z)  SQL=False stdnum=False
++PASS 27AAPFU0939F1Z  (length 14)  SQL=False stdnum=False
++PASS 369296450896540  (format)  SQL=False stdnum=False
++
++== 3. Real registrations of other types (refused by design: not a supplier registration)
++PASS 08JDHA08253A1D4  AIIMS Jodhpur, tax deductor (TAN-based)  SQL=False stdnum=False
++PASS 20RCHA03549A1DF  AIIMS Deoghar, tax deductor  SQL=False stdnum=False
++PASS 07DELS71442A1DD  AIIMS New Delhi, tax deductor  SQL=False stdnum=False
++PASS 07DELG00001B1DM  G.B. Pant Hospital, tax deductor  SQL=False stdnum=False
++PASS 37HYDR05893G1DJ  Government General Hospital Ongole, tax deductor  SQL=False stdnum=False
++PASS 19CALA25755C1D3  AIIMS Kalyani, tax deductor  SQL=False stdnum=False
++PASS 22AACAA7875J1DV  AIIMS Raipur, tax deductor (PAN-based, D in place of Z)  SQL=False stdnum=False
++PASS 07DELD20333F1D7  Dr B.R.A. Institute Rotary Cancer Hospital, tax deductor  SQL=False stdnum=False
++
++== 4. Every single substitution and adjacent transposition of the real valid GSTINs
++PASS 7511 mutants: SQL and stdnum agree on 7511
++     mutants accepted: SQL 0, stdnum 0 (single substitutions of the check-protected part are always caught by Luhn mod 36)
++PASS no single-character substitution of a real GSTIN is accepted (0 found)
++
++== 5. 20,000 random well-formed candidates with a random check character
++PASS 20000 candidates: SQL and stdnum agree on 20000; 564 valid (about 1 in 36 expected: 555)
++
++== 6. Deliberate differences from stdnum
++PASS 38AAPFU0939F1ZS state 38 (Ladakh, assigned after stdnum's table): SQL=True stdnum=False
++PASS 27AAPKU0939F1ZK PAN holder K (not in the Income Tax Department list): SQL=False stdnum=True
++PASS 37aahaa4036g1zy lower case: SQL=False (the API must upper-case input first); stdnum=True (normalises)
++
++32/32 checks passed
++
++######## commit_tests.sh
++== Edit at 23:45, COMMIT at 00:01 the next day
++ statement accepted at 23:45
++ERROR:  A tax classification version in force from 2026-11-19 cannot change (tax date 2026-11-19); add a new version instead
++PASS refused at COMMIT; rate still 12.00
++== Edit at 23:45, COMMIT at 23:46
++PASS committed; rate now 5.00
++== Insert a first registration effective 18 Nov at 23:40, COMMIT at 00:01
++ERROR:  A GST registration cannot be backdated: it cannot start before 2026-11-19 (the hospital's tax date)
++PASS refused at COMMIT; no registration stored
++
++######## rollback_checks.sh
++ERROR:  division by zero
++PASS atomic: schema and data identical after an injected failure
++ERROR:  type "TaxSupplyType" already exists
++PASS re-apply refused, nothing changed
++PASS reversal: schema and data identical to before M-11a, migration record removed
++ERROR:  M-11a rollback refused: tax configuration or statutory rules exist and would be lost
++PASS reversal refused with configuration present, nothing changed
++ERROR:  M-11a rollback refused: tax configuration or statutory rules exist and would be lost
++PASS reversal refused with a later statutory rule; both rules kept
++ERROR:  M-11a rollback refused: tax configuration or statutory rules exist and would be lost
++PASS reversal refused when the seed row differs from M-11a's
++ERROR:  M-11a rollback refused: tax configuration or statutory rules exist and would be lost
++PASS lock alone does not block; reversal restores the exact prior schema and data
++
++######## timing_tests.sh (commit stall, SET CONSTRAINTS bypass, timeouts, lock order)
++== 1. A commit stalled after its commit-time check (synchronous replication to a missing standby)
++     writer, after passing its commit-time check: wait_event = SyncRep for 7s so far (no limit applies)
++     reader without locks during the stall saw rate 12.00 (the old value: the commit was not yet visible)
++     locking reader during the stall: Lock/transactionid
++     writer when the wait was cancelled: already committed locally
++     locking reader then read: 5.00
++PASS a commit became visible 7+ s after its check; the unlocked read saw the old value; the locked read waited for the final value
++PASS synchronous_standby_names restored
++== 2. SET CONSTRAINTS ALL IMMEDIATE moves the commit-time check earlier (simulated clock)
++     commit at a simulated 00:30 after an immediate check at 23:45: no error; rate now 5.00
++PASS the bypass is real: the version took effect at midnight but its edit committed at 00:30
++== 3. ... but a locking reader still waits for the final value (bypass plus a client idle in transaction)
++     locking reader waited 3s and read 5.00
++PASS locking reader saw only the writer's final committed value
++== 4. idle_in_transaction_session_timeout ends a client idling after its immediate check
++     session: terminating connection due to idle-in-transaction timeout
++PASS idle session terminated; its edit rolled back (rate 12.00)
++     SHOW transaction_timeout on PostgreSQL 16.15 (Ubuntu 16.15-0ubuntu0.24.04.1): ERROR:  unrecognized configuration parameter "transaction_timeout"
++PASS no total transaction timeout in PostgreSQL 16 (transaction_timeout arrives in 17)
++== 5. The registration lock (FOR NO KEY UPDATE on the hospital) does not block foreign-key checks
++     department insert for the same hospital during the registration write: ok after .053s
++PASS foreign-key inserts are not delayed by the registration lock
++== 6. Lock order: a first version (stamps the hospital) and a locking reader do not deadlock
++PASS no deadlock; the version committed after the reader
++== 7. A new version inserted by a writer that is slow to commit: the locking reader waits and resolves it
++     version in force on day +25 as resolved by the locking reader after waiting 3s: NIL_RATED
++PASS the reader waited and resolved the newly committed version
++== 8. Control: the same slow writer with the writer locks removed (revision 2): the reader does not wait
++     without writer locks: reader waited 0s and read 12.00 while the writer was still open
++PASS without the writer locks the reader reads a value about to change (the gap revision 3 closes)
++== 9. One transaction edits a version and then adds a registration, against a locking reader
++     writer: committed; reader: 5.00
++PASS no deadlock: every writer takes the hospital row first; the reader saw the final value
++
++######## lock_nowait_tests.sh (SQL rehearsal of T-MIG-TAX-011) - revision 3
++version writer open -> FOR SHARE NOWAIT on classification: ERROR:  could not obtain lock on row in relation "tax_classifications"
++                    -> FOR SHARE NOWAIT on hospital: ERROR:  could not obtain lock on row in relation "hospitals"
++                    -> plain read of the rate: 12.00
++registration writer open -> FOR SHARE NOWAIT on hospital: ERROR:  could not obtain lock on row in relation "hospitals"
++                         -> department insert (FK check): done
++
++######## lock_nowait_tests.sh - control: writer locks removed
++version writer open -> FOR SHARE NOWAIT on classification: 1
++                    -> FOR SHARE NOWAIT on hospital: 1
++                    -> plain read of the rate: 12.00
++registration writer open -> FOR SHARE NOWAIT on hospital: 1
++                         -> department insert (FK check): done
++
++######## summary
++PASS lines: 173; FAIL lines: 0
++behaviour 113/113 passed; conformance 198/198 checks match; GSTIN 32/32 checks passed
++synchronous_standby_names after the run: ''
++finished 2026-11-18 23:16:18 IST
+diff --git a/apps/api/prisma/proposed/20261117200000_tax_configuration/validation/run_all.sh b/apps/api/prisma/proposed/20261117200000_tax_configuration/validation/run_all.sh
+new file mode 100644
+index 0000000..dfcab15
+--- /dev/null
++++ b/apps/api/prisma/proposed/20261117200000_tax_configuration/validation/run_all.sh
+@@ -0,0 +1,29 @@
++#!/bin/bash
++# Full M-11a validation run; writes results-rev3.txt. Concurrency races use the real clock: run before 23:50 IST.
++cd /home/claude/m11a; L=/home/claude/m11a/results-rev3.txt; : > $L
++log() { echo "$@" | tee -a $L; }
++run() { log ""; log "######## $1"; shift; "$@" 2>&1 | tee -a $L > /dev/null; }
++P=/mnt/user-data/uploads/MedCore-HMS/apps/api/prisma/migrations
++log "M-11a revision 3 validation, PostgreSQL $(cd /tmp; sudo -u postgres psql -Atc 'SHOW server_version' -d postgres | cut -d' ' -f1)"
++log "started $(TZ=Asia/Kolkata date '+%Y-%m-%d %H:%M:%S IST'); migration.sql md5 $(md5sum migration.sql | cut -d' ' -f1); rollback.sql md5 $(md5sum rollback.sql | cut -d' ' -f1); schema.prisma md5 $(md5sum prisma/schema.prisma | cut -d' ' -f1)"
++run "concurrency_tests.sh (real clock)" ./concurrency_tests.sh
++log ""; log "######## existing rows and migration application (fresh scratch database m11a)"
++./rebuild.sh m11a; B=$(cd /tmp; sudo -u postgres psql -d m11a -Atf /home/claude/m11a/dataq_old.sql | md5sum)
++(cd /tmp; sudo -u postgres psql -v ON_ERROR_STOP=1 -q -d m11a -c "$(cat /home/claude/m11a/migration.sql)") && log "applied as one multi-statement query: ok"
++A=$(cd /tmp; sudo -u postgres psql -d m11a -Atf /home/claude/m11a/dataq_old.sql | md5sum)
++[ "$B" = "$A" ] && log "PASS existing rows identical by hash before and after (new columns excluded): ${A%% *}" || log "FAIL existing rows changed"
++log "applied migrations used: $(ls $P | grep -c '^2') (last $(ls $P | grep '^2' | sort | tail -1))"
++log "object counts: $(cd /tmp; sudo -u postgres psql -d m11a -Atc "SELECT (SELECT count(*) FROM pg_tables WHERE schemaname='public' AND tablename<>'_prisma_migrations')||' tables, '||(SELECT count(*) FROM pg_trigger t JOIN pg_class c ON c.oid=t.tgrelid JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname='public' AND NOT t.tgisinternal)||' triggers, '||(SELECT count(*) FROM pg_constraint WHERE contype='x')||' exclusions'")"
++run "behaviour_tests.py" python3 behaviour_tests.py m11a
++run "conform.js (proposed schema.prisma vs migrated database)" bash -c "cp prisma/schema.prisma /tmp/prismacheck/schema.prisma && cd /tmp/prismacheck && node conform.js"
++run "gstin_verification.py" python3 gstin_verification.py m11a
++run "commit_tests.sh" ./commit_tests.sh
++run "rollback_checks.sh" ./rollback_checks.sh
++run "timing_tests.sh (commit stall, SET CONSTRAINTS bypass, timeouts, lock order)" ./timing_tests.sh
++run "lock_nowait_tests.sh (SQL rehearsal of T-MIG-TAX-011) - revision 3" ./lock_nowait_tests.sh
++run "lock_nowait_tests.sh - control: writer locks removed" ./lock_nowait_tests.sh /tmp/migration.nolock.sql
++log ""; log "######## summary"
++log "PASS lines: $(grep -c '^PASS' $L); FAIL lines: $(grep -c '^FAIL' $L)"
++log "behaviour $(grep -E '^[0-9]+/[0-9]+ passed' $L); conformance $(grep 'checks match' $L); GSTIN $(grep 'checks passed' $L)"
++log "synchronous_standby_names after the run: '$(cd /tmp; sudo -u postgres psql -Atc 'SHOW synchronous_standby_names' -d postgres)'"
++log "finished $(TZ=Asia/Kolkata date '+%Y-%m-%d %H:%M:%S IST')"
+diff --git a/apps/api/prisma/proposed/20261117200000_tax_configuration/validation/timing_tests.sh b/apps/api/prisma/proposed/20261117200000_tax_configuration/validation/timing_tests.sh
+new file mode 100644
+index 0000000..5c16724
+--- /dev/null
++++ b/apps/api/prisma/proposed/20261117200000_tax_configuration/validation/timing_tests.sh
+@@ -0,0 +1,139 @@
++#!/bin/bash
++# M-11a revision 3: how late can a commit become visible after its commit-time check, and what do the
++# row locks guarantee? Scratch PostgreSQL 16 only. Test 1 changes the cluster setting
++# synchronous_standby_names and always restores it.
++H=/home/claude/m11a
++A=aaaaaaaa-0000-0000-0000-000000000001; UA=aaaaaaaa-0000-0000-0000-0000000000a1
++C=11111111-0000-0000-0000-000000000002; V=33333333-0000-0000-0000-000000000001
++q() { local db=$1; shift; (cd /tmp; sudo -u postgres psql -X -q -d "$db" "$@" 2>&1); }
++fresh() { $H/rebuild.sh "$1" && (cd /tmp; sudo -u postgres psql -v ON_ERROR_STOP=1 -q -d "$1" -c "$(cat $H/migration.sql)"); }
++setup_version() { # classification + a version 30 days ahead (12%); the tax date stamp locks the zone
++  q "$1" -c "INSERT INTO tax_classifications (id,\"hospitalId\",name,\"supplyType\",\"hsnSac\",\"createdById\",\"updatedAt\") VALUES ('$C','$A','Medicaments','GOODS','3004','$UA',now());
++             INSERT INTO tax_classification_versions (id,\"hospitalId\",\"classificationId\",treatment,\"ratePercent\",\"priceIncludesTax\",\"effectiveFrom\",\"createdById\") VALUES ('$V','$A','$C','TAXABLE',12,true,current_date + 30,'$UA');" >/dev/null
++}
++rate() { q "$1" -Atc "SELECT \"ratePercent\" FROM tax_classification_versions WHERE id='$V'"; }
++pass() { echo "PASS $1"; }; fail() { echo "FAIL $1"; }
++
++echo "== 1. A commit stalled after its commit-time check (synchronous replication to a missing standby)"
++restore_sync() { (cd /tmp; sudo -u postgres psql -X -q -d postgres -c "ALTER SYSTEM RESET synchronous_standby_names" -c "SELECT pg_reload_conf()" >/dev/null 2>&1); }
++trap restore_sync EXIT
++DB=m11a_t1; fresh $DB; setup_version $DB
++q postgres -c "ALTER SYSTEM SET synchronous_standby_names = 'missing_standby'" -c "SELECT pg_reload_conf()" >/dev/null; sleep 1
++# The writer passes every check (statement-time and commit-time) and then waits for the standby.
++(cd /tmp; sudo -u postgres env PGAPPNAME=stalled_writer timeout 60 psql -X -q -d $DB \
++   -c "BEGIN; UPDATE tax_classification_versions SET \"ratePercent\" = 5 WHERE id='$V'; COMMIT;" > /tmp/w1.out 2>&1) &
++sleep 2
++WAIT=$(q $DB -Atc "SELECT wait_event FROM pg_stat_activity WHERE application_name = 'stalled_writer'")
++NOLOCK=$(rate $DB)
++# The locking reader ends with ROLLBACK: its own COMMIT would also wait for the missing standby.
++(cd /tmp; sudo -u postgres env PGAPPNAME=locking_reader timeout 60 psql -X -q -At -d $DB \
++   -c "BEGIN; SELECT 1 FROM hospitals WHERE id='$A' FOR SHARE; SELECT 1 FROM tax_classifications WHERE id='$C' FOR SHARE; SELECT \"ratePercent\" FROM tax_classification_versions WHERE id='$V'; ROLLBACK;" > /tmp/r1.out 2>&1) &
++sleep 5
++READER_STATE=$(q $DB -Atc "SELECT wait_event_type || '/' || wait_event FROM pg_stat_activity WHERE application_name = 'locking_reader'")
++STALL_SECONDS=$(q $DB -Atc "SELECT round(extract(epoch FROM clock_timestamp() - state_change)) FROM pg_stat_activity WHERE application_name = 'stalled_writer'")
++q $DB -Atc "SELECT pg_cancel_backend(pid) FROM pg_stat_activity WHERE application_name = 'stalled_writer'" >/dev/null
++wait
++restore_sync; trap - EXIT
++echo "     writer, after passing its commit-time check: wait_event = $WAIT for ${STALL_SECONDS}s so far (no limit applies)"
++echo "     reader without locks during the stall saw rate $NOLOCK (the old value: the commit was not yet visible)"
++echo "     locking reader during the stall: $READER_STATE"
++echo "     writer when the wait was cancelled: $(grep -m1 -o 'already committed locally' /tmp/w1.out)"
++echo "     locking reader then read: $(grep -E '^[0-9]+[.][0-9]+$' /tmp/r1.out)"
++[ "$WAIT" = "SyncRep" ] && [ "$NOLOCK" = "12.00" ] && [ "${READER_STATE%%/*}" = "Lock" ] && grep -qx "5.00" /tmp/r1.out && [ "$(rate $DB)" = "5.00" ] \
++  && pass "a commit became visible ${STALL_SECONDS}+ s after its check; the unlocked read saw the old value; the locked read waited for the final value" \
++  || fail "commit stall"
++[ -z "$(q postgres -Atc "SHOW synchronous_standby_names")" ] && pass "synchronous_standby_names restored" || fail "setting not restored"
++
++echo "== 2. SET CONSTRAINTS ALL IMMEDIATE moves the commit-time check earlier (simulated clock)"
++DB=m11a_t2; fresh $DB; setup_version $DB
++q $DB -c "CREATE OR REPLACE FUNCTION medcore_tax_clock() RETURNS timestamptz LANGUAGE sql VOLATILE AS \$\$ SELECT current_setting('medcore_test.clock')::timestamptz \$\$" >/dev/null
++q $DB -c "SET medcore_test.clock = '2026-11-18 12:00+05:30'; UPDATE hospitals SET timezone = timezone WHERE id='$A';" >/dev/null
++q $DB -c "ALTER TABLE tax_classification_versions DISABLE TRIGGER USER; UPDATE tax_classification_versions SET \"effectiveFrom\" = '2026-11-19'; ALTER TABLE tax_classification_versions ENABLE TRIGGER USER;" >/dev/null
++OUT=$(q $DB -c "BEGIN; SET LOCAL medcore_test.clock = '2026-11-18 23:45+05:30';
++                UPDATE tax_classification_versions SET \"ratePercent\" = 5 WHERE id='$V';
++                SET CONSTRAINTS ALL IMMEDIATE;
++                SET LOCAL medcore_test.clock = '2026-11-19 00:30+05:30'; COMMIT;")
++R=$(rate $DB)
++echo "     commit at a simulated 00:30 after an immediate check at 23:45: ${OUT:-no error}; rate now $R"
++[ "$R" = "5.00" ] && pass "the bypass is real: the version took effect at midnight but its edit committed at 00:30" || fail "bypass not reproduced"
++
++echo "== 3. ... but a locking reader still waits for the final value (bypass plus a client idle in transaction)"
++DB=m11a_t3; fresh $DB; setup_version $DB
++( (echo "BEGIN; UPDATE tax_classification_versions SET \"ratePercent\" = 5 WHERE id='$V'; SET CONSTRAINTS ALL IMMEDIATE;"; sleep 4; echo "COMMIT;") \
++   | (cd /tmp; sudo -u postgres psql -X -q -d $DB) > /tmp/w3.out 2>&1 ) &
++sleep 1
++T0=$(date +%s)
++R=$(q $DB -Atc "BEGIN; SELECT 1 FROM hospitals WHERE id='$A' FOR SHARE; SELECT 1 FROM tax_classifications WHERE id='$C' FOR SHARE; SELECT \"ratePercent\" FROM tax_classification_versions WHERE id='$V'; COMMIT;" | grep -E '^[0-9]+\.[0-9]+$')
++W=$(( $(date +%s) - T0 )); wait
++echo "     locking reader waited ${W}s and read $R"
++[ "$R" = "5.00" ] && [ "$W" -ge 2 ] && pass "locking reader saw only the writer's final committed value" || fail "locking reader"
++
++echo "== 4. idle_in_transaction_session_timeout ends a client idling after its immediate check"
++DB=m11a_t4; fresh $DB; setup_version $DB
++( (echo "SET idle_in_transaction_session_timeout = '2s'; BEGIN; UPDATE tax_classification_versions SET \"ratePercent\" = 5 WHERE id='$V'; SET CONSTRAINTS ALL IMMEDIATE;"; sleep 4; echo "COMMIT;") \
++   | (cd /tmp; sudo -u postgres psql -X -q -d $DB) > /tmp/w4.out 2>&1 )
++R=$(rate $DB)
++echo "     session: $(grep -m1 -o 'terminating connection due to idle-in-transaction timeout' /tmp/w4.out)"
++[ "$R" = "12.00" ] && grep -q "idle-in-transaction timeout" /tmp/w4.out && pass "idle session terminated; its edit rolled back (rate $R)" || fail "idle timeout"
++TT=$(q postgres -Atc "SHOW transaction_timeout" | head -1)
++echo "     SHOW transaction_timeout on PostgreSQL $(q postgres -Atc 'SHOW server_version'): $TT"
++echo "$TT" | grep -q "unrecognized configuration parameter" && pass "no total transaction timeout in PostgreSQL 16 (transaction_timeout arrives in 17)" || fail "transaction_timeout check"
++
++echo "== 5. The registration lock (FOR NO KEY UPDATE on the hospital) does not block foreign-key checks"
++DB=m11a_t5; fresh $DB
++(q $DB -c "BEGIN; INSERT INTO hospital_gst_registrations (id,\"hospitalId\",\"registrationType\",\"effectiveFrom\",\"attestedById\") VALUES ('44444444-0000-0000-0000-000000000001','$A','UNREGISTERED',current_date + 30,'$UA'); SELECT pg_sleep(4); COMMIT;" >/dev/null) &
++sleep 1; T0=$(date +%s.%N)
++D=$(q $DB -c "INSERT INTO departments (id,\"hospitalId\",name,\"updatedAt\") VALUES (gen_random_uuid(),'$A','Cardiology',now())" 2>&1)
++W=$(echo "$(date +%s.%N) - $T0" | bc | cut -c1-4); wait
++echo "     department insert for the same hospital during the registration write: ${D:-ok} after ${W}s"
++[ -z "$D" ] && [ "$(echo "$W < 1" | bc)" = "1" ] && pass "foreign-key inserts are not delayed by the registration lock" || fail "FK insert delayed"
++
++echo "== 6. Lock order: a first version (stamps the hospital) and a locking reader do not deadlock"
++DB=m11a_t6; fresh $DB
++q $DB -c "INSERT INTO tax_classifications (id,\"hospitalId\",name,\"supplyType\",\"hsnSac\",\"createdById\",\"updatedAt\") VALUES ('$C','$A','Medicaments','GOODS','3004','$UA',now());" >/dev/null
++(q $DB -c "BEGIN; SELECT 1 FROM hospitals WHERE id='$A' FOR SHARE; SELECT pg_sleep(2); SELECT 1 FROM tax_classifications WHERE id='$C' FOR SHARE; COMMIT;" > /tmp/r6.out) &
++sleep 0.5
++q $DB -c "INSERT INTO tax_classification_versions (id,\"hospitalId\",\"classificationId\",treatment,\"ratePercent\",\"priceIncludesTax\",\"effectiveFrom\",\"createdById\") VALUES ('$V','$A','$C','TAXABLE',5,true,current_date + 30,'$UA');" > /tmp/w6.out
++wait
++if grep -q deadlock /tmp/r6.out /tmp/w6.out; then fail "deadlock"; else
++  [ "$(q $DB -Atc "SELECT count(*) FROM tax_classification_versions")" = "1" ] && pass "no deadlock; the version committed after the reader" || fail "version missing"; fi
++
++echo "== 7. A new version inserted by a writer that is slow to commit: the locking reader waits and resolves it"
++DB=m11a_t7; fresh $DB; setup_version $DB
++( (echo "BEGIN; INSERT INTO tax_classification_versions (id,\"hospitalId\",\"classificationId\",treatment,\"ratePercent\",\"priceIncludesTax\",\"effectiveFrom\",\"createdById\") VALUES ('33333333-0000-0000-0000-000000000002','$A','$C','NIL_RATED',0,false,current_date + 20,'$UA');"; sleep 4; echo "COMMIT;") \
++   | (cd /tmp; sudo -u postgres psql -X -q -d $DB) > /tmp/w7.out 2>&1 ) &
++sleep 1; T0=$(date +%s)
++R=$(q $DB -Atc "BEGIN; SELECT 1 FROM hospitals WHERE id='$A' FOR SHARE; SELECT 1 FROM tax_classifications WHERE id='$C' FOR SHARE;
++     SELECT treatment FROM tax_classification_versions WHERE \"classificationId\"='$C' AND \"effectiveFrom\" <= current_date + 25 ORDER BY \"effectiveFrom\" DESC LIMIT 1; COMMIT;" | grep -E '^[A-Z_]+$')
++W=$(( $(date +%s) - T0 )); wait
++echo "     version in force on day +25 as resolved by the locking reader after waiting ${W}s: $R"
++[ "$R" = "NIL_RATED" ] && [ "$W" -ge 2 ] && pass "the reader waited and resolved the newly committed version" || fail "insert visibility"
++
++echo "== 8. Control: the same slow writer with the writer locks removed (revision 2): the reader does not wait"
++DB=m11a_t8
++# The control is this migration with its two writer-lock blocks removed (exactly revision 2's behaviour).
++python3 - "$H/migration.sql" > /tmp/migration.nolock.sql <<'PY'
++import re, sys
++s = open(sys.argv[1]).read()
++s2, n = re.subn(r"  IF TG_WHEN = 'BEFORE' THEN\n(    --[^\n]*\n)?    PERFORM 1 FROM (tax_classifications|hospitals)\n.*?FOR NO KEY UPDATE;\n  END IF;\n", "", s, flags=re.S)
++assert n == 2, n
++sys.stdout.write(s2)
++PY
++$H/rebuild.sh $DB && (cd /tmp; sudo -u postgres psql -v ON_ERROR_STOP=1 -q -d $DB -c "$(cat /tmp/migration.nolock.sql)"); setup_version $DB
++( (echo "BEGIN; UPDATE tax_classification_versions SET \"ratePercent\" = 5 WHERE id='$V';"; sleep 4; echo "COMMIT;") \
++   | (cd /tmp; sudo -u postgres psql -X -q -d $DB) > /tmp/w8.out 2>&1 ) &
++sleep 1; T0=$(date +%s)
++R=$(q $DB -Atc "BEGIN; SELECT 1 FROM hospitals WHERE id='$A' FOR SHARE; SELECT 1 FROM tax_classifications WHERE id='$C' FOR SHARE; SELECT \"ratePercent\" FROM tax_classification_versions WHERE id='$V'; COMMIT;" | grep -E '^[0-9]+[.][0-9]+$')
++W=$(( $(date +%s) - T0 )); wait
++echo "     without writer locks: reader waited ${W}s and read $R while the writer was still open"
++[ "$R" = "12.00" ] && [ "$W" -lt 2 ] && pass "without the writer locks the reader reads a value about to change (the gap revision 3 closes)" || fail "control"
++
++echo "== 9. One transaction edits a version and then adds a registration, against a locking reader"
++DB=m11a_t9; fresh $DB; setup_version $DB
++( (echo "BEGIN; UPDATE tax_classification_versions SET \"ratePercent\" = 5 WHERE id='$V';"; sleep 2; echo "INSERT INTO hospital_gst_registrations (id,\"hospitalId\",\"registrationType\",\"effectiveFrom\",\"attestedById\") VALUES (gen_random_uuid(),'$A','UNREGISTERED',current_date + 30,'$UA'); COMMIT;") \
++   | (cd /tmp; sudo -u postgres psql -X -q -d $DB) > /tmp/w9.out 2>&1 ) &
++sleep 1
++q $DB -Atc "BEGIN; SELECT 1 FROM hospitals WHERE id='$A' FOR SHARE; SELECT 1 FROM tax_classifications WHERE id='$C' FOR SHARE; SELECT \"ratePercent\" FROM tax_classification_versions WHERE id='$V'; COMMIT;" > /tmp/r9.out
++wait
++echo "     writer: $(grep -m1 ERROR /tmp/w9.out || echo committed); reader: $(grep -m1 ERROR /tmp/r9.out || grep -E '^[0-9]+[.][0-9]+$' /tmp/r9.out)"
++! grep -q ERROR /tmp/w9.out /tmp/r9.out && grep -qx "5.00" /tmp/r9.out && pass "no deadlock: every writer takes the hospital row first; the reader saw the final value" || fail "mixed writer"

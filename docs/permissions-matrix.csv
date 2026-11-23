@@ -1,0 +1,172 @@
+method,path,SUPER_ADMIN,HOSPITAL_ADMIN,DOCTOR,NURSE,RECEPTIONIST,LAB_TECHNICIAN,PHARMACIST,ACCOUNTANT,PATIENT,notes
+GET,/api/health,PUBLIC,PUBLIC,PUBLIC,PUBLIC,PUBLIC,PUBLIC,PUBLIC,PUBLIC,PUBLIC,Service health (SCOPE-001)
+GET,/api/auth/csrf,PUBLIC,PUBLIC,PUBLIC,PUBLIC,PUBLIC,PUBLIC,PUBLIC,PUBLIC,PUBLIC,Issues the CSRF cookie (DEC-028)
+POST,/api/auth/register,PUBLIC,PUBLIC,PUBLIC,PUBLIC,PUBLIC,PUBLIC,PUBLIC,PUBLIC,PUBLIC,Patient self-registration (AUTH-001)
+POST,/api/auth/verify-email,PUBLIC,PUBLIC,PUBLIC,PUBLIC,PUBLIC,PUBLIC,PUBLIC,PUBLIC,PUBLIC,AUTH-006
+POST,/api/auth/verify-email/resend,PUBLIC,PUBLIC,PUBLIC,PUBLIC,PUBLIC,PUBLIC,PUBLIC,PUBLIC,PUBLIC,DEC-028
+POST,/api/auth/verify-phone/send,ALLOW,ALLOW,ALLOW,ALLOW,ALLOW,ALLOW,ALLOW,ALLOW,ALLOW,Own phone only (AUTH-007)
+POST,/api/auth/verify-phone,ALLOW,ALLOW,ALLOW,ALLOW,ALLOW,ALLOW,ALLOW,ALLOW,ALLOW,Own phone only (AUTH-007)
+POST,/api/auth/login,PUBLIC,PUBLIC,PUBLIC,PUBLIC,PUBLIC,PUBLIC,PUBLIC,PUBLIC,PUBLIC,AUTH-002 / API-010
+POST,/api/auth/refresh,PUBLIC,PUBLIC,PUBLIC,PUBLIC,PUBLIC,PUBLIC,PUBLIC,PUBLIC,PUBLIC,Refresh cookie (AUTH-003 / API-011)
+POST,/api/auth/logout,PUBLIC,PUBLIC,PUBLIC,PUBLIC,PUBLIC,PUBLIC,PUBLIC,PUBLIC,PUBLIC,Refresh cookie (AUTH-008)
+POST,/api/auth/forgot-password,PUBLIC,PUBLIC,PUBLIC,PUBLIC,PUBLIC,PUBLIC,PUBLIC,PUBLIC,PUBLIC,AUTH-004
+POST,/api/auth/reset-password,PUBLIC,PUBLIC,PUBLIC,PUBLIC,PUBLIC,PUBLIC,PUBLIC,PUBLIC,PUBLIC,AUTH-005
+GET,/api/auth/me,ALLOW,ALLOW,ALLOW,ALLOW,ALLOW,ALLOW,ALLOW,ALLOW,ALLOW,AUTH-009
+GET,/api/users,ALLOW,ALLOW,DENY,DENY,DENY,DENY,DENY,DENY,DENY,Hospital Admin: own hospital only
+GET,/api/users/:id,ALLOW,ALLOW,OWN,OWN,OWN,OWN,OWN,OWN,OWN,Self or Admin (API-012)
+PATCH,/api/users/:id,ALLOW,ALLOW,OWN,OWN,OWN,OWN,OWN,OWN,OWN,Self or Admin; isActive admin only
+DELETE,/api/users/:id,ALLOW,ALLOW,DENY,DENY,DENY,DENY,DENY,DENY,DENY,Soft delete
+GET,/api/dev/sms-inbox,PUBLIC,PUBLIC,PUBLIC,PUBLIC,PUBLIC,PUBLIC,PUBLIC,PUBLIC,PUBLIC,Development only; not routed in production (DEC-011)
+DELETE,/api/dev/sms-inbox,PUBLIC,PUBLIC,PUBLIC,PUBLIC,PUBLIC,PUBLIC,PUBLIC,PUBLIC,PUBLIC,Development only; not routed in production (DEC-011)
+GET,/api/hospitals,ALLOW,DENY,DENY,DENY,DENY,DENY,DENY,DENY,DENY,API-013
+POST,/api/hospitals,ALLOW,DENY,DENY,DENY,DENY,DENY,DENY,DENY,DENY,Onboarding (SCOPE-005)
+GET,/api/hospitals/:id,ALLOW,OWN,OWN,OWN,OWN,OWN,OWN,OWN,OWN,Own hospital only
+PATCH,/api/hospitals/:id,ALLOW,OWN,DENY,DENY,DENY,DENY,DENY,DENY,DENY,Profile and billing configuration
+POST,/api/hospitals/:id/verify,ALLOW,DENY,DENY,DENY,DENY,DENY,DENY,DENY,DENY,Verification
+POST,/api/hospitals/:id/suspend,ALLOW,DENY,DENY,DENY,DENY,DENY,DENY,DENY,DENY,Suspension signs out all users
+POST,/api/hospitals/:id/reactivate,ALLOW,DENY,DENY,DENY,DENY,DENY,DENY,DENY,DENY,Lift suspension
+GET,/api/hospitals/:id/departments,ALLOW,OWN,OWN,OWN,OWN,OWN,OWN,OWN,OWN,API-014
+POST,/api/hospitals/:id/departments,ALLOW,OWN,DENY,DENY,DENY,DENY,DENY,DENY,DENY,Create department
+PATCH,/api/departments/:id,ALLOW,ALLOW,DENY,DENY,DENY,DENY,DENY,DENY,DENY,Rename
+DELETE,/api/departments/:id,ALLOW,ALLOW,DENY,DENY,DENY,DENY,DENY,DENY,DENY,Unused departments only
+GET,/api/staff,DENY,ALLOW,DENY,DENY,DENY,DENY,DENY,DENY,DENY,Staff accounts
+POST,/api/staff,DENY,ALLOW,DENY,DENY,DENY,DENY,DENY,DENY,DENY,Create staff; set-password link emailed
+GET,/api/staff/:userId,DENY,ALLOW,DENY,DENY,DENY,DENY,DENY,DENY,DENY,
+PATCH,/api/staff/:userId,DENY,ALLOW,DENY,DENY,DENY,DENY,DENY,DENY,DENY,
+POST,/api/staff/:userId/invite,DENY,ALLOW,DENY,DENY,DENY,DENY,DENY,DENY,DENY,Resend set-password link
+GET,/api/doctors,ALLOW,ALLOW,ALLOW,ALLOW,ALLOW,ALLOW,ALLOW,ALLOW,ALLOW,API-015
+POST,/api/doctors,DENY,ALLOW,DENY,DENY,DENY,DENY,DENY,DENY,DENY,Create doctor
+GET,/api/doctors/me,DENY,DENY,ALLOW,DENY,DENY,DENY,DENY,DENY,DENY,The signed-in doctor
+GET,/api/doctors/:id,ALLOW,ALLOW,ALLOW,ALLOW,ALLOW,ALLOW,ALLOW,ALLOW,ALLOW,
+PATCH,/api/doctors/:id,DENY,ALLOW,OWN,DENY,DENY,DENY,DENY,DENY,DENY,Doctor: own qualification and bio
+POST,/api/doctors/:id/signature,DENY,ALLOW,OWN,DENY,DENY,DENY,DENY,DENY,DENY,PNG/JPEG, 512 KB, magic bytes
+GET,/api/doctors/:id/signature,ALLOW,ALLOW,ALLOW,DENY,DENY,DENY,ALLOW,DENY,DENY,Signature image
+GET,/api/patients,DENY,ALLOW,ALLOW,ALLOW,ALLOW,ALLOW,ALLOW,ALLOW,DENY,Demographics only
+POST,/api/patients,DENY,ALLOW,DENY,DENY,ALLOW,DENY,DENY,DENY,DENY,Reception registration
+GET,/api/patients/me,DENY,DENY,DENY,DENY,DENY,DENY,DENY,DENY,ALLOW,
+GET,/api/patients/:id,DENY,ALLOW,ALLOW,ALLOW,ALLOW,ALLOW,ALLOW,ALLOW,OWN,TEST-011
+PATCH,/api/patients/:id,DENY,ALLOW,DENY,DENY,ALLOW,DENY,DENY,DENY,DENY,
+GET,/api/rooms,DENY,ALLOW,ALLOW,ALLOW,ALLOW,DENY,DENY,ALLOW,DENY,
+GET,/api/rooms/:id,DENY,ALLOW,ALLOW,ALLOW,ALLOW,DENY,DENY,ALLOW,DENY,
+POST,/api/rooms,DENY,ALLOW,DENY,DENY,DENY,DENY,DENY,DENY,DENY,
+PATCH,/api/rooms/:id,DENY,ALLOW,DENY,DENY,DENY,DENY,DENY,DENY,DENY,
+DELETE,/api/rooms/:id,DENY,ALLOW,DENY,DENY,DENY,DENY,DENY,DENY,DENY,Rooms without beds only
+POST,/api/rooms/:id/beds,DENY,ALLOW,DENY,DENY,DENY,DENY,DENY,DENY,DENY,
+PATCH,/api/beds/:id,DENY,ALLOW,DENY,ALLOW,DENY,DENY,DENY,DENY,DENY,Nurse: status only
+DELETE,/api/beds/:id,DENY,ALLOW,DENY,DENY,DENY,DENY,DENY,DENY,DENY,Not while occupied
+GET,/api/doctors/:id/schedules,DENY,ALLOW,ALLOW,ALLOW,ALLOW,DENY,DENY,ALLOW,DENY,APPT-001
+POST,/api/doctors/:id/schedules,DENY,ALLOW,OWN,DENY,DENY,DENY,DENY,DENY,DENY,Weekly window
+PATCH,/api/schedules/:id,DENY,ALLOW,OWN,DENY,DENY,DENY,DENY,DENY,DENY,Activate or end a window
+DELETE,/api/schedules/:id,DENY,ALLOW,OWN,DENY,DENY,DENY,DENY,DENY,DENY,
+GET,/api/doctors/:id/exceptions,DENY,ALLOW,ALLOW,ALLOW,ALLOW,DENY,DENY,ALLOW,DENY,Leave, blocks, extra hours
+POST,/api/doctors/:id/exceptions,DENY,ALLOW,OWN,DENY,DENY,DENY,DENY,DENY,DENY,
+DELETE,/api/exceptions/:id,DENY,ALLOW,OWN,DENY,DENY,DENY,DENY,DENY,DENY,
+GET,/api/doctors/:id/slots,DENY,ALLOW,ALLOW,ALLOW,ALLOW,DENY,DENY,ALLOW,ALLOW,CACHE-002 (60 s)
+POST,/api/appointments,DENY,DENY,DENY,DENY,ALLOW,DENY,DENY,DENY,ALLOW,API-016; emergency by reception
+GET,/api/appointments,DENY,ALLOW,ALLOW,ALLOW,ALLOW,DENY,DENY,ALLOW,ALLOW,Patients and doctors: own only
+GET,/api/appointments/:id,DENY,ALLOW,OWN,ALLOW,ALLOW,DENY,DENY,ALLOW,OWN,
+PATCH,/api/appointments/:id/status,DENY,ALLOW,OWN,DENY,ALLOW,DENY,DENY,DENY,OWN,API-017; patient: cancel only
+POST,/api/appointments/:id/reschedule,DENY,DENY,DENY,DENY,ALLOW,DENY,DENY,DENY,OWN,
+POST,/api/medical-records,DENY,DENY,ALLOW,DENY,DENY,DENY,DENY,DENY,DENY,API-018; start consultation (EMR-001)
+GET,/api/medical-records/record/:id,DENY,DENY,ALLOW,ALLOW,DENY,DENY,DENY,DENY,OWN,View is audited
+PATCH,/api/medical-records/record/:id,DENY,DENY,OWN,DENY,DENY,DENY,DENY,DENY,DENY,Treating doctor; open records only
+POST,/api/medical-records/record/:id/entries,DENY,DENY,OWN,DENY,DENY,DENY,DENY,DENY,DENY,Notes, addenda, corrections (EMR-002)
+POST,/api/medical-records/record/:id/vitals,DENY,DENY,OWN,ALLOW,DENY,DENY,DENY,DENY,DENY,EMR-003
+POST,/api/medical-records/record/:id/diagnoses,DENY,DENY,OWN,DENY,DENY,DENY,DENY,DENY,DENY,EMR-005
+POST,/api/medical-records/record/:id/files,DENY,DENY,OWN,ALLOW,DENY,DENY,DENY,DENY,DENY,EMR-010; 20 MB
+GET,/api/medical-records/:patientId,DENY,DENY,ALLOW,ALLOW,DENY,DENY,DENY,DENY,OWN,API-019; view is audited
+GET,/api/files/:id,DENY,DENY,ALLOW,ALLOW,DENY,DENY,DENY,DENY,OWN,Record attachments
+GET,/api/patients/:patientId/history,DENY,DENY,ALLOW,ALLOW,DENY,DENY,DENY,DENY,OWN,EMR-007..009, EMR-011
+POST,/api/patients/:patientId/allergies,DENY,DENY,ALLOW,ALLOW,DENY,DENY,DENY,DENY,DENY,EMR-007
+POST,/api/patients/:patientId/medications,DENY,DENY,ALLOW,ALLOW,DENY,DENY,DENY,DENY,DENY,EMR-011
+POST,/api/patients/:patientId/vaccinations,DENY,DENY,ALLOW,ALLOW,DENY,DENY,DENY,DENY,DENY,EMR-008
+POST,/api/patients/:patientId/family-history,DENY,DENY,ALLOW,ALLOW,DENY,DENY,DENY,DENY,DENY,EMR-009
+PATCH,/api/patients/:patientId/:kind/:entryId/status,DENY,DENY,ALLOW,ALLOW,DENY,DENY,DENY,DENY,DENY,Resolved or entered in error
+GET,/api/icd10,DENY,DENY,ALLOW,ALLOW,DENY,DENY,DENY,DENY,DENY,EMR-005 code search
+GET,/api/medicines,DENY,ALLOW,ALLOW,DENY,DENY,DENY,ALLOW,DENY,DENY,API-024; RX-003 search with stock
+POST,/api/medicines,DENY,ALLOW,DENY,DENY,DENY,DENY,ALLOW,DENY,DENY,Catalogue (DEC-040 D2)
+PATCH,/api/medicines/:id,DENY,ALLOW,DENY,DENY,DENY,DENY,ALLOW,DENY,DENY,Reorder level; deactivate
+GET,/api/medicines/:id/batches,DENY,ALLOW,DENY,DENY,DENY,DENY,ALLOW,DENY,DENY,PHARM-001; FIFO order; costs shown to pharmacy and admins only
+POST,/api/medicines/:id/batches,DENY,DENY,DENY,DENY,DENY,DENY,ALLOW,DENY,DENY,Receive stock with a RECEIPT ledger entry; expired refused
+PATCH,/api/batches/:id/quarantine,DENY,DENY,DENY,DENY,DENY,DENY,ALLOW,DENY,DENY,PHARM-004; reason; quantity unchanged
+POST,/api/batches/:id/adjustments,DENY,DENY,DENY,DENY,DENY,DENY,ALLOW,DENY,DENY,Count correction with reason; never below zero
+GET,/api/pharmacy/prescriptions,DENY,DENY,DENY,DENY,DENY,DENY,ALLOW,DENY,DENY,PHARM-006 queue; own hospital only
+PATCH,/api/pharmacy/prescriptions/:id/verify,DENY,DENY,DENY,DENY,DENY,DENY,ALLOW,DENY,DENY,PHARM-006; other hospital 404
+POST,/api/pharmacy/prescriptions/:id/dispense,DENY,DENY,DENY,DENY,DENY,DENY,ALLOW,DENY,DENY,PHARM-002/004; FIFO; TEST-014
+PATCH,/api/pharmacy/prescriptions/:id/handover,DENY,DENY,DENY,DENY,DENY,DENY,ALLOW,DENY,DENY,READY_FOR_PICKUP to DISPENSED
+GET,/api/pharmacy/alerts,DENY,ALLOW,DENY,DENY,DENY,DENY,ALLOW,DENY,DENY,PHARM-003/005; no report id in any route
+GET,/api/pharmacy/ledger,DENY,ALLOW,DENY,DENY,DENY,DENY,ALLOW,DENY,DENY,Stock movements; own hospital only
+POST,/api/prescriptions,DENY,DENY,ALLOW,DENY,DENY,DENY,DENY,DENY,DENY,API-020; treating doctor, open record
+GET,/api/prescriptions,DENY,DENY,ALLOW,ALLOW,DENY,DENY,ALLOW,DENY,ALLOW,Patients: own only
+GET,/api/prescriptions/:id,DENY,DENY,ALLOW,ALLOW,DENY,DENY,ALLOW,DENY,OWN,View is audited
+PATCH,/api/prescriptions/:id/cancel,DENY,DENY,OWN,DENY,DENY,DENY,DENY,DENY,DENY,Prescribing doctor, before dispensing (D3)
+GET,/api/prescriptions/:id/pdf,DENY,DENY,ALLOW,DENY,DENY,DENY,ALLOW,DENY,OWN,API-021; RX-002
+POST,/api/prescriptions/:id/pdf,DENY,DENY,OWN,DENY,DENY,DENY,DENY,DENY,DENY,Re-queue a failed PDF
+GET,/api/lab-tests,DENY,ALLOW,ALLOW,DENY,ALLOW,ALLOW,DENY,DENY,DENY,Catalogue with ranges
+POST,/api/lab-tests,DENY,ALLOW,DENY,DENY,DENY,DENY,DENY,DENY,DENY,LAB-006
+PATCH,/api/lab-tests/:id,DENY,ALLOW,DENY,DENY,DENY,DENY,DENY,DENY,DENY,Ranges replaced; past results keep theirs (D8)
+POST,/api/lab-orders,DENY,DENY,ALLOW,DENY,DENY,DENY,DENY,DENY,DENY,API-022; treating doctor, open record
+GET,/api/lab-orders,DENY,DENY,ALLOW,ALLOW,ALLOW,ALLOW,DENY,DENY,ALLOW,Patients: own approved only
+GET,/api/lab-orders/:id,DENY,DENY,ALLOW,ALLOW,ALLOW,ALLOW,DENY,DENY,OWN,Values hidden until approved; view audited
+PATCH,/api/lab-orders/:id/cancel,DENY,DENY,OWN,DENY,DENY,DENY,DENY,DENY,DENY,Ordering doctor, before sample
+PATCH,/api/lab-orders/:id/sample,DENY,DENY,DENY,DENY,ALLOW,ALLOW,DENY,DENY,DENY,LAB-002
+PATCH,/api/lab-orders/:id/processing,DENY,DENY,DENY,DENY,DENY,ALLOW,DENY,DENY,DENY,
+PATCH,/api/lab-orders/:id/result,DENY,DENY,DENY,DENY,DENY,ALLOW,DENY,DENY,DENY,API-023; LAB-003
+POST,/api/lab-orders/:id/report-file,DENY,DENY,DENY,DENY,DENY,ALLOW,DENY,DENY,DENY,PDF only
+PATCH,/api/lab-orders/:id/approve,DENY,DENY,DENY,DENY,DENY,ALLOW,DENY,DENY,DENY,Senior; not own results (LAB-004)
+PATCH,/api/lab-orders/:id/reject,DENY,DENY,DENY,DENY,DENY,ALLOW,DENY,DENY,DENY,Senior; back to technician (D7)
+POST,/api/lab-orders/:id/amend,DENY,DENY,DENY,DENY,DENY,ALLOW,DENY,DENY,DENY,Senior; approved orders
+GET,/api/lab-orders/:id/report,DENY,DENY,ALLOW,ALLOW,DENY,ALLOW,DENY,DENY,OWN,Approved only; flags in red
+GET,/api/lab-orders/:id/report-file,DENY,DENY,ALLOW,ALLOW,DENY,ALLOW,DENY,DENY,OWN,Attached PDF
+GET,/api/tax/settings,DENY,ALLOW,DENY,DENY,DENY,DENY,DENY,ALLOW,DENY,BILL-008 tax settings (8-B2)
+POST,/api/tax/classifications,DENY,ALLOW,DENY,DENY,DENY,DENY,DENY,DENY,DENY,BILL-008 classification
+PATCH,/api/tax/classifications/:id,DENY,ALLOW,DENY,DENY,DENY,DENY,DENY,DENY,DENY,Name and active flag (DEC-059)
+POST,/api/tax/classifications/:id/versions,DENY,ALLOW,DENY,DENY,DENY,DENY,DENY,DENY,DENY,Dated rate version (DEC-047)
+PATCH,/api/tax/versions/:id,DENY,ALLOW,DENY,DENY,DENY,DENY,DENY,DENY,DENY,Future versions only (DEC-059)
+DELETE,/api/tax/versions/:id,DENY,ALLOW,DENY,DENY,DENY,DENY,DENY,DENY,DENY,Future versions only (DEC-059)
+PUT,/api/tax/defaults/:kind,DENY,ALLOW,DENY,DENY,DENY,DENY,DENY,DENY,DENY,Consultation and lab defaults
+POST,/api/tax/registrations,DENY,ALLOW,DENY,DENY,DENY,DENY,DENY,DENY,DENY,GST registration (DEC-048)
+DELETE,/api/tax/registrations/:id,DENY,ALLOW,DENY,DENY,DENY,DENY,DENY,DENY,DENY,Not yet in force only
+POST,/api/tax/confirm,DENY,ALLOW,DENY,DENY,DENY,DENY,DENY,DENY,DENY,Tax set-up confirmation
+PUT,/api/tax/assignments/lab-tests/:id,DENY,ALLOW,DENY,DENY,DENY,DENY,DENY,DENY,DENY,Lab test classification
+PUT,/api/tax/assignments/medicines/:id,DENY,ALLOW,DENY,DENY,DENY,DENY,DENY,DENY,DENY,Medicine classification
+GET,/api/invoices,DENY,ALLOW,DENY,DENY,ALLOW,DENY,DENY,ALLOW,ALLOW,BILL-003; patients see their own issued documents (Q8 A); doctors have no invoice access (Q16 A)
+GET,/api/invoices/options,DENY,DENY,DENY,DENY,ALLOW,DENY,DENY,ALLOW,DENY,Choices for manual charges (active classifications and rooms)
+GET,/api/invoices/:id,DENY,ALLOW,DENY,DENY,ALLOW,DENY,DENY,ALLOW,ALLOW,Patients: own issued documents only; read audited
+POST,/api/invoices,DENY,DENY,DENY,DENY,ALLOW,DENY,DENY,ALLOW,DENY,Original draft for a visit; 409 INVOICE_EXISTS
+POST,/api/invoices/:id/late-charges,DENY,DENY,DENY,DENY,ALLOW,DENY,DENY,ALLOW,DENY,Late-charge draft after the original is issued (Q19 A)
+POST,/api/invoices/:id/items,DENY,DENY,DENY,DENY,ALLOW,DENY,DENY,ALLOW,DENY,Manual room (Q5 A) or other charge on a draft
+DELETE,/api/invoices/:id/items/:itemId,DENY,DENY,DENY,DENY,ALLOW,DENY,DENY,ALLOW,DENY,Manual charges only; automatic charges follow their source
+POST,/api/invoices/:id/reresolve-tax,DENY,DENY,DENY,DENY,ALLOW,DENY,DENY,ALLOW,DENY,Draft only: re-applies current tax settings
+PATCH,/api/invoices/:id/discount,DENY,DENY,DENY,DENY,DENY,DENY,DENY,ALLOW,DENY,Accountant only (Q2 B); reason required
+PATCH,/api/invoices/:id/finalise,DENY,DENY,DENY,DENY,ALLOW,DENY,DENY,ALLOW,DENY,Explicit finalise (Q18 A); allocates the document number
+PATCH,/api/invoices/:id/void,DENY,DENY,DENY,DENY,ALLOW,DENY,DENY,ALLOW,DENY,Drafts only; releases their charges (DEC-066)
+POST,/api/invoices/:id/correction-requests,DENY,DENY,DENY,DENY,ALLOW,DENY,DENY,ALLOW,DENY,Issued documents only (DEC-053)
+POST,/api/invoices/:id/correction-requests/:rid/notes,DENY,DENY,DENY,DENY,DENY,DENY,DENY,ALLOW,DENY,Accountant outcome note (DEC-053)
+GET,/api/invoices/:id/payments,DENY,ALLOW,DENY,DENY,ALLOW,DENY,DENY,ALLOW,OWN,Payments and balance; patients see received payments of their own issued invoice (8-B5)
+POST,/api/invoices/:id/payments/cash,DENY,DENY,DENY,DENY,ALLOW,DENY,DENY,ALLOW,DENY,Cash received; partial payments allowed (8-B5)
+POST,/api/invoices/:id/payments/checkout,DENY,DENY,DENY,DENY,ALLOW,DENY,DENY,DENY,DENY,Online checkout for the whole balance (DEC-054 Q9, Q12)
+GET,/api/payments/:id,DENY,ALLOW,DENY,DENY,ALLOW,DENY,DENY,ALLOW,DENY,One payment (staff)
+POST,/api/payments/:id/cancel,DENY,DENY,DENY,DENY,ALLOW,DENY,DENY,DENY,DENY,Open online checkout only; a later success is held (DEC-064)
+POST,/api/payments/:id/simulate,DENY,DENY,DENY,DENY,ALLOW,DENY,DENY,DENY,DENY,Test checkout only (FakeProvider, development)
+POST,/api/payments/webhooks/:provider,PUBLIC,PUBLIC,PUBLIC,PUBLIC,PUBLIC,PUBLIC,PUBLIC,PUBLIC,PUBLIC,Provider webhook; signature verified; idempotent
+POST,/api/payments/:id/reverse,DENY,DENY,DENY,DENY,DENY,DENY,DENY,ALLOW,DENY,Reverse a received payment; refused once reconciled; needs M-12
+GET,/api/payments/:id/receipt,DENY,ALLOW,DENY,DENY,ALLOW,DENY,DENY,ALLOW,OWN,Receipt PDF rendered from the payment record; patients: own received payments only
+POST,/api/payments/:id/receipt/email,DENY,DENY,DENY,DENY,ALLOW,DENY,DENY,ALLOW,DENY,Email the receipt to the patient account address
+GET,/api/reconciliation,DENY,ALLOW,DENY,DENY,DENY,DENY,DENY,ALLOW,DENY,Received payments in a date range with totals (8-B5)
+POST,/api/reconciliation/mark,DENY,DENY,DENY,DENY,DENY,DENY,DENY,ALLOW,DENY,Mark received payments as reconciled
+GET,/api/billing/summary,DENY,ALLOW,DENY,DENY,DENY,DENY,DENY,ALLOW,DENY,Accountant day view: collections outstanding reconciliation claims
+GET,/api/invoices/:id/claims,DENY,ALLOW,DENY,DENY,ALLOW,DENY,DENY,ALLOW,DENY,Insurance claims on an invoice (PRD 7.7)
+POST,/api/invoices/:id/claims,DENY,DENY,DENY,DENY,ALLOW,DENY,DENY,ALLOW,DENY,Submit an insurance claim on an issued invoice
+GET,/api/claims,DENY,ALLOW,DENY,DENY,DENY,DENY,DENY,ALLOW,DENY,Claims queue by status
+PATCH,/api/claims/:id/decision,DENY,DENY,DENY,DENY,DENY,DENY,DENY,ALLOW,DENY,Approve or reject a submitted claim
+POST,/api/claims/:id/settle,DENY,DENY,DENY,DENY,DENY,DENY,DENY,ALLOW,DENY,Record settled amount; tracking only until M-13
+GET,/api/payments/mine,DENY,DENY,DENY,DENY,DENY,DENY,DENY,DENY,ALLOW,The signed-in patient's received payments (self-scoped)
+GET,/api/notifications,ALLOW,ALLOW,ALLOW,ALLOW,ALLOW,ALLOW,ALLOW,ALLOW,ALLOW,My own notifications (filtered by recipient)
+GET,/api/notifications/unread-count,ALLOW,ALLOW,ALLOW,ALLOW,ALLOW,ALLOW,ALLOW,ALLOW,ALLOW,My unread count
+PATCH,/api/notifications/:id/read,OWN,OWN,OWN,OWN,OWN,OWN,OWN,OWN,OWN,Mark one of my notifications read; others are not found
+POST,/api/notifications/read-all,ALLOW,ALLOW,ALLOW,ALLOW,ALLOW,ALLOW,ALLOW,ALLOW,ALLOW,Mark all my notifications read
+GET,/api/portal/summary,DENY,DENY,DENY,DENY,DENY,DENY,DENY,DENY,ALLOW,Patient dashboard summary (self-scoped)
+GET,/api/analytics/overview,DENY,ALLOW,DENY,DENY,DENY,DENY,DENY,DENY,DENY,Hospital overview analytics (Phase 11)
+GET,/api/analytics/operations,DENY,ALLOW,DENY,DENY,DENY,DENY,DENY,DENY,DENY,Operational analytics (Phase 11)
+GET,/api/search,DENY,ALLOW,ALLOW,ALLOW,ALLOW,ALLOW,ALLOW,ALLOW,DENY,Global search; each kind limited to roles that may open it

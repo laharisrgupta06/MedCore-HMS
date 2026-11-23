@@ -1,0 +1,1994 @@
+// MedCore HMS database schema (PRD section 05; roadmap section 5).
+//
+// Conventions
+// - Every table that holds hospital-specific data carries `hospitalId` (PRD section 03,
+//   multi-tenancy). This is the one deliberate exception to strict 3NF: on child tables the
+//   value is also reachable through the parent, but the PRD requires it on every tenant table
+//   so tenant scoping can be enforced on each query.
+// - Otherwise 3NF: values derivable from other columns are not stored (e.g. BMI, a prescription's
+//   patient). Deliberate, documented denormalisations: Invoice money totals (PRD billing
+//   integrity test) and MedicineBatch.quantity (current balance, kept consistent with the
+//   StockMovement ledger inside one transaction).
+// - Soft delete (`deletedAt`) on User, Patient, Doctor, Appointment (PRD section 05 hint).
+//   Medical records, record entries, diagnoses and lab results have no delete path.
+// - Columns ending in `Enc` are encrypted at rest with pgcrypto (PRD section 10). They are
+//   written and read only through the EMR repository helpers (Phase 4).
+// - Constraints Prisma cannot express (CHECK, exclusion, partial and expression indexes) are
+//   added by a hand-written SQL migration: see prisma/sql/constraints.sql.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ---------------------------------------------------------------------------
+// Enums
+// ---------------------------------------------------------------------------
+
+/// The nine system roles (PRD section 06).
+enum Role {
+  SUPER_ADMIN
+  HOSPITAL_ADMIN
+  DOCTOR
+  NURSE
+  RECEPTIONIST
+  LAB_TECHNICIAN
+  PHARMACIST
+  ACCOUNTANT
+  PATIENT
+}
+
+enum HospitalStatus {
+  PENDING
+  VERIFIED
+  SUSPENDED
+}
+
+/// Minimal subscription state (approved default A4: no subscription payments).
+enum SubscriptionStatus {
+  TRIAL
+  ACTIVE
+  SUSPENDED
+}
+
+enum Gender {
+  MALE
+  FEMALE
+  OTHER
+  UNDISCLOSED
+}
+
+enum BloodGroup {
+  A_POSITIVE
+  A_NEGATIVE
+  B_POSITIVE
+  B_NEGATIVE
+  AB_POSITIVE
+  AB_NEGATIVE
+  O_POSITIVE
+  O_NEGATIVE
+}
+
+enum RoomType {
+  WARD
+  PRIVATE
+  ICU
+  CONSULTATION
+  OTHER
+}
+
+enum BedStatus {
+  AVAILABLE
+  OCCUPIED
+  MAINTENANCE
+}
+
+enum Weekday {
+  MONDAY
+  TUESDAY
+  WEDNESDAY
+  THURSDAY
+  FRIDAY
+  SATURDAY
+  SUNDAY
+}
+
+enum ScheduleExceptionType {
+  LEAVE
+  BLOCKED
+  EXTRA_HOURS
+}
+
+/// PRD 7.2: PENDING -> CONFIRMED -> IN_PROGRESS -> COMPLETED | CANCELLED | NO_SHOW.
+enum AppointmentStatus {
+  PENDING
+  CONFIRMED
+  IN_PROGRESS
+  COMPLETED
+  CANCELLED
+  NO_SHOW
+}
+
+enum AppointmentType {
+  REGULAR
+  FOLLOW_UP
+  EMERGENCY
+}
+
+enum MedicalRecordStatus {
+  OPEN
+  CLOSED
+}
+
+enum RecordEntryKind {
+  NOTE
+  ADDENDUM
+}
+
+/// Lifecycle of patient-level history entries. Entries are never deleted: ENTERED_IN_ERROR
+/// marks a mistake while keeping it visible in the history.
+enum ClinicalEntryStatus {
+  ACTIVE
+  RESOLVED
+  ENTERED_IN_ERROR
+}
+
+enum DiagnosisType {
+  DIFFERENTIAL
+  CONFIRMED
+}
+
+enum AllergyKind {
+  ALLERGY
+  ADVERSE_DRUG_REACTION
+}
+
+enum Severity {
+  MILD
+  MODERATE
+  SEVERE
+}
+
+/// Family history flags (PRD 7.3).
+enum FamilyCondition {
+  DIABETES
+  HYPERTENSION
+  CANCER
+  CARDIAC
+}
+
+enum FilePurpose {
+  MEDICAL_ATTACHMENT
+  LAB_REPORT
+  DOCTOR_SIGNATURE
+  PRESCRIPTION_PDF
+  RECEIPT_PDF
+}
+
+/// PRD 7.4: tablet / capsule / syrup / injection / topical.
+enum MedicineForm {
+  TABLET
+  CAPSULE
+  SYRUP
+  INJECTION
+  TOPICAL
+}
+
+/// PRD 7.4: OD / BD / TDS / QID / SOS.
+enum DoseFrequency {
+  OD
+  BD
+  TDS
+  QID
+  SOS
+}
+
+enum PrescriptionEventKind {
+  ISSUED
+  VERIFIED
+  DISPENSED
+  HANDED_OVER
+  CANCELLED
+  BASELINE
+}
+
+enum PrescriptionStatus {
+  ISSUED
+  /// Prepared and waiting for collection (PRD 7.8 "Prescription ready at pharmacy").
+  READY_FOR_PICKUP
+  PARTIALLY_DISPENSED
+  DISPENSED
+  CANCELLED
+}
+
+/// RADIOLOGY covers radiology orders as report-only tests (approved default A2; no DICOM).
+enum LabTestCategory {
+  LABORATORY
+  RADIOLOGY
+}
+
+/// PRD 7.5 workflow.
+enum LabOrderStatus {
+  ORDERED
+  SAMPLE_COLLECTED
+  PROCESSING
+  RESULT_UPLOADED
+  APPROVED
+  REJECTED
+  /// Cancelled by the ordering doctor before the sample was collected (M-06).
+  CANCELLED
+}
+
+enum LabPriority {
+  ROUTINE
+  URGENT
+}
+
+enum ResultFlag {
+  NORMAL
+  LOW
+  HIGH
+}
+
+enum BatchStatus {
+  ACTIVE
+  QUARANTINED
+  DEPLETED
+}
+
+enum StockMovementType {
+  RECEIPT
+  DISPENSE
+  ADJUSTMENT
+  QUARANTINE
+}
+
+enum InvoiceStatus {
+  DRAFT
+  FINALISED
+  PARTIALLY_PAID
+  PAID
+  VOID
+}
+
+/// Phase 8 (M-11b): an original invoice per visit, or a late-charge invoice (Q19 A).
+enum InvoiceKind {
+  ORIGINAL
+  LATE_CHARGES
+}
+
+/// Phase 8 (M-11b, DEC-047): fixed when an invoice is finalised.
+enum DocumentType {
+  TAX_INVOICE
+  INVOICE_CUM_BILL_OF_SUPPLY
+  BILL_OF_SUPPLY
+}
+
+/// Phase 8 (M-11b): why a line collects no GST although its supply may be taxable.
+enum TaxNotCollectedReason {
+  UNREGISTERED
+  COMPOSITION
+}
+
+enum InvoiceEventKind {
+  CREATED
+  DISCOUNT_CHANGED
+  FINALISED
+  VOIDED
+  CORRECTION_REQUESTED
+}
+
+enum CorrectionRequestKind {
+  CANCEL_DOCUMENT
+  CHANGE_AMOUNTS
+  WRONG_PATIENT
+  WRONG_DETAILS
+}
+
+enum InvoiceItemKind {
+  CONSULTATION
+  LAB
+  PHARMACY
+  ROOM
+  OTHER
+}
+
+/// Phase 8 (M-11a, DEC-045): goods take an HSN code, services a SAC code (starting with 99).
+enum TaxSupplyType {
+  GOODS
+  SERVICE
+}
+
+enum TaxTreatment {
+  EXEMPT
+  NIL_RATED
+  TAXABLE
+}
+
+enum GstRegistrationType {
+  REGULAR
+  COMPOSITION
+  UNREGISTERED
+}
+
+/// Critical-care rooms are exempt from the statutory room rule at any price (DEC-049).
+enum CriticalCareUnit {
+  ICU
+  CCU
+  ICCU
+  NICU
+}
+
+/// PRD 7.7: Stripe card, Razorpay UPI/Netbanking, or cash at counter.
+enum PaymentMethod {
+  STRIPE_CARD
+  RAZORPAY_UPI
+  RAZORPAY_NETBANKING
+  CASH
+  /// An insurer (TPA) settlement posted to the invoice balance (M-13). No provider.
+  TPA_SETTLEMENT
+}
+
+enum PaymentStatus {
+  PENDING
+  SUCCEEDED
+  FAILED
+  /// A received payment taken back by an accountant (M-12); keeps its reversal details.
+  REVERSED
+}
+
+enum PaymentProvider {
+  STRIPE
+  RAZORPAY
+}
+
+enum ClaimStatus {
+  SUBMITTED
+  APPROVED
+  REJECTED
+  SETTLED
+}
+
+enum NotificationChannel {
+  EMAIL
+  SMS
+  IN_APP
+}
+
+enum DeliveryStatus {
+  PENDING
+  SENT
+  FAILED
+}
+
+// ---------------------------------------------------------------------------
+// Tenancy, identity and organisation
+// ---------------------------------------------------------------------------
+
+/// Shared address (PRD hint: reuse for hospitals, patients and suppliers).
+model Address {
+  id         String   @id @default(uuid()) @db.Uuid
+  line1      String
+  line2      String?
+  city       String
+  state      String
+  postalCode String
+  country    String   @default("IN") @db.Char(2)
+  createdAt  DateTime @default(now()) @db.Timestamptz(3)
+  updatedAt  DateTime @updatedAt @db.Timestamptz(3)
+  hospitalId String   @db.Uuid
+
+  tenant Hospital @relation("AddressTenant", fields: [hospitalId], references: [id], onDelete: Restrict)
+
+  hospital            Hospital?  @relation("HospitalAddress")
+  /// Back-relation of the same-tenant key (DEC-031); not used by application code.
+  hospitalsSameTenant Hospital[] @relation("HospitalAddressSameTenant")
+  patients            Patient[]
+  suppliers           Supplier[]
+
+  @@unique([id, hospitalId])
+  @@index([hospitalId])
+  @@map("addresses")
+}
+
+/// A tenant. `code` is the short identifier patients enter at self-registration (decision 1a).
+model Hospital {
+  /// Generated by PostgreSQL: id is also a foreign-key column (DEC-031), and Prisma does not apply
+  /// @default(uuid()) to foreign-key columns (DEC-032).
+  id                    String             @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  name                  String
+  code                  String             @unique
+  email                 String
+  phone                 String
+  licenseNumber         String
+  status                HospitalStatus     @default(PENDING)
+  verifiedAt            DateTime?          @db.Timestamptz(3)
+  timezone              String             @default("Asia/Kolkata")
+  currency              String             @default("INR") @db.Char(3)
+  defaultSlotMinutes    Int                @default(30)
+  subscriptionPlan      String?
+  subscriptionStatus    SubscriptionStatus @default(TRIAL)
+  addressId             String?            @unique @db.Uuid
+  createdAt             DateTime           @default(now()) @db.Timestamptz(3)
+  updatedAt             DateTime           @updatedAt @db.Timestamptz(3)
+  /// Billing configuration (PRD section 06: Hospital Admin "billing config").
+  taxRatePercent        Decimal            @default(0) @db.Decimal(5, 2)
+  invoicePrefix         String             @default("INV")
+  taxSetupConfirmedAt   DateTime?          @db.Timestamptz(3)
+  taxSetupConfirmedById String?            @db.Uuid
+  /// Set when the hospital's first tax version or GST registration is written (M-11a); from then on
+  /// the database refuses any change to `timezone`, so effective dates cannot move.
+  taxTimezoneLockedAt   DateTime?          @db.Timestamptz(3)
+
+  address             Address?             @relation("HospitalAddress", fields: [addressId], references: [id], onDelete: Restrict)
+  /// Same-tenant guarantee: the address must belong to this hospital (constraints.sql, DEC-031).
+  /// Declared so Prisma Migrate keeps the database key; use `address` in application code.
+  addressSameTenant   Address?             @relation("HospitalAddressSameTenant", fields: [addressId, id], references: [id, hospitalId], onDelete: Restrict, onUpdate: NoAction, map: "hospitals_address_same_tenant_fkey")
+  users               User[]
+  staffProfiles       StaffProfile[]
+  departments         Department[]
+  rooms               Room[]
+  beds                Bed[]
+  doctors             Doctor[]
+  doctorDepartments   DoctorDepartment[]
+  patients            Patient[]
+  doctorSchedules     DoctorSchedule[]
+  scheduleExceptions  ScheduleException[]
+  appointments        Appointment[]
+  medicalRecords      MedicalRecord[]
+  recordEntries       RecordEntry[]
+  administrationNotes AdministrationNote[]
+  vitals              Vitals[]
+  diagnoses           Diagnosis[]
+  allergies           Allergy[]
+  medicationHistory   MedicationHistory[]
+  vaccinations        Vaccination[]
+  familyHistory       FamilyHistory[]
+  files               FileAttachment[]
+  prescriptionEvents  PrescriptionEvent[]
+  expiryReports       ExpiryReport[]
+  medicines           Medicine[]
+  suppliers           Supplier[]
+  medicineBatches     MedicineBatch[]
+  stockMovements      StockMovement[]
+  prescriptions       Prescription[]
+  prescriptionItems   PrescriptionItem[]
+  dispenses           Dispense[]
+  labTests            LabTest[]
+  labTestRanges       LabTestRange[]
+  labOrders           LabOrder[]
+  labOrderItems       LabOrderItem[]
+  labResults          LabResult[]
+  invoices            Invoice[]
+  invoiceItems        InvoiceItem[]
+  payments            Payment[]
+  insuranceClaims     InsuranceClaim[]
+  notifications       Notification[]
+  auditLogs           AuditLog[]
+
+  addresses              Address[]              @relation("AddressTenant")
+  notificationDeliveries NotificationDelivery[]
+
+  /// The hospital admin who confirmed the tax set-up (same tenant, DEC-046).
+  taxSetupConfirmedBy       User?                          @relation("HospitalTaxSetupConfirmedBy", fields: [taxSetupConfirmedById, id], references: [id, hospitalId], onDelete: Restrict, onUpdate: NoAction, map: "hospitals_taxSetupConfirmedById_id_fkey")
+  taxClassifications        TaxClassification[]
+  taxClassificationVersions TaxClassificationVersion[]
+  taxDefaults               HospitalTaxDefault[]
+  gstRegistrations          HospitalGstRegistration[]
+  documentSeries            DocumentNumberSeries[]
+  invoiceEvents             InvoiceEvent[]
+  correctionRequests        InvoiceCorrectionRequest[]
+  correctionRequestNotes    InvoiceCorrectionRequestNote[]
+
+  @@index([status])
+  @@map("hospitals")
+}
+
+/// Every person who can sign in. hospitalId is null only for SUPER_ADMIN (CHECK constraint).
+/// Email is unique platform-wide (approved limitation: one hospital per user).
+model User {
+  id              String    @id @default(uuid()) @db.Uuid
+  hospitalId      String?   @db.Uuid
+  email           String    @unique
+  phone           String?
+  passwordHash    String
+  role            Role
+  firstName       String
+  lastName        String
+  emailVerifiedAt DateTime? @db.Timestamptz(3)
+  phoneVerifiedAt DateTime? @db.Timestamptz(3)
+  isActive        Boolean   @default(true)
+  lastLoginAt     DateTime? @db.Timestamptz(3)
+  deletedAt       DateTime? @db.Timestamptz(3)
+  createdAt       DateTime  @default(now()) @db.Timestamptz(3)
+  updatedAt       DateTime  @updatedAt @db.Timestamptz(3)
+
+  hospital     Hospital?     @relation(fields: [hospitalId], references: [id], onDelete: Restrict)
+  staffProfile StaffProfile?
+  doctor       Doctor?
+  patient      Patient?
+
+  createdAppointments        Appointment[]                  @relation("AppointmentCreatedBy")
+  recordEntries              RecordEntry[]
+  administrationNotes        AdministrationNote[]
+  vitalsRecorded             Vitals[]
+  diagnosesRecorded          Diagnosis[]
+  allergiesRecorded          Allergy[]                      @relation("AllergyRecordedBy")
+  allergyStatusChanges       Allergy[]                      @relation("AllergyStatusChangedBy")
+  medicationsRecorded        MedicationHistory[]            @relation("MedicationHistoryRecordedBy")
+  medicationStatusChanges    MedicationHistory[]            @relation("MedicationHistoryStatusChangedBy")
+  vaccinationsRecorded       Vaccination[]                  @relation("VaccinationRecordedBy")
+  vaccinationStatusChanges   Vaccination[]                  @relation("VaccinationStatusChangedBy")
+  familyHistoryRecorded      FamilyHistory[]                @relation("FamilyHistoryRecordedBy")
+  familyHistoryStatusChanges FamilyHistory[]                @relation("FamilyHistoryStatusChangedBy")
+  filesUploaded              FileAttachment[]
+  stockMovements             StockMovement[]
+  dispenses                  Dispense[]
+  labOrdersPlaced            LabOrder[]                     @relation("LabOrderOrderedBy")
+  labSamplesCollected        LabOrder[]                     @relation("LabOrderSampleCollectedBy")
+  labOrdersApproved          LabOrder[]                     @relation("LabOrderApprovedBy")
+  labOrdersCancelled         LabOrder[]                     @relation("LabOrderCancelledBy")
+  labOrdersRejected          LabOrder[]                     @relation("LabOrderRejectedBy")
+  labResultsEntered          LabResult[]
+  invoicesFinalised          Invoice[]                      @relation("InvoiceFinalisedBy")
+  invoicesCreated            Invoice[]                      @relation("InvoiceCreatedBy")
+  invoiceDiscountsSet        Invoice[]                      @relation("InvoiceDiscountSetBy")
+  invoicesVoided             Invoice[]                      @relation("InvoiceVoidedBy")
+  invoiceItemsAdded          InvoiceItem[]                  @relation("InvoiceItemAddedBy")
+  documentSeriesOpened       DocumentNumberSeries[]         @relation("DocumentSeriesOpenedBy")
+  documentSeriesClosed       DocumentNumberSeries[]         @relation("DocumentSeriesClosedBy")
+  invoiceEvents              InvoiceEvent[]                 @relation("InvoiceEventActor")
+  correctionRequests         InvoiceCorrectionRequest[]     @relation("InvoiceCorrectionRequestedBy")
+  correctionNotes            InvoiceCorrectionRequestNote[] @relation("InvoiceCorrectionNoteAuthor")
+  paymentsReceived           Payment[]                      @relation("PaymentReceivedBy")
+  paymentsReconciled         Payment[]                      @relation("PaymentReconciledBy")
+  paymentsReversed           Payment[]                      @relation("PaymentReversedBy")
+  prescriptionsVerified      Prescription[]                 @relation("PrescriptionVerifiedBy")
+  prescriptionEvents         PrescriptionEvent[]            @relation("PrescriptionEventActor")
+  prescriptionsCancelled     Prescription[]                 @relation("PrescriptionCancelledBy")
+  notifications              Notification[]                 @relation("NotificationRecipient")
+  notificationsSameTenant    Notification[]                 @relation("NotificationRecipientSameTenant")
+  auditLogs                  AuditLog[]
+  hospitalsTaxSetupConfirmed Hospital[]                     @relation("HospitalTaxSetupConfirmedBy")
+  taxClassificationsCreated  TaxClassification[]            @relation("TaxClassificationCreatedBy")
+  taxVersionsCreated         TaxClassificationVersion[]     @relation("TaxClassificationVersionCreatedBy")
+  taxDefaultsUpdated         HospitalTaxDefault[]           @relation("HospitalTaxDefaultUpdatedBy")
+  gstRegistrationsAttested   HospitalGstRegistration[]      @relation("GstRegistrationAttestedBy")
+
+  @@unique([id, hospitalId])
+  @@index([hospitalId, role])
+  @@map("users")
+}
+
+/// Profile for non-doctor staff. `isSeniorLabTechnician` allows lab report approval (approved default A1).
+model StaffProfile {
+  id                    String   @id @default(uuid()) @db.Uuid
+  hospitalId            String   @db.Uuid
+  userId                String   @unique @db.Uuid
+  departmentId          String?  @db.Uuid
+  employeeCode          String?
+  designation           String?
+  isSeniorLabTechnician Boolean  @default(false)
+  createdAt             DateTime @default(now()) @db.Timestamptz(3)
+  updatedAt             DateTime @updatedAt @db.Timestamptz(3)
+
+  hospital   Hospital    @relation(fields: [hospitalId], references: [id], onDelete: Restrict)
+  user       User        @relation(fields: [userId, hospitalId], references: [id, hospitalId], onDelete: Restrict)
+  department Department? @relation(fields: [departmentId, hospitalId], references: [id, hospitalId], onDelete: Restrict)
+
+  @@unique([userId, hospitalId])
+  @@unique([hospitalId, employeeCode])
+  @@map("staff_profiles")
+}
+
+model Department {
+  id          String   @id @default(uuid()) @db.Uuid
+  hospitalId  String   @db.Uuid
+  name        String
+  description String?
+  createdAt   DateTime @default(now()) @db.Timestamptz(3)
+  updatedAt   DateTime @updatedAt @db.Timestamptz(3)
+
+  hospital     Hospital           @relation(fields: [hospitalId], references: [id], onDelete: Restrict)
+  doctors      DoctorDepartment[]
+  staff        StaffProfile[]
+  rooms        Room[]
+  schedules    DoctorSchedule[]
+  appointments Appointment[]
+
+  @@unique([id, hospitalId])
+  @@unique([hospitalId, name])
+  @@map("departments")
+}
+
+model Room {
+  id               String            @id @default(uuid()) @db.Uuid
+  hospitalId       String            @db.Uuid
+  departmentId     String?           @db.Uuid
+  number           String
+  type             RoomType
+  floor            String?
+  /// Daily charge billed as a ROOM invoice item (PRD 7.7 "room charges").
+  dailyCharge      Decimal?          @db.Decimal(12, 2)
+  criticalCareUnit CriticalCareUnit?
+  createdAt        DateTime          @default(now()) @db.Timestamptz(3)
+  updatedAt        DateTime          @updatedAt @db.Timestamptz(3)
+
+  hospital     Hospital      @relation(fields: [hospitalId], references: [id], onDelete: Restrict)
+  department   Department?   @relation(fields: [departmentId, hospitalId], references: [id, hospitalId], onDelete: Restrict)
+  beds         Bed[]
+  invoiceItems InvoiceItem[]
+
+  @@unique([id, hospitalId])
+  @@unique([hospitalId, number])
+  @@map("rooms")
+}
+
+/// Beds feed the "occupied beds" KPI (PRD section 09). No full admission workflow (approved default A3).
+model Bed {
+  id         String    @id @default(uuid()) @db.Uuid
+  hospitalId String    @db.Uuid
+  roomId     String    @db.Uuid
+  label      String
+  status     BedStatus @default(AVAILABLE)
+  createdAt  DateTime  @default(now()) @db.Timestamptz(3)
+  updatedAt  DateTime  @updatedAt @db.Timestamptz(3)
+
+  hospital Hospital @relation(fields: [hospitalId], references: [id], onDelete: Restrict)
+  room     Room     @relation(fields: [roomId, hospitalId], references: [id, hospitalId], onDelete: Restrict)
+
+  @@unique([roomId, label])
+  @@index([hospitalId, status])
+  @@map("beds")
+}
+
+// ---------------------------------------------------------------------------
+// Doctors, patients and scheduling
+// ---------------------------------------------------------------------------
+
+/// One-to-one with User (PRD section 05). Works in one or more departments (PRD 7.2).
+model Doctor {
+  id                 String    @id @default(uuid()) @db.Uuid
+  hospitalId         String    @db.Uuid
+  userId             String    @unique @db.Uuid
+  registrationNumber String
+  specialisation     String
+  qualification      String?
+  consultationFee    Decimal   @db.Decimal(12, 2)
+  bio                String?
+  /// Signature image (SVG or PNG) overlaid on prescription PDFs (PRD 7.4).
+  signatureFileId    String?   @unique @db.Uuid
+  deletedAt          DateTime? @db.Timestamptz(3)
+  createdAt          DateTime  @default(now()) @db.Timestamptz(3)
+  updatedAt          DateTime  @updatedAt @db.Timestamptz(3)
+
+  hospital           Hospital            @relation(fields: [hospitalId], references: [id], onDelete: Restrict)
+  user               User                @relation(fields: [userId, hospitalId], references: [id, hospitalId], onDelete: Restrict)
+  signatureFile      FileAttachment?     @relation("DoctorSignature", fields: [signatureFileId, hospitalId], references: [id, hospitalId], onDelete: Restrict)
+  departments        DoctorDepartment[]
+  schedules          DoctorSchedule[]
+  scheduleExceptions ScheduleException[]
+  appointments       Appointment[]
+
+  @@unique([userId, hospitalId])
+  @@unique([signatureFileId, hospitalId])
+  @@unique([id, hospitalId])
+  @@unique([hospitalId, registrationNumber])
+  @@index([hospitalId, specialisation])
+  @@map("doctors")
+}
+
+model DoctorDepartment {
+  hospitalId   String   @db.Uuid
+  doctorId     String   @db.Uuid
+  departmentId String   @db.Uuid
+  createdAt    DateTime @default(now()) @db.Timestamptz(3)
+
+  hospital   Hospital   @relation(fields: [hospitalId], references: [id], onDelete: Restrict)
+  doctor     Doctor     @relation(fields: [doctorId, hospitalId], references: [id, hospitalId], onDelete: Cascade)
+  department Department @relation(fields: [departmentId, hospitalId], references: [id, hospitalId], onDelete: Restrict)
+
+  @@id([doctorId, departmentId])
+  @@index([hospitalId])
+  @@index([departmentId])
+  @@map("doctor_departments")
+}
+
+/// One-to-one with User (PRD section 05). Name, email and phone live on User.
+model Patient {
+  id                    String      @id @default(uuid()) @db.Uuid
+  hospitalId            String      @db.Uuid
+  userId                String      @unique @db.Uuid
+  /// Medical record number, unique per hospital.
+  mrn                   String
+  dateOfBirth           DateTime    @db.Date
+  gender                Gender
+  bloodGroup            BloodGroup?
+  emergencyContactName  String?
+  emergencyContactPhone String?
+  addressId             String?     @db.Uuid
+  deletedAt             DateTime?   @db.Timestamptz(3)
+  createdAt             DateTime    @default(now()) @db.Timestamptz(3)
+  updatedAt             DateTime    @updatedAt @db.Timestamptz(3)
+
+  hospital          Hospital            @relation(fields: [hospitalId], references: [id], onDelete: Restrict)
+  user              User                @relation(fields: [userId, hospitalId], references: [id, hospitalId], onDelete: Restrict)
+  address           Address?            @relation(fields: [addressId, hospitalId], references: [id, hospitalId], onDelete: Restrict)
+  appointments      Appointment[]
+  allergies         Allergy[]
+  medicationHistory MedicationHistory[]
+  vaccinations      Vaccination[]
+  familyHistory     FamilyHistory[]
+  files             FileAttachment[]
+  invoices          Invoice[]
+
+  @@unique([userId, hospitalId])
+  @@unique([id, hospitalId])
+  @@unique([hospitalId, mrn])
+  @@map("patients")
+}
+
+/// Repeating weekly availability (roadmap decision: rules + exceptions, slots generated on demand).
+model DoctorSchedule {
+  id           String    @id @default(uuid()) @db.Uuid
+  hospitalId   String    @db.Uuid
+  doctorId     String    @db.Uuid
+  departmentId String    @db.Uuid
+  weekday      Weekday
+  /// Local wall-clock time in the hospital's timezone, e.g. 09:00.
+  startTime    DateTime  @db.Time(0)
+  endTime      DateTime  @db.Time(0)
+  slotMinutes  Int
+  validFrom    DateTime  @db.Date
+  validTo      DateTime? @db.Date
+  isActive     Boolean   @default(true)
+  createdAt    DateTime  @default(now()) @db.Timestamptz(3)
+  updatedAt    DateTime  @updatedAt @db.Timestamptz(3)
+
+  hospital   Hospital   @relation(fields: [hospitalId], references: [id], onDelete: Restrict)
+  doctor     Doctor     @relation(fields: [doctorId, hospitalId], references: [id, hospitalId], onDelete: Cascade)
+  department Department @relation(fields: [departmentId, hospitalId], references: [id, hospitalId], onDelete: Restrict)
+
+  @@index([hospitalId])
+  @@index([doctorId, weekday])
+  @@map("doctor_schedules")
+}
+
+model ScheduleException {
+  id         String                @id @default(uuid()) @db.Uuid
+  hospitalId String                @db.Uuid
+  doctorId   String                @db.Uuid
+  date       DateTime              @db.Date
+  type       ScheduleExceptionType
+  /// Null start/end means the whole day.
+  startTime  DateTime?             @db.Time(0)
+  endTime    DateTime?             @db.Time(0)
+  reason     String?
+  createdAt  DateTime              @default(now()) @db.Timestamptz(3)
+
+  hospital Hospital @relation(fields: [hospitalId], references: [id], onDelete: Restrict)
+  doctor   Doctor   @relation(fields: [doctorId, hospitalId], references: [id, hospitalId], onDelete: Cascade)
+
+  @@index([hospitalId])
+  @@index([doctorId, date])
+  @@map("schedule_exceptions")
+}
+
+/// No double booking is enforced in the database by exclusion constraints
+/// (doctor overlap, except EMERGENCY; patient overlap) in prisma/sql/constraints.sql.
+model Appointment {
+  id                 String            @id @default(uuid()) @db.Uuid
+  hospitalId         String            @db.Uuid
+  doctorId           String            @db.Uuid
+  patientId          String            @db.Uuid
+  departmentId       String            @db.Uuid
+  scheduledAt        DateTime          @db.Timestamptz(3)
+  endAt              DateTime          @db.Timestamptz(3)
+  status             AppointmentStatus @default(PENDING)
+  type               AppointmentType   @default(REGULAR)
+  reason             String?
+  cancellationReason String?
+  createdById        String            @db.Uuid
+  deletedAt          DateTime?         @db.Timestamptz(3)
+  createdAt          DateTime          @default(now()) @db.Timestamptz(3)
+  updatedAt          DateTime          @updatedAt @db.Timestamptz(3)
+
+  hospital          Hospital       @relation(fields: [hospitalId], references: [id], onDelete: Restrict)
+  doctor            Doctor         @relation(fields: [doctorId, hospitalId], references: [id, hospitalId], onDelete: Restrict)
+  patient           Patient        @relation(fields: [patientId, hospitalId], references: [id, hospitalId], onDelete: Restrict)
+  department        Department     @relation(fields: [departmentId, hospitalId], references: [id, hospitalId], onDelete: Restrict)
+  createdBy         User           @relation("AppointmentCreatedBy", fields: [createdById, hospitalId], references: [id, hospitalId], onDelete: Restrict)
+  medicalRecord     MedicalRecord?
+  invoices          Invoice[]
+  consultationLines InvoiceItem[]  @relation("InvoiceItemConsultation")
+
+  @@unique([id, hospitalId])
+  @@index([hospitalId, scheduledAt])
+  @@index([hospitalId, status])
+  @@index([doctorId, scheduledAt])
+  @@index([patientId, scheduledAt])
+  @@map("appointments")
+}
+
+// ---------------------------------------------------------------------------
+// Electronic medical records (PRD 7.3). Append-only: no delete path.
+// ---------------------------------------------------------------------------
+
+/// One record per appointment (PRD section 05). Patient and doctor come from the appointment (3NF).
+/// treatmentPlanEnc is editable only while OPEN; after CLOSED, changes are ADDENDUM entries.
+model MedicalRecord {
+  id                 String              @id @default(uuid()) @db.Uuid
+  hospitalId         String              @db.Uuid
+  appointmentId      String              @unique @db.Uuid
+  chiefComplaint     String
+  presentingSymptoms String?
+  treatmentPlanEnc   Bytes?
+  status             MedicalRecordStatus @default(OPEN)
+  closedAt           DateTime?           @db.Timestamptz(3)
+  createdAt          DateTime            @default(now()) @db.Timestamptz(3)
+  updatedAt          DateTime            @updatedAt @db.Timestamptz(3)
+
+  hospital            Hospital             @relation(fields: [hospitalId], references: [id], onDelete: Restrict)
+  appointment         Appointment          @relation(fields: [appointmentId, hospitalId], references: [id, hospitalId], onDelete: Restrict)
+  entries             RecordEntry[]
+  administrationNotes AdministrationNote[]
+  vitals              Vitals[]
+  diagnoses           Diagnosis[]
+  files               FileAttachment[]
+  prescriptions       Prescription[]
+  labOrders           LabOrder[]
+
+  @@unique([appointmentId, hospitalId])
+  @@unique([id, hospitalId])
+  @@index([hospitalId, createdAt])
+  @@map("medical_records")
+}
+
+/// Doctor notes and addenda. Never updated or deleted.
+model RecordEntry {
+  id               String          @id @default(uuid()) @db.Uuid
+  hospitalId       String          @db.Uuid
+  medicalRecordId  String          @db.Uuid
+  authorId         String          @db.Uuid
+  kind             RecordEntryKind
+  bodyEnc          Bytes
+  createdAt        DateTime        @default(now()) @db.Timestamptz(3)
+  /// The entry this ADDENDUM corrects (the original stays unchanged).
+  amendsEntryId    String?         @unique @db.Uuid
+  correctionReason String?
+
+  hospital      Hospital      @relation(fields: [hospitalId], references: [id], onDelete: Restrict)
+  medicalRecord MedicalRecord @relation(fields: [medicalRecordId, hospitalId], references: [id, hospitalId], onDelete: Restrict)
+  author        User          @relation(fields: [authorId, hospitalId], references: [id, hospitalId], onDelete: Restrict)
+
+  amends    RecordEntry? @relation("RecordEntryAmendment", fields: [amendsEntryId, hospitalId], references: [id, hospitalId], onDelete: Restrict)
+  amendedBy RecordEntry? @relation("RecordEntryAmendment")
+
+  @@unique([amendsEntryId, hospitalId])
+  @@unique([id, hospitalId])
+  @@index([medicalRecordId, createdAt])
+  @@map("record_entries")
+}
+
+/// Nurse medication administration notes (PRD section 06; approved default A3).
+model AdministrationNote {
+  id               String   @id @default(uuid()) @db.Uuid
+  hospitalId       String   @db.Uuid
+  medicalRecordId  String   @db.Uuid
+  nurseId          String   @db.Uuid
+  medicationGiven  String
+  dose             String?
+  route            String?
+  noteEnc          Bytes?
+  administeredAt   DateTime @db.Timestamptz(3)
+  createdAt        DateTime @default(now()) @db.Timestamptz(3)
+  /// Correction of an earlier entry (which stays unchanged). Who and when: the author and timestamp of this row.
+  supersedesId     String?  @unique @db.Uuid
+  correctionReason String?
+
+  hospital      Hospital      @relation(fields: [hospitalId], references: [id], onDelete: Restrict)
+  medicalRecord MedicalRecord @relation(fields: [medicalRecordId, hospitalId], references: [id, hospitalId], onDelete: Restrict)
+  nurse         User          @relation(fields: [nurseId, hospitalId], references: [id, hospitalId], onDelete: Restrict)
+
+  supersedes   AdministrationNote? @relation("AdministrationNoteCorrection", fields: [supersedesId, hospitalId], references: [id, hospitalId], onDelete: Restrict)
+  supersededBy AdministrationNote? @relation("AdministrationNoteCorrection")
+
+  @@unique([supersedesId, hospitalId])
+  @@unique([id, hospitalId])
+  @@index([medicalRecordId])
+  @@map("administration_notes")
+}
+
+/// BMI is not stored: it is calculated from height and weight when read (3NF; PRD 7.3 "auto-calculated").
+model Vitals {
+  id               String   @id @default(uuid()) @db.Uuid
+  hospitalId       String   @db.Uuid
+  medicalRecordId  String   @db.Uuid
+  recordedById     String   @db.Uuid
+  systolicBp       Int?
+  diastolicBp      Int?
+  pulse            Int?
+  temperatureC     Decimal? @db.Decimal(4, 1)
+  spo2             Int?
+  heightCm         Decimal? @db.Decimal(5, 1)
+  weightKg         Decimal? @db.Decimal(5, 1)
+  recordedAt       DateTime @default(now()) @db.Timestamptz(3)
+  /// Correction of an earlier entry (which stays unchanged). Who and when: the author and timestamp of this row.
+  supersedesId     String?  @unique @db.Uuid
+  correctionReason String?
+
+  hospital      Hospital      @relation(fields: [hospitalId], references: [id], onDelete: Restrict)
+  medicalRecord MedicalRecord @relation(fields: [medicalRecordId, hospitalId], references: [id, hospitalId], onDelete: Restrict)
+  recordedBy    User          @relation(fields: [recordedById, hospitalId], references: [id, hospitalId], onDelete: Restrict)
+
+  supersedes   Vitals? @relation("VitalsCorrection", fields: [supersedesId, hospitalId], references: [id, hospitalId], onDelete: Restrict)
+  supersededBy Vitals? @relation("VitalsCorrection")
+
+  @@unique([supersedesId, hospitalId])
+  @@unique([id, hospitalId])
+  @@index([medicalRecordId])
+  @@map("vitals")
+}
+
+/// ICD-10 reference data (global, not tenant-specific). A seeded subset; codes are optional (PRD: "where possible").
+model Icd10Code {
+  code      String      @id
+  title     String
+  diagnoses Diagnosis[]
+
+  @@map("icd10_codes")
+}
+
+model Diagnosis {
+  id               String        @id @default(uuid()) @db.Uuid
+  hospitalId       String        @db.Uuid
+  medicalRecordId  String        @db.Uuid
+  icd10Code        String?
+  descriptionEnc   Bytes
+  type             DiagnosisType
+  recordedById     String        @db.Uuid
+  createdAt        DateTime      @default(now()) @db.Timestamptz(3)
+  /// Correction of an earlier entry (which stays unchanged). Who and when: the author and timestamp of this row.
+  supersedesId     String?       @unique @db.Uuid
+  correctionReason String?
+
+  hospital      Hospital      @relation(fields: [hospitalId], references: [id], onDelete: Restrict)
+  medicalRecord MedicalRecord @relation(fields: [medicalRecordId, hospitalId], references: [id, hospitalId], onDelete: Restrict)
+  icd10         Icd10Code?    @relation(fields: [icd10Code], references: [code], onDelete: Restrict)
+  recordedBy    User          @relation(fields: [recordedById, hospitalId], references: [id, hospitalId], onDelete: Restrict)
+
+  supersedes   Diagnosis? @relation("DiagnosisCorrection", fields: [supersedesId, hospitalId], references: [id, hospitalId], onDelete: Restrict)
+  supersededBy Diagnosis? @relation("DiagnosisCorrection")
+
+  @@unique([supersedesId, hospitalId])
+  @@unique([id, hospitalId])
+  @@index([medicalRecordId])
+  @@index([icd10Code])
+  @@map("diagnoses")
+}
+
+/// Allergies and adverse drug reactions (PRD 7.3). Patient-level, not per visit.
+model Allergy {
+  id                String              @id @default(uuid()) @db.Uuid
+  hospitalId        String              @db.Uuid
+  patientId         String              @db.Uuid
+  kind              AllergyKind
+  substance         String
+  reaction          String?
+  severity          Severity?
+  recordedById      String              @db.Uuid
+  recordedAt        DateTime            @default(now()) @db.Timestamptz(3)
+  /// Correction of an earlier entry (which stays unchanged). Who and when: recordedBy / recordedAt of this row.
+  supersedesId      String?             @unique @db.Uuid
+  correctionReason  String?
+  /// Only these four status columns may change after insert (database trigger).
+  status            ClinicalEntryStatus @default(ACTIVE)
+  statusReason      String?
+  statusChangedById String?             @db.Uuid
+  statusChangedAt   DateTime?           @db.Timestamptz(3)
+
+  hospital   Hospital @relation(fields: [hospitalId], references: [id], onDelete: Restrict)
+  patient    Patient  @relation(fields: [patientId, hospitalId], references: [id, hospitalId], onDelete: Restrict)
+  recordedBy User     @relation("AllergyRecordedBy", fields: [recordedById, hospitalId], references: [id, hospitalId], onDelete: Restrict)
+
+  statusChangedBy User?    @relation("AllergyStatusChangedBy", fields: [statusChangedById, hospitalId], references: [id, hospitalId], onDelete: Restrict)
+  supersedes      Allergy? @relation("AllergyCorrection", fields: [supersedesId, hospitalId], references: [id, hospitalId], onDelete: Restrict)
+  supersededBy    Allergy? @relation("AllergyCorrection")
+
+  @@unique([supersedesId, hospitalId])
+  @@unique([id, hospitalId])
+  @@index([patientId])
+  @@map("allergies")
+}
+
+/// Medication history (PRD section 02, Week 2: "allergy and medication history"),
+/// including medicines prescribed elsewhere.
+model MedicationHistory {
+  id                String              @id @default(uuid()) @db.Uuid
+  hospitalId        String              @db.Uuid
+  patientId         String              @db.Uuid
+  medicineName      String
+  dosage            String?
+  frequency         String?
+  startedOn         DateTime?           @db.Date
+  endedOn           DateTime?           @db.Date
+  notes             String?
+  recordedById      String              @db.Uuid
+  recordedAt        DateTime            @default(now()) @db.Timestamptz(3)
+  /// Correction of an earlier entry (which stays unchanged). Who and when: recordedBy / recordedAt of this row.
+  supersedesId      String?             @unique @db.Uuid
+  correctionReason  String?
+  /// Only these four status columns may change after insert (database trigger).
+  status            ClinicalEntryStatus @default(ACTIVE)
+  statusReason      String?
+  statusChangedById String?             @db.Uuid
+  statusChangedAt   DateTime?           @db.Timestamptz(3)
+
+  hospital   Hospital @relation(fields: [hospitalId], references: [id], onDelete: Restrict)
+  patient    Patient  @relation(fields: [patientId, hospitalId], references: [id, hospitalId], onDelete: Restrict)
+  recordedBy User     @relation("MedicationHistoryRecordedBy", fields: [recordedById, hospitalId], references: [id, hospitalId], onDelete: Restrict)
+
+  statusChangedBy User?              @relation("MedicationHistoryStatusChangedBy", fields: [statusChangedById, hospitalId], references: [id, hospitalId], onDelete: Restrict)
+  supersedes      MedicationHistory? @relation("MedicationHistoryCorrection", fields: [supersedesId, hospitalId], references: [id, hospitalId], onDelete: Restrict)
+  supersededBy    MedicationHistory? @relation("MedicationHistoryCorrection")
+
+  @@unique([supersedesId, hospitalId])
+  @@unique([id, hospitalId])
+  @@index([patientId])
+  @@map("medication_history")
+}
+
+/// PRD 7.3: date, vaccine name, batch number, next due date.
+model Vaccination {
+  id                String              @id @default(uuid()) @db.Uuid
+  hospitalId        String              @db.Uuid
+  patientId         String              @db.Uuid
+  vaccineName       String
+  administeredOn    DateTime            @db.Date
+  batchNumber       String
+  nextDueOn         DateTime?           @db.Date
+  recordedById      String              @db.Uuid
+  recordedAt        DateTime            @default(now()) @db.Timestamptz(3)
+  /// Correction of an earlier entry (which stays unchanged). Who and when: recordedBy / recordedAt of this row.
+  supersedesId      String?             @unique @db.Uuid
+  correctionReason  String?
+  /// Only these four status columns may change after insert (database trigger).
+  status            ClinicalEntryStatus @default(ACTIVE)
+  statusReason      String?
+  statusChangedById String?             @db.Uuid
+  statusChangedAt   DateTime?           @db.Timestamptz(3)
+
+  hospital   Hospital @relation(fields: [hospitalId], references: [id], onDelete: Restrict)
+  patient    Patient  @relation(fields: [patientId, hospitalId], references: [id, hospitalId], onDelete: Restrict)
+  recordedBy User     @relation("VaccinationRecordedBy", fields: [recordedById, hospitalId], references: [id, hospitalId], onDelete: Restrict)
+
+  statusChangedBy User?        @relation("VaccinationStatusChangedBy", fields: [statusChangedById, hospitalId], references: [id, hospitalId], onDelete: Restrict)
+  supersedes      Vaccination? @relation("VaccinationCorrection", fields: [supersedesId, hospitalId], references: [id, hospitalId], onDelete: Restrict)
+  supersededBy    Vaccination? @relation("VaccinationCorrection")
+
+  @@unique([supersedesId, hospitalId])
+  @@unique([id, hospitalId])
+  @@index([patientId])
+  @@map("vaccinations")
+}
+
+/// Family history flags (PRD 7.3): one row per patient and condition.
+model FamilyHistory {
+  id                String              @id @default(uuid()) @db.Uuid
+  hospitalId        String              @db.Uuid
+  patientId         String              @db.Uuid
+  condition         FamilyCondition
+  present           Boolean
+  relation          String?
+  notes             String?
+  recordedById      String              @db.Uuid
+  recordedAt        DateTime            @default(now()) @db.Timestamptz(3)
+  /// Correction of an earlier entry (which stays unchanged). Who and when: recordedBy / recordedAt of this row.
+  supersedesId      String?             @unique @db.Uuid
+  correctionReason  String?
+  /// Only these four status columns may change after insert (database trigger).
+  status            ClinicalEntryStatus @default(ACTIVE)
+  statusReason      String?
+  statusChangedById String?             @db.Uuid
+  statusChangedAt   DateTime?           @db.Timestamptz(3)
+
+  hospital   Hospital @relation(fields: [hospitalId], references: [id], onDelete: Restrict)
+  patient    Patient  @relation(fields: [patientId, hospitalId], references: [id, hospitalId], onDelete: Restrict)
+  recordedBy User     @relation("FamilyHistoryRecordedBy", fields: [recordedById, hospitalId], references: [id, hospitalId], onDelete: Restrict)
+
+  statusChangedBy User?          @relation("FamilyHistoryStatusChangedBy", fields: [statusChangedById, hospitalId], references: [id, hospitalId], onDelete: Restrict)
+  supersedes      FamilyHistory? @relation("FamilyHistoryCorrection", fields: [supersedesId, hospitalId], references: [id, hospitalId], onDelete: Restrict)
+  supersededBy    FamilyHistory? @relation("FamilyHistoryCorrection")
+
+  @@unique([supersedesId, hospitalId])
+  @@unique([id, hospitalId])
+  @@index([patientId])
+  @@map("family_history")
+}
+
+/// Uploaded files stored in object storage (max 20 MB, CHECK constraint). Other tables reference files by FK.
+model FileAttachment {
+  id              String      @id @default(uuid()) @db.Uuid
+  hospitalId      String      @db.Uuid
+  patientId       String?     @db.Uuid
+  medicalRecordId String?     @db.Uuid
+  purpose         FilePurpose
+  storageKey      String      @unique
+  originalName    String
+  mimeType        String
+  sizeBytes       Int
+  sha256          String      @db.Char(64)
+  uploadedById    String      @db.Uuid
+  createdAt       DateTime    @default(now()) @db.Timestamptz(3)
+
+  hospital        Hospital       @relation(fields: [hospitalId], references: [id], onDelete: Restrict)
+  patient         Patient?       @relation(fields: [patientId, hospitalId], references: [id, hospitalId], onDelete: Restrict)
+  medicalRecord   MedicalRecord? @relation(fields: [medicalRecordId, hospitalId], references: [id, hospitalId], onDelete: Restrict)
+  uploadedBy      User           @relation(fields: [uploadedById, hospitalId], references: [id, hospitalId], onDelete: Restrict)
+  doctorSignature Doctor?        @relation("DoctorSignature")
+  prescriptionPdf Prescription?  @relation("PrescriptionPdf")
+  labReport       LabOrder?      @relation("LabOrderReport")
+  invoiceReceipt  Invoice?       @relation("InvoiceReceipt")
+
+  @@unique([id, hospitalId])
+  @@index([hospitalId, purpose])
+  @@index([patientId])
+  @@index([medicalRecordId])
+  @@map("file_attachments")
+}
+
+// ---------------------------------------------------------------------------
+// Pharmacy and prescriptions (PRD 7.4, 7.6)
+// ---------------------------------------------------------------------------
+
+model Medicine {
+  id                  String       @id @default(uuid()) @db.Uuid
+  hospitalId          String       @db.Uuid
+  name                String
+  genericName         String?
+  form                MedicineForm
+  /// e.g. "500 mg"
+  strength            String
+  /// Low-stock alert threshold (PRD 7.6, configurable per medicine).
+  reorderLevel        Int
+  isActive            Boolean      @default(true)
+  taxClassificationId String?      @db.Uuid
+  /// PHARM-003 (M-07): set when available stock first falls below reorderLevel, cleared on restock,
+  /// so the low-stock alert is raised once per crossing.
+  lowStockSince       DateTime?    @db.Timestamptz(3)
+  createdAt           DateTime     @default(now()) @db.Timestamptz(3)
+  updatedAt           DateTime     @updatedAt @db.Timestamptz(3)
+
+  hospital          Hospital           @relation(fields: [hospitalId], references: [id], onDelete: Restrict)
+  batches           MedicineBatch[]
+  prescriptionItems PrescriptionItem[]
+  taxClassification TaxClassification? @relation(fields: [taxClassificationId, hospitalId], references: [id, hospitalId], onDelete: Restrict)
+
+  @@unique([id, hospitalId])
+  @@unique([hospitalId, name, strength, form])
+  @@index([hospitalId, name])
+  @@map("medicines")
+}
+
+model Supplier {
+  id          String   @id @default(uuid()) @db.Uuid
+  hospitalId  String   @db.Uuid
+  name        String
+  contactName String?
+  phone       String?
+  email       String?
+  addressId   String?  @db.Uuid
+  createdAt   DateTime @default(now()) @db.Timestamptz(3)
+  updatedAt   DateTime @updatedAt @db.Timestamptz(3)
+
+  hospital Hospital        @relation(fields: [hospitalId], references: [id], onDelete: Restrict)
+  address  Address?        @relation(fields: [addressId, hospitalId], references: [id, hospitalId], onDelete: Restrict)
+  batches  MedicineBatch[]
+
+  @@unique([id, hospitalId])
+  @@unique([hospitalId, name])
+  @@map("suppliers")
+}
+
+/// PRD 7.6: batch number, manufacturing date, expiry date, quantity, unit cost, MRP.
+/// quantity is the current balance; every change also writes a StockMovement in the same transaction.
+model MedicineBatch {
+  id             String      @id @default(uuid()) @db.Uuid
+  hospitalId     String      @db.Uuid
+  medicineId     String      @db.Uuid
+  supplierId     String?     @db.Uuid
+  batchNumber    String
+  manufacturedOn DateTime    @db.Date
+  expiresOn      DateTime    @db.Date
+  quantity       Int
+  unitCost       Decimal     @db.Decimal(12, 2)
+  mrp            Decimal     @db.Decimal(12, 2)
+  status         BatchStatus @default(ACTIVE)
+  receivedAt     DateTime    @default(now()) @db.Timestamptz(3)
+  updatedAt      DateTime    @updatedAt @db.Timestamptz(3)
+
+  hospital       Hospital        @relation(fields: [hospitalId], references: [id], onDelete: Restrict)
+  medicine       Medicine        @relation(fields: [medicineId, hospitalId], references: [id, hospitalId], onDelete: Restrict)
+  supplier       Supplier?       @relation(fields: [supplierId, hospitalId], references: [id, hospitalId], onDelete: Restrict)
+  stockMovements StockMovement[]
+  dispenses      Dispense[]
+
+  @@unique([id, hospitalId])
+  @@unique([medicineId, batchNumber])
+  @@index([medicineId, status, expiresOn])
+  @@index([hospitalId, expiresOn])
+  @@map("medicine_batches")
+}
+
+/// Signed quantity change ledger for every batch.
+model StockMovement {
+  id             String            @id @default(uuid()) @db.Uuid
+  hospitalId     String            @db.Uuid
+  batchId        String            @db.Uuid
+  type           StockMovementType
+  quantity       Int
+  reason         String?
+  dispenseId     String?           @unique @db.Uuid
+  /// Null only for system QUARANTINE rows of the nightly expiry run, which link expiryReportId (M-09).
+  performedById  String?           @db.Uuid
+  /// The nightly report a system quarantine belongs to (M-09 trigger checks it was written with it).
+  expiryReportId String?           @db.Uuid
+  createdAt      DateTime          @default(now()) @db.Timestamptz(3)
+
+  hospital     Hospital      @relation(fields: [hospitalId], references: [id], onDelete: Restrict)
+  batch        MedicineBatch @relation(fields: [batchId, hospitalId], references: [id, hospitalId], onDelete: Restrict)
+  dispense     Dispense?     @relation(fields: [dispenseId, hospitalId], references: [id, hospitalId], onDelete: Restrict)
+  performedBy  User?         @relation(fields: [performedById, hospitalId], references: [id, hospitalId], onDelete: Restrict)
+  expiryReport ExpiryReport? @relation(fields: [expiryReportId, hospitalId], references: [id, hospitalId], onDelete: Restrict)
+
+  @@unique([dispenseId, hospitalId])
+  @@index([batchId, createdAt])
+  @@map("stock_movements")
+}
+
+/// Issued at the end of an encounter, linked to the medical record (PRD 7.4).
+model Prescription {
+  id                    String             @id @default(uuid()) @db.Uuid
+  hospitalId            String             @db.Uuid
+  medicalRecordId       String             @db.Uuid
+  status                PrescriptionStatus @default(ISSUED)
+  notes                 String?
+  pdfFileId             String?            @unique @db.Uuid
+  issuedAt              DateTime           @default(now()) @db.Timestamptz(3)
+  updatedAt             DateTime           @updatedAt @db.Timestamptz(3)
+  verifiedById          String?            @db.Uuid
+  verifiedAt            DateTime?          @db.Timestamptz(3)
+  /// Cancelled before any dispensing, with a reason (DEC-040 D3). The prescription is never edited.
+  cancelledAt           DateTime?          @db.Timestamptz(3)
+  cancelledById         String?            @db.Uuid
+  cancellationReason    String?
+  /// Why the doctor prescribed despite a recorded allergy (DEC-040 D4); shown to the pharmacist.
+  allergyOverrideReason String?
+
+  hospital      Hospital            @relation(fields: [hospitalId], references: [id], onDelete: Restrict)
+  medicalRecord MedicalRecord       @relation(fields: [medicalRecordId, hospitalId], references: [id, hospitalId], onDelete: Restrict)
+  pdfFile       FileAttachment?     @relation("PrescriptionPdf", fields: [pdfFileId, hospitalId], references: [id, hospitalId], onDelete: Restrict)
+  items         PrescriptionItem[]
+  events        PrescriptionEvent[]
+
+  verifiedBy  User? @relation("PrescriptionVerifiedBy", fields: [verifiedById, hospitalId], references: [id, hospitalId], onDelete: Restrict)
+  cancelledBy User? @relation("PrescriptionCancelledBy", fields: [cancelledById, hospitalId], references: [id, hospitalId], onDelete: Restrict)
+
+  @@unique([pdfFileId, hospitalId])
+  @@unique([id, hospitalId])
+  @@index([hospitalId, status])
+  @@index([medicalRecordId])
+  @@map("prescriptions")
+}
+
+/// The prescription to medicine many-to-many, carrying per-item dosage (PRD section 05).
+/// Form comes from the Medicine (3NF). Dispensed quantity is the sum of its Dispense rows.
+/// M-10: append-only history of a prescription (DEC-044). `status` is the status after the event.
+/// Only BASELINE (the start of recorded history for older rows) has no actor.
+model PrescriptionEvent {
+  id             String                @id @default(uuid()) @db.Uuid
+  hospitalId     String                @db.Uuid
+  prescriptionId String                @db.Uuid
+  kind           PrescriptionEventKind
+  status         PrescriptionStatus
+  actorId        String?               @db.Uuid
+  reason         String?
+  occurredAt     DateTime              @default(now()) @db.Timestamptz(3)
+
+  hospital     Hospital     @relation(fields: [hospitalId], references: [id], onDelete: Restrict)
+  prescription Prescription @relation(fields: [prescriptionId, hospitalId], references: [id, hospitalId], onDelete: Restrict)
+  actor        User?        @relation("PrescriptionEventActor", fields: [actorId, hospitalId], references: [id, hospitalId], onDelete: Restrict)
+
+  @@unique([id, hospitalId])
+  @@index([prescriptionId, occurredAt])
+  @@map("prescription_events")
+}
+
+model PrescriptionItem {
+  id             String        @id @default(uuid()) @db.Uuid
+  hospitalId     String        @db.Uuid
+  prescriptionId String        @db.Uuid
+  medicineId     String        @db.Uuid
+  /// e.g. "500 mg"
+  dosage         String
+  frequency      DoseFrequency
+  durationDays   Int
+  quantity       Int
+  instructions   String?
+
+  hospital     Hospital     @relation(fields: [hospitalId], references: [id], onDelete: Restrict)
+  prescription Prescription @relation(fields: [prescriptionId, hospitalId], references: [id, hospitalId], onDelete: Restrict)
+  medicine     Medicine     @relation(fields: [medicineId, hospitalId], references: [id, hospitalId], onDelete: Restrict)
+  dispenses    Dispense[]
+
+  @@unique([id, hospitalId])
+  @@unique([prescriptionId, medicineId])
+  @@map("prescription_items")
+}
+
+/// One row per batch consumed; first-in-first-out may span several batches (PRD 7.6).
+/// PHARM-005 (M-08): the stored result of one nightly expiry run, one per hospital and
+/// hospital-local day. items: [{batchId, medicineId, medicineName, strength, batchNumber, expiresOn,
+/// quantity, kind: "EXPIRING" | "QUARANTINED"}], a snapshot never used to look rows up.
+model ExpiryReport {
+  id         String   @id @default(uuid()) @db.Uuid
+  hospitalId String   @db.Uuid
+  runDate    DateTime @db.Date
+  items      Json
+  createdAt  DateTime @default(now()) @db.Timestamptz(3)
+
+  hospital       Hospital        @relation(fields: [hospitalId], references: [id], onDelete: Restrict)
+  stockMovements StockMovement[]
+
+  @@unique([id, hospitalId])
+  @@unique([hospitalId, runDate])
+  @@map("expiry_reports")
+}
+
+model Dispense {
+  id                 String   @id @default(uuid()) @db.Uuid
+  hospitalId         String   @db.Uuid
+  prescriptionItemId String   @db.Uuid
+  batchId            String   @db.Uuid
+  quantity           Int
+  dispensedById      String   @db.Uuid
+  dispensedAt        DateTime @default(now()) @db.Timestamptz(3)
+
+  hospital         Hospital         @relation(fields: [hospitalId], references: [id], onDelete: Restrict)
+  prescriptionItem PrescriptionItem @relation(fields: [prescriptionItemId, hospitalId], references: [id, hospitalId], onDelete: Restrict)
+  batch            MedicineBatch    @relation(fields: [batchId, hospitalId], references: [id, hospitalId], onDelete: Restrict)
+  dispensedBy      User             @relation(fields: [dispensedById, hospitalId], references: [id, hospitalId], onDelete: Restrict)
+  stockMovement    StockMovement?
+  invoiceItems     InvoiceItem[]
+
+  @@unique([id, hospitalId])
+  @@index([prescriptionItemId])
+  @@map("dispenses")
+}
+
+// ---------------------------------------------------------------------------
+// Laboratory (PRD 7.5)
+// ---------------------------------------------------------------------------
+
+model LabTest {
+  id                  String          @id @default(uuid()) @db.Uuid
+  hospitalId          String          @db.Uuid
+  code                String
+  name                String
+  category            LabTestCategory @default(LABORATORY)
+  unit                String?
+  sampleType          String?
+  price               Decimal         @db.Decimal(12, 2)
+  isActive            Boolean         @default(true)
+  taxClassificationId String?         @db.Uuid
+  createdAt           DateTime        @default(now()) @db.Timestamptz(3)
+  updatedAt           DateTime        @updatedAt @db.Timestamptz(3)
+
+  hospital          Hospital           @relation(fields: [hospitalId], references: [id], onDelete: Restrict)
+  ranges            LabTestRange[]
+  orderItems        LabOrderItem[]
+  taxClassification TaxClassification? @relation(fields: [taxClassificationId, hospitalId], references: [id, hospitalId], onDelete: Restrict)
+
+  @@unique([id, hospitalId])
+  @@unique([hospitalId, code])
+  @@map("lab_tests")
+}
+
+/// Reference ranges for automatic out-of-range flagging (PRD 7.5 hint), optionally by gender and age.
+model LabTestRange {
+  id          String  @id @default(uuid()) @db.Uuid
+  hospitalId  String  @db.Uuid
+  labTestId   String  @db.Uuid
+  gender      Gender?
+  ageMinYears Int?
+  ageMaxYears Int?
+  low         Decimal @db.Decimal(12, 4)
+  high        Decimal @db.Decimal(12, 4)
+
+  hospital Hospital @relation(fields: [hospitalId], references: [id], onDelete: Restrict)
+  labTest  LabTest  @relation(fields: [labTestId, hospitalId], references: [id, hospitalId], onDelete: Cascade)
+
+  @@index([labTestId])
+  @@map("lab_test_ranges")
+}
+
+/// Ordered by a doctor during an encounter; one record has many orders (PRD section 05).
+model LabOrder {
+  id                  String         @id @default(uuid()) @db.Uuid
+  hospitalId          String         @db.Uuid
+  medicalRecordId     String         @db.Uuid
+  orderedById         String         @db.Uuid
+  status              LabOrderStatus @default(ORDERED)
+  priority            LabPriority    @default(ROUTINE)
+  sampleCollectedAt   DateTime?      @db.Timestamptz(3)
+  sampleCollectedById String?        @db.Uuid
+  approvedAt          DateTime?      @db.Timestamptz(3)
+  approvedById        String?        @db.Uuid
+  rejectionReason     String?
+  reportFileId        String?        @unique @db.Uuid
+  createdAt           DateTime       @default(now()) @db.Timestamptz(3)
+  updatedAt           DateTime       @updatedAt @db.Timestamptz(3)
+  /// Amended report for an APPROVED order (approved results are locked). The original order stays unchanged.
+  amendsLabOrderId    String?        @unique @db.Uuid
+  amendmentReason     String?
+  /// Optional note from the doctor to the laboratory (M-06).
+  clinicalNotes       String?
+  /// Cancelled before sample collection, with a reason (M-06).
+  cancelledAt         DateTime?      @db.Timestamptz(3)
+  cancelledById       String?        @db.Uuid
+  cancellationReason  String?
+  /// Last rejection by a senior technician (DEC-040 D7); the reason is rejectionReason.
+  rejectedAt          DateTime?      @db.Timestamptz(3)
+  rejectedById        String?        @db.Uuid
+
+  hospital          Hospital        @relation(fields: [hospitalId], references: [id], onDelete: Restrict)
+  medicalRecord     MedicalRecord   @relation(fields: [medicalRecordId, hospitalId], references: [id, hospitalId], onDelete: Restrict)
+  orderedBy         User            @relation("LabOrderOrderedBy", fields: [orderedById, hospitalId], references: [id, hospitalId], onDelete: Restrict)
+  sampleCollectedBy User?           @relation("LabOrderSampleCollectedBy", fields: [sampleCollectedById, hospitalId], references: [id, hospitalId], onDelete: Restrict)
+  approvedBy        User?           @relation("LabOrderApprovedBy", fields: [approvedById, hospitalId], references: [id, hospitalId], onDelete: Restrict)
+  cancelledBy       User?           @relation("LabOrderCancelledBy", fields: [cancelledById, hospitalId], references: [id, hospitalId], onDelete: Restrict)
+  rejectedBy        User?           @relation("LabOrderRejectedBy", fields: [rejectedById, hospitalId], references: [id, hospitalId], onDelete: Restrict)
+  reportFile        FileAttachment? @relation("LabOrderReport", fields: [reportFileId, hospitalId], references: [id, hospitalId], onDelete: Restrict)
+  items             LabOrderItem[]
+
+  amends    LabOrder? @relation("LabOrderAmendment", fields: [amendsLabOrderId, hospitalId], references: [id, hospitalId], onDelete: Restrict)
+  amendedBy LabOrder? @relation("LabOrderAmendment")
+
+  @@unique([reportFileId, hospitalId])
+  @@unique([amendsLabOrderId, hospitalId])
+  @@unique([id, hospitalId])
+  @@index([hospitalId, status])
+  @@index([medicalRecordId])
+  @@map("lab_orders")
+}
+
+model LabOrderItem {
+  id         String @id @default(uuid()) @db.Uuid
+  hospitalId String @db.Uuid
+  labOrderId String @db.Uuid
+  labTestId  String @db.Uuid
+
+  hospital     Hospital      @relation(fields: [hospitalId], references: [id], onDelete: Restrict)
+  labOrder     LabOrder      @relation(fields: [labOrderId, hospitalId], references: [id, hospitalId], onDelete: Restrict)
+  labTest      LabTest       @relation(fields: [labTestId, hospitalId], references: [id, hospitalId], onDelete: Restrict)
+  result       LabResult?
+  invoiceItems InvoiceItem[]
+
+  @@unique([id, hospitalId])
+  @@unique([labOrderId, labTestId])
+  @@map("lab_order_items")
+}
+
+/// Hybrid storage: structured value per test, plus an optional PDF report on the order.
+model LabResult {
+  id             String      @id @default(uuid()) @db.Uuid
+  hospitalId     String      @db.Uuid
+  labOrderItemId String      @unique @db.Uuid
+  valueNumeric   Decimal?    @db.Decimal(12, 4)
+  valueText      String?
+  flag           ResultFlag?
+  enteredById    String      @db.Uuid
+  enteredAt      DateTime    @default(now()) @db.Timestamptz(3)
+  /// Copied from the test and the matching range when the result is entered (DEC-040 D8), so the
+  /// report keeps the range it was judged against even if the catalogue changes later.
+  unit           String?
+  referenceLow   Decimal?    @db.Decimal(12, 4)
+  referenceHigh  Decimal?    @db.Decimal(12, 4)
+
+  hospital     Hospital     @relation(fields: [hospitalId], references: [id], onDelete: Restrict)
+  labOrderItem LabOrderItem @relation(fields: [labOrderItemId, hospitalId], references: [id, hospitalId], onDelete: Restrict)
+  enteredBy    User         @relation(fields: [enteredById, hospitalId], references: [id, hospitalId], onDelete: Restrict)
+
+  @@unique([labOrderItemId, hospitalId])
+  @@map("lab_results")
+}
+
+// ---------------------------------------------------------------------------
+// Billing and payments (PRD 7.7)
+// ---------------------------------------------------------------------------
+
+/// One original invoice per visit, plus late-charge invoices (Q19 A). Totals equal the sum of the
+/// lines (checked at commit, M-11b). Drafts have no number; the document number, type, issue date
+/// and seller details are written by the database when an invoice is finalised (DEC-052), and an
+/// issued document never changes (DEC-053). `sequence` is set by the database.
+model Invoice {
+  id                String               @id @default(uuid()) @db.Uuid
+  hospitalId        String               @db.Uuid
+  appointmentId     String               @db.Uuid
+  patientId         String               @db.Uuid
+  kind              InvoiceKind          @default(ORIGINAL)
+  sequence          Int                  @default(0)
+  relatedInvoiceId  String?              @db.Uuid
+  invoiceNumber     String?
+  status            InvoiceStatus        @default(DRAFT)
+  subtotal          Decimal              @default(0) @db.Decimal(12, 2)
+  taxAmount         Decimal              @default(0) @db.Decimal(12, 2)
+  discountAmount    Decimal              @default(0) @db.Decimal(12, 2)
+  total             Decimal              @default(0) @db.Decimal(12, 2)
+  discountReason    String?
+  discountSetById   String?              @db.Uuid
+  discountSetAt     DateTime?            @db.Timestamptz(3)
+  voidedAt          DateTime?            @db.Timestamptz(3)
+  voidedById        String?              @db.Uuid
+  voidReason        String?
+  documentType      DocumentType?
+  issueDate         DateTime?            @db.Date
+  financialYear     String?              @db.VarChar(5)
+  numberingScope    String?
+  seriesId          String?              @db.Uuid
+  serial            Int?
+  gstRegistrationId String?              @db.Uuid
+  registrationType  GstRegistrationType?
+  sellerGstin       String?              @db.VarChar(15)
+  sellerLegalName   String?
+  sellerStateCode   String?              @db.VarChar(2)
+  finalisedAt       DateTime?            @db.Timestamptz(3)
+  finalisedById     String?              @db.Uuid
+  receiptFileId     String?              @unique @db.Uuid
+  createdById       String               @db.Uuid
+  createdAt         DateTime             @default(now()) @db.Timestamptz(3)
+  updatedAt         DateTime             @updatedAt @db.Timestamptz(3)
+
+  hospital           Hospital                   @relation(fields: [hospitalId], references: [id], onDelete: Restrict)
+  appointment        Appointment                @relation(fields: [appointmentId, hospitalId], references: [id, hospitalId], onDelete: Restrict)
+  patient            Patient                    @relation(fields: [patientId, hospitalId], references: [id, hospitalId], onDelete: Restrict)
+  relatedInvoice     Invoice?                   @relation("InvoiceLateCharges", fields: [relatedInvoiceId, hospitalId], references: [id, hospitalId], onDelete: Restrict)
+  lateCharges        Invoice[]                  @relation("InvoiceLateCharges")
+  createdBy          User                       @relation("InvoiceCreatedBy", fields: [createdById, hospitalId], references: [id, hospitalId], onDelete: Restrict)
+  discountSetBy      User?                      @relation("InvoiceDiscountSetBy", fields: [discountSetById, hospitalId], references: [id, hospitalId], onDelete: Restrict)
+  voidedBy           User?                      @relation("InvoiceVoidedBy", fields: [voidedById, hospitalId], references: [id, hospitalId], onDelete: Restrict)
+  finalisedBy        User?                      @relation("InvoiceFinalisedBy", fields: [finalisedById, hospitalId], references: [id, hospitalId], onDelete: Restrict)
+  series             DocumentNumberSeries?      @relation(fields: [seriesId, hospitalId], references: [id, hospitalId], onDelete: Restrict)
+  gstRegistration    HospitalGstRegistration?   @relation(fields: [gstRegistrationId, hospitalId], references: [id, hospitalId], onDelete: Restrict)
+  receiptFile        FileAttachment?            @relation("InvoiceReceipt", fields: [receiptFileId, hospitalId], references: [id, hospitalId], onDelete: Restrict)
+  items              InvoiceItem[]
+  payments           Payment[]
+  claims             InsuranceClaim[]
+  events             InvoiceEvent[]
+  correctionRequests InvoiceCorrectionRequest[]
+
+  @@unique([receiptFileId, hospitalId])
+  @@unique([id, hospitalId])
+  @@unique([appointmentId, sequence])
+  @@unique([seriesId, serial])
+  @@unique([numberingScope, financialYear, invoiceNumber])
+  @@unique([hospitalId, financialYear, invoiceNumber])
+  @@index([hospitalId, status])
+  @@index([hospitalId, createdAt])
+  @@index([hospitalId, patientId, createdAt])
+  @@index([appointmentId])
+  @@index([relatedInvoiceId])
+  @@map("invoices")
+}
+
+/// Line items from consultation, lab, pharmacy, room and other charges. Source links are real FKs;
+/// price and quantity come from the source (Q4 A, Q6 A). Every line snapshots its tax data, checked
+/// by the database against the settings in force on the service date (DEC-051, DEC-058).
+model InvoiceItem {
+  id                        String                 @id @default(uuid()) @db.Uuid
+  hospitalId                String                 @db.Uuid
+  invoiceId                 String                 @db.Uuid
+  kind                      InvoiceItemKind
+  description               String
+  quantity                  Int
+  unitPrice                 Decimal                @db.Decimal(12, 2)
+  lineTotal                 Decimal                @db.Decimal(12, 2)
+  labOrderItemId            String?                @db.Uuid
+  dispenseId                String?                @db.Uuid
+  roomId                    String?                @db.Uuid
+  serviceDate               DateTime               @db.Date
+  addedById                 String?                @db.Uuid
+  unclassified              Boolean                @default(false)
+  classificationId          String?                @db.Uuid
+  classificationVersionId   String?                @db.Uuid
+  classificationName        String?
+  hsnSac                    String?                @db.VarChar(8)
+  supplyType                TaxSupplyType?
+  treatment                 TaxTreatment?
+  ratePercent               Decimal?               @db.Decimal(5, 2)
+  priceIncludesTax          Boolean?
+  gstCollected              Boolean                @default(false)
+  notCollectedReason        TaxNotCollectedReason?
+  grossAmount               Decimal                @db.Decimal(12, 2)
+  discountShare             Decimal                @default(0) @db.Decimal(12, 2)
+  taxableValue              Decimal                @db.Decimal(12, 2)
+  taxAmount                 Decimal                @db.Decimal(12, 2)
+  roomRuleId                String?                @db.Uuid
+  roomDailyCharge           Decimal?               @db.Decimal(12, 2)
+  roomCriticalCare          Boolean?
+  /// The visit charged by a consultation line (decision 4: one unreleased consultation per visit).
+  consultationAppointmentId String?                @db.Uuid
+  /// Set by the database only when the line's draft is voided; frees its source for a replacement draft.
+  releasedAt                DateTime?              @db.Timestamptz(3)
+  createdAt                 DateTime               @default(now()) @db.Timestamptz(3)
+
+  hospital                Hospital                  @relation(fields: [hospitalId], references: [id], onDelete: Restrict)
+  invoice                 Invoice                   @relation(fields: [invoiceId, hospitalId], references: [id, hospitalId], onDelete: Restrict)
+  labOrderItem            LabOrderItem?             @relation(fields: [labOrderItemId, hospitalId], references: [id, hospitalId], onDelete: Restrict)
+  dispense                Dispense?                 @relation(fields: [dispenseId, hospitalId], references: [id, hospitalId], onDelete: Restrict)
+  room                    Room?                     @relation(fields: [roomId, hospitalId], references: [id, hospitalId], onDelete: Restrict)
+  addedBy                 User?                     @relation("InvoiceItemAddedBy", fields: [addedById, hospitalId], references: [id, hospitalId], onDelete: Restrict)
+  classification          TaxClassification?        @relation(fields: [classificationId, hospitalId], references: [id, hospitalId], onDelete: Restrict)
+  version                 TaxClassificationVersion? @relation(fields: [classificationVersionId, hospitalId], references: [id, hospitalId], onDelete: Restrict)
+  roomRule                StatutoryRoomTaxRule?     @relation(fields: [roomRuleId], references: [id], onDelete: Restrict)
+  consultationAppointment Appointment?              @relation("InvoiceItemConsultation", fields: [consultationAppointmentId, hospitalId], references: [id, hospitalId], onDelete: Restrict)
+
+  // At most one unreleased line per source: partial unique indexes in the migration (decision 4).
+  @@index([invoiceId])
+  @@index([labOrderItemId])
+  @@index([dispenseId])
+  @@index([consultationAppointmentId])
+  @@index([classificationVersionId])
+  @@index([classificationId])
+  @@map("invoice_items")
+}
+
+/// Document number series (DEC-052): per hospital, registration, financial year and document type;
+/// the scope is the GSTIN, or the hospital when unregistered. Never deleted; the counter never
+/// decreases; opened automatically at the first finalise of a year, or by the hospital admin.
+model DocumentNumberSeries {
+  id                String       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  hospitalId        String       @db.Uuid
+  gstRegistrationId String?      @db.Uuid
+  numberingScope    String
+  documentType      DocumentType
+  financialYear     String       @db.VarChar(5)
+  prefix            String       @db.VarChar(4)
+  nextSerial        Int          @default(1)
+  openedAt          DateTime     @default(now()) @db.Timestamptz(3)
+  openedById        String       @db.Uuid
+  closedAt          DateTime?    @db.Timestamptz(3)
+  closedById        String?      @db.Uuid
+
+  hospital        Hospital                 @relation(fields: [hospitalId], references: [id], onDelete: Restrict)
+  gstRegistration HospitalGstRegistration? @relation(fields: [gstRegistrationId, hospitalId], references: [id, hospitalId], onDelete: Restrict)
+  openedBy        User                     @relation("DocumentSeriesOpenedBy", fields: [openedById, hospitalId], references: [id, hospitalId], onDelete: Restrict)
+  closedBy        User?                    @relation("DocumentSeriesClosedBy", fields: [closedById, hospitalId], references: [id, hospitalId], onDelete: Restrict)
+  invoices        Invoice[]
+
+  @@unique([id, hospitalId])
+  @@unique([numberingScope, financialYear, prefix])
+  @@unique([hospitalId, financialYear, prefix])
+  @@map("document_number_series")
+}
+
+/// Append-only invoice history, written by the database (M-11b).
+model InvoiceEvent {
+  id         String           @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  hospitalId String           @db.Uuid
+  invoiceId  String           @db.Uuid
+  kind       InvoiceEventKind
+  actorId    String           @db.Uuid
+  note       String?
+  createdAt  DateTime         @default(now()) @db.Timestamptz(3)
+
+  hospital Hospital @relation(fields: [hospitalId], references: [id], onDelete: Restrict)
+  invoice  Invoice  @relation(fields: [invoiceId, hospitalId], references: [id, hospitalId], onDelete: Restrict)
+  actor    User     @relation("InvoiceEventActor", fields: [actorId, hospitalId], references: [id, hospitalId], onDelete: Restrict)
+
+  @@index([invoiceId, createdAt])
+  @@map("invoice_events")
+}
+
+/// A request to correct or cancel an issued document (DEC-053). Append-only; it never changes the
+/// document. The accountant handles the correction outside MedCore.
+model InvoiceCorrectionRequest {
+  id            String                @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  hospitalId    String                @db.Uuid
+  invoiceId     String                @db.Uuid
+  kind          CorrectionRequestKind
+  description   String
+  requestedById String                @db.Uuid
+  createdAt     DateTime              @default(now()) @db.Timestamptz(3)
+
+  hospital    Hospital                       @relation(fields: [hospitalId], references: [id], onDelete: Restrict)
+  invoice     Invoice                        @relation(fields: [invoiceId, hospitalId], references: [id, hospitalId], onDelete: Restrict)
+  requestedBy User                           @relation("InvoiceCorrectionRequestedBy", fields: [requestedById, hospitalId], references: [id, hospitalId], onDelete: Restrict)
+  notes       InvoiceCorrectionRequestNote[]
+
+  @@unique([id, hospitalId])
+  @@index([invoiceId, createdAt])
+  @@map("invoice_correction_requests")
+}
+
+/// Accountant's append-only outcome note on a correction request, for example an external
+/// credit-note reference. Information only: never changes the document or its balance.
+model InvoiceCorrectionRequestNote {
+  id                String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  hospitalId        String   @db.Uuid
+  requestId         String   @db.Uuid
+  note              String
+  externalReference String?  @db.VarChar(100)
+  authorId          String   @db.Uuid
+  createdAt         DateTime @default(now()) @db.Timestamptz(3)
+
+  hospital Hospital                 @relation(fields: [hospitalId], references: [id], onDelete: Restrict)
+  request  InvoiceCorrectionRequest @relation(fields: [requestId, hospitalId], references: [id, hospitalId], onDelete: Restrict)
+  author   User                     @relation("InvoiceCorrectionNoteAuthor", fields: [authorId, hospitalId], references: [id, hospitalId], onDelete: Restrict)
+
+  @@index([requestId, createdAt])
+  @@map("invoice_correction_request_notes")
+}
+
+/// Card/UPI/netbanking payments are confirmed only by verified webhooks (PRD 7.7).
+model Payment {
+  id                String           @id @default(uuid()) @db.Uuid
+  hospitalId        String           @db.Uuid
+  invoiceId         String           @db.Uuid
+  method            PaymentMethod
+  provider          PaymentProvider?
+  /// Stripe PaymentIntent id or Razorpay payment id; unique for webhook idempotency.
+  providerReference String?          @unique
+  amount            Decimal          @db.Decimal(12, 2)
+  status            PaymentStatus    @default(PENDING)
+  paidAt            DateTime?        @db.Timestamptz(3)
+  receivedById      String?          @db.Uuid
+  createdAt         DateTime         @default(now()) @db.Timestamptz(3)
+  updatedAt         DateTime         @updatedAt @db.Timestamptz(3)
+  reconciledAt      DateTime?        @db.Timestamptz(3)
+  reconciledById    String?          @db.Uuid
+
+  hospital   Hospital @relation(fields: [hospitalId], references: [id], onDelete: Restrict)
+  invoice    Invoice  @relation(fields: [invoiceId, hospitalId], references: [id, hospitalId], onDelete: Restrict)
+  receivedBy User?    @relation("PaymentReceivedBy", fields: [receivedById, hospitalId], references: [id, hospitalId], onDelete: Restrict)
+
+  reconciledBy User? @relation("PaymentReconciledBy", fields: [reconciledById, hospitalId], references: [id, hospitalId], onDelete: Restrict)
+
+  /// Reversal (M-12): all three are set together, only when status is REVERSED.
+  reversedAt     DateTime? @db.Timestamptz(3)
+  reversedById   String?   @db.Uuid
+  reversalReason String?
+  reversedBy     User?     @relation("PaymentReversedBy", fields: [reversedById, hospitalId], references: [id, hospitalId], onDelete: Restrict)
+
+  @@index([invoiceId])
+  @@index([hospitalId, paidAt])
+  @@map("payments")
+}
+
+/// Processed provider webhook events (replay protection). Global: identified by provider event id.
+model WebhookEvent {
+  id          String          @id @default(uuid()) @db.Uuid
+  provider    PaymentProvider
+  eventId     String
+  receivedAt  DateTime        @default(now()) @db.Timestamptz(3)
+  processedAt DateTime?       @db.Timestamptz(3)
+
+  @@unique([provider, eventId])
+  @@map("webhook_events")
+}
+
+/// Insurance claim through a Third Party Administrator (PRD 7.7).
+model InsuranceClaim {
+  id            String      @id @default(uuid()) @db.Uuid
+  hospitalId    String      @db.Uuid
+  invoiceId     String      @db.Uuid
+  tpaName       String
+  policyNumber  String
+  claimAmount   Decimal     @db.Decimal(12, 2)
+  status        ClaimStatus @default(SUBMITTED)
+  settledAmount Decimal?    @db.Decimal(12, 2)
+  notes         String?
+  submittedAt   DateTime    @default(now()) @db.Timestamptz(3)
+  decidedAt     DateTime?   @db.Timestamptz(3)
+  updatedAt     DateTime    @updatedAt @db.Timestamptz(3)
+
+  hospital Hospital @relation(fields: [hospitalId], references: [id], onDelete: Restrict)
+  invoice  Invoice  @relation(fields: [invoiceId, hospitalId], references: [id, hospitalId], onDelete: Restrict)
+
+  @@index([hospitalId, status])
+  @@map("insurance_claims")
+}
+
+// ---------------------------------------------------------------------------
+// Notifications and audit
+// ---------------------------------------------------------------------------
+
+/// Recipient is a user; the linked entity is polymorphic (PRD section 05).
+model Notification {
+  id          String    @id @default(uuid()) @db.Uuid
+  hospitalId  String?   @db.Uuid
+  recipientId String    @db.Uuid
+  type        String
+  title       String
+  body        String
+  entityType  String?
+  entityId    String?   @db.Uuid
+  readAt      DateTime? @db.Timestamptz(3)
+  createdAt   DateTime  @default(now()) @db.Timestamptz(3)
+  /// "<type>:<entityId>" for notifications sent at most once; NULL for repeatable ones (M-15).
+  dedupeKey   String?
+
+  hospital             Hospital?              @relation(fields: [hospitalId], references: [id], onDelete: Restrict)
+  recipient            User                   @relation("NotificationRecipient", fields: [recipientId], references: [id], onDelete: Restrict)
+  /// Same-tenant guarantee for hospital notifications (constraints.sql, DEC-031). Not enforced when
+  /// hospitalId is null (platform notifications). Use `recipient` in application code.
+  recipientSameTenant  User?                  @relation("NotificationRecipientSameTenant", fields: [recipientId, hospitalId], references: [id, hospitalId], onDelete: Restrict, onUpdate: NoAction, map: "notifications_recipient_same_tenant_fkey")
+  deliveries           NotificationDelivery[] @relation("DeliveryNotification")
+  /// Back-relation of the deliveries same-tenant key (DEC-031); not used by application code.
+  deliveriesSameTenant NotificationDelivery[] @relation("DeliveryNotificationSameTenant")
+
+  @@unique([id, hospitalId], map: "notifications_id_hospital_key")
+  @@unique([recipientId, dedupeKey])
+  @@index([recipientId, readAt])
+  @@index([recipientId, createdAt])
+  @@map("notifications")
+}
+
+model NotificationDelivery {
+  id             String              @id @default(uuid()) @db.Uuid
+  notificationId String              @db.Uuid
+  channel        NotificationChannel
+  status         DeliveryStatus      @default(PENDING)
+  attempts       Int                 @default(0)
+  lastError      String?
+  sentAt         DateTime?           @db.Timestamptz(3)
+  createdAt      DateTime            @default(now()) @db.Timestamptz(3)
+  updatedAt      DateTime            @updatedAt @db.Timestamptz(3)
+  hospitalId     String?             @db.Uuid
+
+  notification           Notification  @relation("DeliveryNotification", fields: [notificationId], references: [id], onDelete: Cascade)
+  /// Same-tenant guarantee (constraints.sql, DEC-031). Use `notification` in application code.
+  notificationSameTenant Notification? @relation("DeliveryNotificationSameTenant", fields: [notificationId, hospitalId], references: [id, hospitalId], onDelete: Cascade, onUpdate: NoAction, map: "notification_deliveries_same_tenant_fkey")
+
+  hospital Hospital? @relation(fields: [hospitalId], references: [id], onDelete: Restrict)
+
+  @@unique([notificationId, channel])
+  @@index([status, updatedAt])
+  @@map("notification_deliveries")
+}
+
+/// Every create/update/delete with userId, IP and timestamp (PRD section 10). Append-only.
+model AuditLog {
+  id         String   @id @default(uuid()) @db.Uuid
+  hospitalId String?  @db.Uuid
+  actorId    String?  @db.Uuid
+  /// e.g. "auth.login", "appointment.create"
+  action     String
+  entityType String
+  entityId   String?
+  ipAddress  String?
+  userAgent  String?
+  /// Before/after values with sensitive fields redacted.
+  changes    Json?
+  createdAt  DateTime @default(now()) @db.Timestamptz(3)
+
+  hospital Hospital? @relation(fields: [hospitalId], references: [id], onDelete: Restrict)
+  actor    User?     @relation(fields: [actorId], references: [id], onDelete: Restrict)
+
+  @@index([hospitalId, createdAt])
+  @@index([entityType, entityId])
+  @@index([actorId, createdAt])
+  @@map("audit_logs")
+}
+
+// Phase 8: tax configuration (M-11a, DEC-045 to DEC-050) ------------------------------------------
+// Rules Prisma cannot express (CHECKs, the exclusion constraint, immutability triggers) live in the
+// migration: prisma/migrations/20261117200000_tax_configuration.
+
+/// The stable identity of a kind of supply in one hospital. Never deleted; only the name and the
+/// active flag change.
+model TaxClassification {
+  id          String        @id @default(uuid()) @db.Uuid
+  hospitalId  String        @db.Uuid
+  name        String
+  supplyType  TaxSupplyType
+  hsnSac      String        @db.VarChar(8)
+  isActive    Boolean       @default(true)
+  createdById String        @db.Uuid
+  createdAt   DateTime      @default(now()) @db.Timestamptz(3)
+  updatedAt   DateTime      @updatedAt @db.Timestamptz(3)
+
+  hospital     Hospital                   @relation(fields: [hospitalId], references: [id], onDelete: Restrict)
+  createdBy    User                       @relation("TaxClassificationCreatedBy", fields: [createdById, hospitalId], references: [id, hospitalId], onDelete: Restrict)
+  versions     TaxClassificationVersion[]
+  defaults     HospitalTaxDefault[]
+  labTests     LabTest[]
+  medicines    Medicine[]
+  invoiceItems InvoiceItem[]
+
+  @@unique([id, hospitalId])
+  @@unique([hospitalId, name])
+  @@map("tax_classifications")
+}
+
+/// What the law says for a classification from a date. The version in force on a date has the
+/// latest effectiveFrom on or before it. Immutable once it has taken effect.
+model TaxClassificationVersion {
+  id               String       @id @default(uuid()) @db.Uuid
+  hospitalId       String       @db.Uuid
+  classificationId String       @db.Uuid
+  treatment        TaxTreatment
+  ratePercent      Decimal      @db.Decimal(5, 2)
+  priceIncludesTax Boolean
+  effectiveFrom    DateTime     @db.Date
+  createdById      String       @db.Uuid
+  createdAt        DateTime     @default(now()) @db.Timestamptz(3)
+
+  hospital       Hospital          @relation(fields: [hospitalId], references: [id], onDelete: Restrict)
+  classification TaxClassification @relation(fields: [classificationId, hospitalId], references: [id, hospitalId], onDelete: Restrict)
+  createdBy      User              @relation("TaxClassificationVersionCreatedBy", fields: [createdById, hospitalId], references: [id, hospitalId], onDelete: Restrict)
+  invoiceItems   InvoiceItem[]
+
+  @@unique([id, hospitalId])
+  @@unique([classificationId, effectiveFrom])
+  @@map("tax_classification_versions")
+}
+
+/// The hospital's classification for consultations and for lab tests (kind CONSULTATION or LAB).
+model HospitalTaxDefault {
+  hospitalId       String          @db.Uuid
+  kind             InvoiceItemKind
+  classificationId String          @db.Uuid
+  updatedById      String          @db.Uuid
+  updatedAt        DateTime        @updatedAt @db.Timestamptz(3)
+
+  hospital       Hospital          @relation(fields: [hospitalId], references: [id], onDelete: Restrict)
+  classification TaxClassification @relation(fields: [classificationId, hospitalId], references: [id, hospitalId], onDelete: Restrict)
+  updatedBy      User              @relation("HospitalTaxDefaultUpdatedBy", fields: [updatedById, hospitalId], references: [id, hospitalId], onDelete: Restrict)
+
+  @@id([hospitalId, kind])
+  @@map("hospital_tax_defaults")
+}
+
+/// Dated GST registrations; the one in force on a date has the latest effectiveFrom on or before
+/// it. Never edited or backdated. A GSTIN belongs to one MedCore hospital only (Q1g A).
+model HospitalGstRegistration {
+  id               String              @id @default(uuid()) @db.Uuid
+  hospitalId       String              @db.Uuid
+  registrationType GstRegistrationType
+  gstin            String?             @db.VarChar(15)
+  legalName        String?
+  stateCode        String?             @db.Char(2)
+  effectiveFrom    DateTime            @db.Date
+  attestedById     String              @db.Uuid
+  attestedAt       DateTime            @default(now()) @db.Timestamptz(3)
+
+  hospital       Hospital               @relation(fields: [hospitalId], references: [id], onDelete: Restrict)
+  attestedBy     User                   @relation("GstRegistrationAttestedBy", fields: [attestedById, hospitalId], references: [id, hospitalId], onDelete: Restrict)
+  invoices       Invoice[]
+  documentSeries DocumentNumberSeries[]
+
+  @@unique([id, hospitalId])
+  @@unique([hospitalId, effectiveFrom])
+  @@map("hospital_gst_registrations")
+}
+
+/// Platform reference data (not tenant data): the statutory room rule. Append-only; changed only by
+/// a reviewed migration.
+model StatutoryRoomTaxRule {
+  id               String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  effectiveFrom    DateTime      @unique @db.Date
+  thresholdPerDay  Decimal       @db.Decimal(12, 2)
+  ratePercent      Decimal       @db.Decimal(5, 2)
+  sacCode          String        @db.VarChar(8)
+  priceIncludesTax Boolean       @default(false)
+  legalReference   String
+  createdAt        DateTime      @default(now()) @db.Timestamptz(3)
+  invoiceItems     InvoiceItem[]
+
+  @@map("statutory_room_tax_rules")
+}

@@ -1,0 +1,419 @@
+@import 'tailwindcss';
+
+/*
+ * Approved design tokens (docs/DESIGN.md, DEC-033). Every component reads these; do not add colours
+ * outside this set or hardcode shades. Sage is the brand, off-white the working surface, tomato the
+ * selective accent (focus, current page, the one key action, alerts that need attention).
+ */
+@theme {
+  --color-sage-50: #f3f6f2;
+  --color-sage-100: #e3ebe1;
+  --color-sage-200: #c8d7c4;
+  --color-sage-300: #a6bea1;
+  --color-sage-400: #84a47e;
+  --color-sage-500: #688a62;
+  --color-sage-600: #52714d;
+  --color-sage-700: #405a3d;
+  --color-sage-800: #2f432d;
+  --color-sage-900: #1f2d1e;
+  --color-tomato-50: #fdf0ec;
+  --color-tomato-100: #fadbd2;
+  --color-tomato-600: #c8432b;
+  --color-tomato-700: #a33622;
+  --color-tomato-800: #7f2a1a;
+
+  --color-bg: #faf8f3;
+  --color-surface: #ffffff;
+  --color-surface-muted: #f2efe7;
+  --color-border: #e2ddd1;
+  --color-border-strong: #8c8576;
+  --color-ink: #1e2420;
+  --color-ink-secondary: #4a534c;
+  --color-ink-muted: #6b736d;
+  --color-ink-disabled: #9aa09b;
+
+  --color-success: #2e6b3f;
+  --color-success-bg: #e8f2ea;
+  --color-warning: #8a5300;
+  --color-warning-bg: #fbf1e1;
+  --color-error: #b42318;
+  --color-error-bg: #fcebe9;
+  --color-error-hover: #8f1c13;
+  /* UI refinement: information uses a muted sage-slate instead of a generic blue (owner brief). */
+  --color-info: #35575a;
+  --color-info-bg: #ebf2f1;
+
+  --font-sans: 'IBM Plex Sans', ui-sans-serif, system-ui, sans-serif;
+  --font-serif: 'Source Serif 4', ui-serif, Georgia, serif;
+  --font-mono: 'IBM Plex Mono', ui-monospace, monospace;
+
+  --text-display: 36px;
+  --text-display--line-height: 44px;
+  --text-h1: 28px;
+  --text-h1--line-height: 36px;
+  --text-h2: 22px;
+  --text-h2--line-height: 30px;
+  --text-h3: 18px;
+  --text-h3--line-height: 26px;
+  --text-body: 15px;
+  --text-body--line-height: 24px;
+  --text-body-sm: 13px;
+  --text-body-sm--line-height: 20px;
+  --text-label: 13px;
+  --text-label--line-height: 18px;
+  --text-caption: 12px;
+  --text-caption--line-height: 16px;
+
+  --radius-sm: 4px;
+  --radius-md: 6px;
+  --radius-lg: 10px;
+
+  --shadow-1: 0 1px 2px rgba(30, 36, 32, 0.06);
+  --shadow-2: 0 4px 12px rgba(30, 36, 32, 0.08);
+  --shadow-3: 0 12px 32px rgba(30, 36, 32, 0.12);
+  /* Hover lift for interactive cards and rows: a slightly deeper shadow, never a glow. */
+  --shadow-hover: 0 2px 8px rgba(30, 36, 32, 0.08);
+
+  --ease-standard: cubic-bezier(0.2, 0, 0, 1);
+}
+
+@layer base {
+  html {
+    background: var(--color-bg);
+    color: var(--color-ink);
+    font-family: var(--font-sans);
+    font-size: 15px;
+    line-height: 24px;
+    -webkit-font-smoothing: antialiased;
+  }
+  body {
+    min-height: 100dvh;
+  }
+  :focus-visible {
+    outline: 2px solid var(--color-tomato-600);
+    outline-offset: 2px;
+  }
+  ::selection {
+    background: var(--color-sage-200);
+  }
+  /* Native checkboxes, radios and range controls follow the brand colour. */
+  input[type='checkbox'],
+  input[type='radio'],
+  input[type='range'] {
+    accent-color: var(--color-sage-600);
+  }
+  h1,
+  h2,
+  h3 {
+    text-wrap: balance;
+  }
+  p {
+    text-wrap: pretty;
+  }
+}
+
+/*
+ * Shared presentation classes, for elements that are not one of the React UI components (links in
+ * running text, hand-built tables, clickable cards). Components keep using the tokens directly.
+ */
+@layer components {
+  /* A link in running text: sage, underlined, darker on hover. */
+  .mc-link {
+    color: var(--color-sage-700);
+    font-weight: 500;
+    text-decoration-line: underline;
+    text-decoration-color: color-mix(in srgb, var(--color-sage-700) 40%, transparent);
+    text-underline-offset: 3px;
+    border-radius: var(--radius-sm);
+    transition:
+      color 150ms var(--ease-standard),
+      text-decoration-color 150ms var(--ease-standard);
+  }
+  .mc-link:hover {
+    color: var(--color-sage-800);
+    text-decoration-color: currentColor;
+  }
+
+  /* A whole card that is a link or button: border and lift change on hover and focus. */
+  .mc-card-link {
+    display: flex;
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-lg);
+    background: var(--color-surface);
+    box-shadow: var(--shadow-1);
+    transition:
+      border-color 150ms var(--ease-standard),
+      box-shadow 150ms var(--ease-standard),
+      background-color 150ms var(--ease-standard);
+  }
+  .mc-card-link:hover {
+    border-color: var(--color-sage-300);
+    box-shadow: var(--shadow-hover);
+  }
+
+  /* Hand-built data tables share the DataTable look: muted header, hairline rows, hover tint. */
+  .mc-table {
+    width: 100%;
+    font-size: var(--text-body-sm);
+    line-height: var(--text-body-sm--line-height);
+  }
+  .mc-table thead {
+    background: var(--color-surface-muted);
+    text-align: left;
+  }
+  .mc-table th {
+    padding: 0.625rem 1.25rem;
+    font-size: var(--text-label);
+    font-weight: 500;
+    color: var(--color-ink-secondary);
+    white-space: nowrap;
+  }
+  .mc-table td {
+    padding: 0.75rem 1.25rem;
+    vertical-align: middle;
+    border-top: 1px solid var(--color-border);
+  }
+  .mc-table tbody tr {
+    transition: background-color 150ms var(--ease-standard);
+  }
+  .mc-table tbody tr:hover {
+    background: var(--color-sage-50);
+  }
+}
+
+@keyframes mc-fade-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+.mc-enter {
+  animation: mc-fade-in 250ms var(--ease-standard) both;
+}
+@keyframes mc-overlay-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+.mc-overlay {
+  animation: mc-overlay-in 200ms var(--ease-standard) both;
+}
+/* Drawer from the left (mobile navigation). */
+@keyframes mc-slide-in {
+  from {
+    transform: translateX(-12px);
+    opacity: 0;
+  }
+  to {
+    transform: none;
+    opacity: 1;
+  }
+}
+.mc-drawer {
+  animation: mc-slide-in 200ms var(--ease-standard) both;
+}
+
+/*
+ * Hospital scene (components/brand/hospital-scene.tsx). One 16 s timeline shared by the ambulance,
+ * doors and the two people who use the entrance; transform and opacity only. Every part starts
+ * 1.5 s into the loop, so the ambulance is already on its way when the page opens. The base
+ * (non-animated) values are the still composition used for reduced motion: ambulance parked at
+ * the entrance, doors closed, people standing.
+ *   0-25%   ambulance drives in and slows to the entrance   16-21%  doors slide open
+ *   25-55%  ambulance waits; visitor goes in, staff out      52-57%  doors close
+ *   55-72%  ambulance pulls away                             72-100% road empty
+ */
+.mc-scene .mc-amb,
+.mc-scene .mc-door-l,
+.mc-scene .mc-door-r,
+.mc-scene .mc-walk-a,
+.mc-scene .mc-walk-b {
+  animation-duration: 16s;
+  animation-iteration-count: infinite;
+  animation-delay: -1.5s;
+}
+.mc-scene .mc-amb {
+  transform: translateX(510px);
+  animation-name: mc-amb;
+}
+@keyframes mc-amb {
+  0% {
+    transform: translateX(-160px);
+    animation-timing-function: cubic-bezier(0.3, 0.5, 0.4, 1);
+  }
+  25%,
+  55% {
+    transform: translateX(510px);
+    animation-timing-function: cubic-bezier(0.5, 0, 0.75, 0.5);
+  }
+  72%,
+  100% {
+    transform: translateX(1120px);
+  }
+}
+.mc-scene .mc-amb-glow {
+  opacity: 0.5;
+  animation: mc-glow 2s ease-in-out infinite alternate;
+}
+@keyframes mc-glow {
+  from {
+    opacity: 0.3;
+  }
+  to {
+    opacity: 0.85;
+  }
+}
+.mc-scene .mc-door-l {
+  animation-name: mc-door-l;
+  animation-timing-function: var(--ease-standard);
+}
+.mc-scene .mc-door-r {
+  animation-name: mc-door-r;
+  animation-timing-function: var(--ease-standard);
+}
+@keyframes mc-door-l {
+  0%,
+  16%,
+  57%,
+  100% {
+    transform: translateX(0);
+  }
+  21%,
+  52% {
+    transform: translateX(-30px);
+  }
+}
+@keyframes mc-door-r {
+  0%,
+  16%,
+  57%,
+  100% {
+    transform: translateX(0);
+  }
+  21%,
+  52% {
+    transform: translateX(30px);
+  }
+}
+/* Visitor walks in through the open doors. */
+.mc-scene .mc-walk-a {
+  transform: translate(430px, 332px);
+  animation-name: mc-walk-a;
+  animation-timing-function: linear;
+}
+@keyframes mc-walk-a {
+  0%,
+  10% {
+    transform: translate(318px, 332px);
+    opacity: 0;
+  }
+  13% {
+    transform: translate(336px, 332px);
+    opacity: 1;
+  }
+  46% {
+    transform: translate(548px, 332px);
+    opacity: 1;
+  }
+  49%,
+  100% {
+    transform: translate(556px, 332px);
+    opacity: 0;
+  }
+}
+/* Staff member comes out once the doors are open. */
+.mc-scene .mc-walk-b {
+  transform: translate(700px, 332px);
+  animation-name: mc-walk-b;
+  animation-timing-function: linear;
+}
+@keyframes mc-walk-b {
+  0%,
+  23% {
+    transform: translate(572px, 332px);
+    opacity: 0;
+  }
+  26% {
+    transform: translate(592px, 332px);
+    opacity: 1;
+  }
+  52% {
+    transform: translate(800px, 332px);
+    opacity: 1;
+  }
+  55%,
+  100% {
+    transform: translate(822px, 332px);
+    opacity: 0;
+  }
+}
+/* A passer-by crosses the whole street (its own 22 s cycle; starts part-way across). */
+.mc-scene .mc-walk-c {
+  transform: translate(180px, 332px);
+  animation: mc-walk-c 22s linear -8s infinite;
+}
+@keyframes mc-walk-c {
+  from {
+    transform: translate(1000px, 332px);
+  }
+  to {
+    transform: translate(-60px, 332px);
+  }
+}
+/* Gait: a slight bob and alternating legs. */
+.mc-scene .mc-step {
+  animation: mc-step 0.5s ease-in-out infinite alternate;
+}
+@keyframes mc-step {
+  to {
+    transform: translateY(-1px);
+  }
+}
+.mc-scene .mc-leg-a,
+.mc-scene .mc-leg-b {
+  transform-box: fill-box;
+  transform-origin: 50% 0;
+  animation: mc-leg 0.5s ease-in-out infinite alternate;
+}
+.mc-scene .mc-leg-b {
+  animation-direction: alternate-reverse;
+}
+@keyframes mc-leg {
+  from {
+    transform: rotate(-16deg);
+  }
+  to {
+    transform: rotate(16deg);
+  }
+}
+.mc-scene[data-paused] * {
+  animation-play-state: paused;
+}
+/* Wide placements fade out at both ends instead of stopping at a hard edge. */
+.mc-scene-fade {
+  -webkit-mask-image: linear-gradient(to right, transparent, #000 12%, #000 88%, transparent);
+  mask-image: linear-gradient(to right, transparent, #000 12%, #000 88%, transparent);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .mc-scene * {
+    animation: none !important;
+  }
+}

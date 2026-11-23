@@ -1,0 +1,27 @@
+diff --git a/apps/api/src/infra/prisma/schema-tenancy.spec.ts b/apps/api/prisma/proposed/20261117200000_tax_configuration/tests/schema-tenancy.spec.ts
+index 0b84148..381f21d 100644
+--- a/apps/api/src/infra/prisma/schema-tenancy.spec.ts
++++ b/apps/api/prisma/proposed/20261117200000_tax_configuration/tests/schema-tenancy.spec.ts
+@@ -20,8 +20,11 @@ const models: ModelInfo[] = [...schema.matchAll(/^model (\w+) \{\n([\s\S]*?)^\}/
+   return { name, body, hospitalId: !hid ? 'none' : hid[1] ? 'optional' : 'required' };
+ });
+ 
+-/** Tables that are deliberately not owned by one hospital. */
+-const GLOBAL_MODELS = ['Hospital', 'Icd10Code', 'WebhookEvent'];
++/**
++ * Tables that are deliberately not owned by one hospital. StatutoryRoomTaxRule (M-11a) is platform
++ * reference data: the statutory room rule applies to every hospital and is append-only (R-13).
++ */
++const GLOBAL_MODELS = ['Hospital', 'Icd10Code', 'StatutoryRoomTaxRule', 'WebhookEvent'];
+ /** Platform-level rows (Super Admin activity) may have no hospital. */
+ const OPTIONAL_TENANT_MODELS = ['User', 'Notification', 'NotificationDelivery', 'AuditLog'];
+ /** Relations from required-tenant models that intentionally stay single-column. */
+@@ -29,7 +32,7 @@ const SINGLE_COLUMN_ALLOWED = ['Diagnosis.icd10 -> Icd10Code'];
+ 
+ describe('schema multi-tenancy rules', () => {
+   it('parses the expected number of models', () => {
+-    expect(models.length).toBe(46);
++    expect(models.length).toBe(51);
+   });
+ 
+   it('every model carries hospitalId unless it is a documented global model', () => {

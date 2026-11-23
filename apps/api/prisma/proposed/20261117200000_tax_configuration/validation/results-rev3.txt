@@ -1,0 +1,283 @@
+M-11a revision 3 validation, PostgreSQL 16.15
+started 2026-11-18 23:14:28 IST; migration.sql md5 ada51b5f23da889a358af8356533c06b; rollback.sql md5 40d796cc681eae9565f2ef2506ba8b32; schema.prisma md5 2c5e81a5f193ecee252b72798446303f
+
+######## concurrency_tests.sh (real clock)
+PASS RC: version first, then time-zone change: change waits, then is refused
+     session 1: committed
+     session 2 (waited 2.05s): ERROR:  The time zone of a hospital with tax versions or GST registrations cannot change
+     final: timezone|locked|versions = Asia/Kolkata|t|1 (expected Asia/Kolkata|t|1)
+PASS RC: time-zone change first, then version: version waits, then uses the new zone and locks it
+     session 1: committed
+     session 2 (waited 2.05s): committed
+     final: timezone|locked|versions = America/Los_Angeles|t|1 (expected America/Los_Angeles|t|1)
+PASS RR: version first, then time-zone change: change fails, zone unchanged
+     session 1: committed
+     session 2 (waited 2.05s): ERROR:  could not serialize access due to concurrent update
+     final: timezone|locked|versions = Asia/Kolkata|t|1 (expected Asia/Kolkata|t|1)
+PASS RR: time-zone change first, then version: version fails with a serialization error
+     session 1: committed
+     session 2 (waited 2.04s): ERROR:  could not serialize access due to concurrent update
+     final: timezone|locked|versions = America/Los_Angeles|f|0 (expected America/Los_Angeles|f|0)
+PASS RC: registration first, then time-zone change: change refused
+     session 1: committed
+     session 2 (waited 2.05s): ERROR:  The time zone of a hospital with tax versions or GST registrations cannot change
+     final: timezone|locked|versions = Asia/Kolkata|t|0 (expected Asia/Kolkata|t|0)
+PASS SERIALIZABLE: version first, then time-zone change: change fails, zone unchanged
+     session 1: committed
+     session 2 (waited 2.07s): ERROR:  could not serialize access due to concurrent update
+     final: timezone|locked|versions = Asia/Kolkata|t|1 (expected Asia/Kolkata|t|1)
+
+######## existing rows and migration application (fresh scratch database m11a)
+applied as one multi-statement query: ok
+PASS existing rows identical by hash before and after (new columns excluded): e07f3e84f4b4667de499360943dfb7d7
+applied migrations used: 8 (last 20261117100000_prescription_events)
+object counts: 51 tables, 53 triggers, 3 exclusions
+
+######## behaviour_tests.py
+PASS classification: service with SAC 9993
+PASS classification: goods with HSN 30049099
+PASS classification: service code must start with 99
+PASS classification: goods code must not start with 99
+PASS classification: code of 5 digits refused
+PASS classification: blank name refused
+PASS classification: duplicate name in one hospital refused
+PASS classification: same name in another hospital allowed
+PASS classification: creator from another hospital refused
+PASS classification: rename allowed
+PASS classification: code change refused
+PASS classification: supply type change refused
+PASS classification: move to another hospital refused
+PASS classification: delete refused
+PASS version: taxable 5% price-inclusive from today
+PASS version: nil-rated 0% from today
+PASS version: exempt with a rate refused
+PASS version: taxable at 0% refused
+PASS version: taxable above 40% refused
+PASS version: exempt with tax inside the price refused
+PASS version: backdated start refused
+PASS version: two versions on one date refused
+PASS version: in force today cannot be edited
+PASS version: in force today cannot be deleted
+PASS version: future version can be edited
+PASS version: future version cannot be moved into the past
+PASS version: future version cannot change classification
+PASS version: future version can be deleted
+PASS clock: tomorrow's version can still be edited at 23:45
+PASS clock: tomorrow's version is frozen from 23:50 (10-minute margin)
+PASS clock: an edit made at 23:45 is refused when the commit lands after midnight
+PASS clock: a delete made at 23:45 is refused when the commit lands after midnight
+PASS clock: a version started 'today' at 23:40 is refused when the commit lands tomorrow (backdating)
+PASS clock: the same insert committing before 23:50 is accepted
+PASS clock: from 23:50 a first version must start tomorrow
+PASS clock: a second version cannot start today once one is in force
+PASS clock: a second version cannot start today once an earlier one is in force
+PASS clock: a second version can start tomorrow
+PASS clock: a future version cannot be moved to today
+PASS clock: a future version inserted and deleted in one transaction is not judged as an insert at commit
+PASS clock: a version in force cannot be deleted even in the transaction that inserted it
+PASS version: classification of another hospital refused
+PASS lab test: service classification accepted
+PASS lab test: goods classification refused
+PASS lab test: another hospital's classification refused
+PASS lab test: inactive classification refused
+PASS lab test: Phase 6 price update unaffected
+PASS medicine: goods classification accepted
+PASS medicine: service classification refused
+PASS medicine: Phase 7 reorder update unaffected
+PASS medicine: classification can be cleared
+PASS room: NICU critical-care unit accepted
+PASS room: unknown critical-care unit refused
+PASS classification: referenced by a lab test cannot be deleted
+PASS default: consultation with a service classification
+PASS default: pharmacy kind refused
+PASS default: goods classification refused
+PASS default: another hospital's classification refused
+PASS default: second default for the same kind refused
+PASS default: can point at another classification
+PASS default: cannot be removed
+PASS default: its classification cannot be deactivated
+PASS confirmation: by the hospital's own admin
+PASS confirmation: by another hospital's user refused
+PASS confirmation: time without a user refused
+PASS registration: regular with a valid GSTIN
+PASS registration: unregistered without details
+PASS registration: unregistered with a GSTIN refused
+PASS registration: wrong check character refused
+PASS registration: lower case refused
+PASS registration: state code 39 refused even with a valid check character
+PASS registration: state code 00 refused
+PASS registration: chosen state differs from the GSTIN refused
+PASS registration: missing legal name refused
+PASS registration: malformed PAN refused
+PASS registration: PAN holder type X refused (fourth PAN letter)
+PASS registration: PAN sequence 0000 refused
+PASS registration: tax deductor format (D in place of Z) refused
+PASS registration: backdated refused
+PASS registration: never edited
+PASS registration: in force cannot be deleted
+PASS registration: future one can be deleted
+PASS registration: two starting today refused
+PASS registration: two on one future date refused
+PASS registration: same GSTIN later in the same hospital (composition to regular)
+PASS registration: started 'today' at 23:40, refused when the commit lands tomorrow
+PASS registration: a future one deleted at 23:45 is refused when the commit lands after midnight
+PASS registration: tomorrow's one is frozen from 23:50
+PASS registration: a second one cannot start today once one is in force
+PASS registration: a second one can start tomorrow
+PASS registration: Q1g A, same GSTIN in another hospital refused
+PASS registration: Q1g A holds even for a future row
+PASS registration: different GSTINs in two hospitals
+PASS registration: attested by another hospital's user refused
+PASS timezone: can change while the hospital has no tax versions or registrations
+PASS timezone: a classification alone does not fix it
+PASS timezone: the first version stamps the lock
+PASS timezone: cannot change once a version exists
+PASS timezone: cannot change once a registration exists
+PASS timezone: stays fixed after the only (future) version is deleted
+PASS timezone: the lock cannot be cleared
+PASS timezone: writing the same zone again is allowed
+PASS timezone: other hospital settings still change
+PASS timezone: another hospital is unaffected
+PASS timezone: a hospital locked in Kolkata cannot move west to reopen today's version
+PASS real clock: the production clock path accepts a version from the hospital's real today
+PASS real clock: and refuses yesterday
+PASS room rule: seeded row is the 18 July 2022 rule
+PASS room rule: cannot be edited
+PASS room rule: cannot be deleted
+PASS room rule: bad SAC refused
+PASS hospitals: ordinary update unaffected
+PASS hospitals: delete still refused by existing foreign keys
+
+113/113 passed
+
+######## conform.js (proposed schema.prisma vs migrated database)
+198/198 checks match
+
+######## gstin_verification.py
+== 1. Real GSTINs from published documents (expected valid in both)
+PASS 37AAHAA4036G1ZY  AIIMS Mangalagiri  [AIIMS Mangalagiri GST registration certificate, aiimsmangalagiri.edu.in]  SQL=True stdnum=True
+PASS 24AADCB2295A1Z7  Baroda Medicare Pvt Ltd (Sunshine Global Hospital)  [Gujarat AAR 106/2020, gstcouncil.gov.in]  SQL=True stdnum=True
+PASS 24AAQFM2633M1ZY  M/s MJ Solanki  [Telangana AAR 04/2024 (AIIMS Bibinagar), taxmanagementindia.com / livelaw.in]  SQL=True stdnum=True
+PASS 07ADKPJ3897P1ZM  M/s Kore Security Services  [Telangana AAR 04/2024 (AIIMS Bibinagar)]  SQL=True stdnum=True
+PASS 36AAVFP9999G1ZZ  M/s P. Suresh & Associates  [Telangana AAR 04/2024 (AIIMS Bibinagar)]  SQL=True stdnum=True
+PASS 08AAAGA0038H1ZY  AIIMS Jodhpur  [public GST record, knowyourgst.com]  SQL=True stdnum=True
+PASS 03AAAGA2223A1ZN  AIIMS Bathinda  [public GST record, knowyourgst.com]  SQL=True stdnum=True
+PASS 36AAAGA2453A1Z6  AIIMS Bibinagar  [public GST record, piceapp.com (shown in lower case)]  SQL=True stdnum=True
+PASS 18AAAGA2376L1ZB  AIIMS Guwahati  [public GST record, piceapp.com (shown in lower case)]  SQL=True stdnum=True
+PASS 33AAACA5443N3ZN  Apollo Hospitals Enterprise Ltd, Tamil Nadu  [public GST record, piceapp.com]  SQL=True stdnum=True
+PASS 07AAACA5443N1ZK  Apollo Hospitals Enterprise Ltd, Delhi  [public GST record, piceapp.com]  SQL=True stdnum=True
+PASS 19AAACA5443N1ZF  Apollo Hospitals Enterprise Ltd, West Bengal  [public GST record, piceapp.com]  SQL=True stdnum=True
+PASS 07AAATG2183J1ZO  Gujarmal Modi Hospital  [public GST record, knowyourgst.com]  SQL=True stdnum=True
+PASS 27AAPFU0939F1ZV  stdnum documented valid number  [python-stdnum doctest]  SQL=True stdnum=True
+
+== 2. stdnum's documented invalid numbers (expected invalid in both)
+PASS 27AAPFU0939F1ZO  (check character)  SQL=False stdnum=False
+PASS 27AAPFU0939F1AA  (14th character not Z)  SQL=False stdnum=False
+PASS 27AAPFU0939F1Z  (length 14)  SQL=False stdnum=False
+PASS 369296450896540  (format)  SQL=False stdnum=False
+
+== 3. Real registrations of other types (refused by design: not a supplier registration)
+PASS 08JDHA08253A1D4  AIIMS Jodhpur, tax deductor (TAN-based)  SQL=False stdnum=False
+PASS 20RCHA03549A1DF  AIIMS Deoghar, tax deductor  SQL=False stdnum=False
+PASS 07DELS71442A1DD  AIIMS New Delhi, tax deductor  SQL=False stdnum=False
+PASS 07DELG00001B1DM  G.B. Pant Hospital, tax deductor  SQL=False stdnum=False
+PASS 37HYDR05893G1DJ  Government General Hospital Ongole, tax deductor  SQL=False stdnum=False
+PASS 19CALA25755C1D3  AIIMS Kalyani, tax deductor  SQL=False stdnum=False
+PASS 22AACAA7875J1DV  AIIMS Raipur, tax deductor (PAN-based, D in place of Z)  SQL=False stdnum=False
+PASS 07DELD20333F1D7  Dr B.R.A. Institute Rotary Cancer Hospital, tax deductor  SQL=False stdnum=False
+
+== 4. Every single substitution and adjacent transposition of the real valid GSTINs
+PASS 7511 mutants: SQL and stdnum agree on 7511
+     mutants accepted: SQL 0, stdnum 0 (single substitutions of the check-protected part are always caught by Luhn mod 36)
+PASS no single-character substitution of a real GSTIN is accepted (0 found)
+
+== 5. 20,000 random well-formed candidates with a random check character
+PASS 20000 candidates: SQL and stdnum agree on 20000; 564 valid (about 1 in 36 expected: 555)
+
+== 6. Deliberate differences from stdnum
+PASS 38AAPFU0939F1ZS state 38 (Ladakh, assigned after stdnum's table): SQL=True stdnum=False
+PASS 27AAPKU0939F1ZK PAN holder K (not in the Income Tax Department list): SQL=False stdnum=True
+PASS 37aahaa4036g1zy lower case: SQL=False (the API must upper-case input first); stdnum=True (normalises)
+
+32/32 checks passed
+
+######## commit_tests.sh
+== Edit at 23:45, COMMIT at 00:01 the next day
+ statement accepted at 23:45
+ERROR:  A tax classification version in force from 2026-11-19 cannot change (tax date 2026-11-19); add a new version instead
+PASS refused at COMMIT; rate still 12.00
+== Edit at 23:45, COMMIT at 23:46
+PASS committed; rate now 5.00
+== Insert a first registration effective 18 Nov at 23:40, COMMIT at 00:01
+ERROR:  A GST registration cannot be backdated: it cannot start before 2026-11-19 (the hospital's tax date)
+PASS refused at COMMIT; no registration stored
+
+######## rollback_checks.sh
+ERROR:  division by zero
+PASS atomic: schema and data identical after an injected failure
+ERROR:  type "TaxSupplyType" already exists
+PASS re-apply refused, nothing changed
+PASS reversal: schema and data identical to before M-11a, migration record removed
+ERROR:  M-11a rollback refused: tax configuration or statutory rules exist and would be lost
+PASS reversal refused with configuration present, nothing changed
+ERROR:  M-11a rollback refused: tax configuration or statutory rules exist and would be lost
+PASS reversal refused with a later statutory rule; both rules kept
+ERROR:  M-11a rollback refused: tax configuration or statutory rules exist and would be lost
+PASS reversal refused when the seed row differs from M-11a's
+ERROR:  M-11a rollback refused: tax configuration or statutory rules exist and would be lost
+PASS lock alone does not block; reversal restores the exact prior schema and data
+
+######## timing_tests.sh (commit stall, SET CONSTRAINTS bypass, timeouts, lock order)
+== 1. A commit stalled after its commit-time check (synchronous replication to a missing standby)
+     writer, after passing its commit-time check: wait_event = SyncRep for 7s so far (no limit applies)
+     reader without locks during the stall saw rate 12.00 (the old value: the commit was not yet visible)
+     locking reader during the stall: Lock/transactionid
+     writer when the wait was cancelled: already committed locally
+     locking reader then read: 5.00
+PASS a commit became visible 7+ s after its check; the unlocked read saw the old value; the locked read waited for the final value
+PASS synchronous_standby_names restored
+== 2. SET CONSTRAINTS ALL IMMEDIATE moves the commit-time check earlier (simulated clock)
+     commit at a simulated 00:30 after an immediate check at 23:45: no error; rate now 5.00
+PASS the bypass is real: the version took effect at midnight but its edit committed at 00:30
+== 3. ... but a locking reader still waits for the final value (bypass plus a client idle in transaction)
+     locking reader waited 3s and read 5.00
+PASS locking reader saw only the writer's final committed value
+== 4. idle_in_transaction_session_timeout ends a client idling after its immediate check
+     session: terminating connection due to idle-in-transaction timeout
+PASS idle session terminated; its edit rolled back (rate 12.00)
+     SHOW transaction_timeout on PostgreSQL 16.15 (Ubuntu 16.15-0ubuntu0.24.04.1): ERROR:  unrecognized configuration parameter "transaction_timeout"
+PASS no total transaction timeout in PostgreSQL 16 (transaction_timeout arrives in 17)
+== 5. The registration lock (FOR NO KEY UPDATE on the hospital) does not block foreign-key checks
+     department insert for the same hospital during the registration write: ok after .053s
+PASS foreign-key inserts are not delayed by the registration lock
+== 6. Lock order: a first version (stamps the hospital) and a locking reader do not deadlock
+PASS no deadlock; the version committed after the reader
+== 7. A new version inserted by a writer that is slow to commit: the locking reader waits and resolves it
+     version in force on day +25 as resolved by the locking reader after waiting 3s: NIL_RATED
+PASS the reader waited and resolved the newly committed version
+== 8. Control: the same slow writer with the writer locks removed (revision 2): the reader does not wait
+     without writer locks: reader waited 0s and read 12.00 while the writer was still open
+PASS without the writer locks the reader reads a value about to change (the gap revision 3 closes)
+== 9. One transaction edits a version and then adds a registration, against a locking reader
+     writer: committed; reader: 5.00
+PASS no deadlock: every writer takes the hospital row first; the reader saw the final value
+
+######## lock_nowait_tests.sh (SQL rehearsal of T-MIG-TAX-011) - revision 3
+version writer open -> FOR SHARE NOWAIT on classification: ERROR:  could not obtain lock on row in relation "tax_classifications"
+                    -> FOR SHARE NOWAIT on hospital: ERROR:  could not obtain lock on row in relation "hospitals"
+                    -> plain read of the rate: 12.00
+registration writer open -> FOR SHARE NOWAIT on hospital: ERROR:  could not obtain lock on row in relation "hospitals"
+                         -> department insert (FK check): done
+
+######## lock_nowait_tests.sh - control: writer locks removed
+version writer open -> FOR SHARE NOWAIT on classification: 1
+                    -> FOR SHARE NOWAIT on hospital: 1
+                    -> plain read of the rate: 12.00
+registration writer open -> FOR SHARE NOWAIT on hospital: 1
+                         -> department insert (FK check): done
+
+######## summary
+PASS lines: 173; FAIL lines: 0
+behaviour 113/113 passed; conformance 198/198 checks match; GSTIN 32/32 checks passed
+synchronous_standby_names after the run: ''
+finished 2026-11-18 23:16:18 IST

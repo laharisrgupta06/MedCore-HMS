@@ -1,0 +1,574 @@
+# MedCore HMS — Decision Register
+
+Every significant product, architecture, database, design and process decision. Status values:
+**Proposed** (recommended or implemented, not yet explicitly approved), **Approved**, **Rejected**,
+**Superseded** (kept for history). Approvals quote the project owner where possible. All dates are
+2026-11-16 (IST) unless noted. Never delete an entry: mark it superseded and add a new one.
+
+---
+
+### DEC-001: Approved roadmap and technology stack as the baseline
+- Status: **Approved** ("I'm approving this roadmap as our development baseline")
+- Context: The PRD (section 04) fixes the stack. A 12-section roadmap was produced from it.
+- Final decision: Keep the full PRD stack; the roadmap ([implementation-roadmap.md](implementation-roadmap.md)) is the implementation sequence.
+- Impact: All phases. Related: TECH-*, SCOPE-*.
+
+### DEC-002: No AI or LLM functionality in the application
+- Status: **Approved** (owner instruction, repeated in every brief)
+- Final decision: No AI/LLM APIs, SDKs or AI-dependent features. Deterministic logic, SQL and rules only.
+- Related: OUT-003. Enforced in [RULES.md](RULES.md).
+
+### DEC-003: Local or mock providers during development
+- Status: **Approved** ("must remain fully runnable locally without requiring paid API subscriptions")
+- Final decision: Email, SMS, payments and storage behind adapter interfaces with local implementations; real providers (Resend, Twilio, Stripe, Razorpay, S3) enabled by environment configuration.
+- Related: SCOPE-015, SCOPE-016, NOTIF-*, BILL-004.
+
+### DEC-004: Same-origin API proxy through Next.js
+- Status: **Approved** ("Use the Next.js same-origin API proxy approach")
+- Problem: A SameSite=Strict refresh cookie fails across Vercel and EC2 domains.
+- Final decision: The browser calls only the Next.js origin; `/api/*` is rewritten to the NestJS API.
+- Files: `apps/web/next.config.ts`, `apps/web/lib/api-client.ts`. Related: AUTH-002, SEC-010.
+
+### DEC-005: Node.js 24 LTS and pnpm 11 instead of Node 20 and pnpm 9
+- Status: **Approved** ("I've decided on Option A: Node.js 24 LTS + pnpm 11")
+- Context: Node.js 20 reached end of life on 2026-04-30; pnpm 9 is two majors behind.
+- Options: A Node 24 + pnpm 11; B Node 22 + pnpm 11; C PRD versions without security patches.
+- Impact: `.nvmrc` = 24, `packageManager` = pnpm@11.28.12. Related: TECH-040.
+
+### DEC-006: Roadmap defaults for PRD ambiguities
+- Status: **Approved** (owner approval of roadmap defaults A1–A4 and one hospital per user)
+- Final decision: `isSeniorLabTechnician` flag instead of a tenth role; radiology as a lab-test category (no DICOM); basic nurse administration notes; minimal subscription fields on Hospital; each user belongs to exactly one hospital (global unique email).
+- Related: LAB-004, LAB-007, ROLE-004, ROLE-001.
+
+### DEC-007: Row-level multi-tenancy in a shared schema
+- Status: **Approved** (part of the roadmap baseline, DEC-001)
+- Options: database per tenant; schema per tenant; shared schema with `hospitalId`.
+- Final decision: Shared schema with `hospitalId`, enforced in the database (DEC-018) and query layer.
+- Reason: Many small-to-large hospitals on one deployment; a solo developer cannot run per-tenant migrations.
+- Related: TEN-001..005.
+
+### DEC-008: Database Engineer owns schema and migrations
+- Status: **Approved** ("The Database Engineer owns the Prisma schema, database design and migrations")
+- Impact: Supersedes the roadmap statement that the Team Lead owns the schema. Applies to the agent team (DEC-021).
+
+### DEC-009: Frontend completeness scope and custom domain
+- Status: **Approved**
+- Final decision: Privacy Policy, Terms and Conditions (flagged for legal review), custom 404 and the Part 11 SEO items are in scope. A custom domain is optional; nothing may depend on buying one during development.
+- Related: [frontend-design-system.md](frontend-design-system.md) §11.10, §11.15.
+
+### DEC-010: Patient self-registration uses a hospital code
+- Status: **Approved** (decision 1a)
+- Problem: Each user belongs to one hospital; the PRD does not say how a patient chooses it.
+- Options: (a) hospital code; (b) public list of verified hospitals (an endpoint not in the PRD).
+- Impact: `hospitals.code` unique; `POST /auth/register` takes the code. Related: AUTH-001, DB-005.
+
+### DEC-011: Local OTP delivery without logging OTPs
+- Status: **Approved** ("Email OTPs must go through Mailpit. SMS OTPs must use a separate local development-only inbox/adapter. Never log OTPs or expose them in production.")
+- Final decision: Email to Mailpit over SMTP; SMS to a separate development-only inbox adapter; neither selectable in production (startup validation); OTPs never logged.
+- Related: AUTH-006, AUTH-007, AUTH-012. Implementation: Phase 1B.
+
+### DEC-012: Password policy
+- Status: **Approved** (decision 3)
+- Final decision: 10–128 characters, at least one letter and one number, not equal to the email address.
+- Related: AUTH-001, AUTH-005.
+
+### DEC-013: First Super Admin created by a CLI command
+- Status: **Approved** (decision 4)
+- Final decision: `pnpm --filter @medcore/api create-super-admin` prompts for email and password; no public endpoint.
+- Related: ROLE-001.
+
+### DEC-014: Library major versions
+- Status: **Proposed** (implemented in Phase 0 and reported; not explicitly approved)
+- Decision as implemented: NestJS 11 (not ESM-only 12), TypeScript 5.9 (ts-jest supports <7), Prisma 6.19 (8 is a release candidate), ESLint 9, Next.js 15.5 (PRD-mandated), Tailwind 4, BullMQ 6, Vitest 5.
+- Reason: Stable, verifiable tooling; PRD rule "do not upgrade major versions simply because newer versions exist".
+- Files: `package.json` files, `pnpm-lock.yaml`. Record: [phase-0-checklist.md](phase-0-checklist.md).
+
+### DEC-015: Phase 0 deferrals
+- Status: **Proposed** (implemented and reported; not explicitly approved)
+- Decision as implemented: MinIO local storage deferred to the phase that needs uploads; API Dockerfile and Nginx config moved to Phase 14 (cannot be built or tested in the build VM); route groups created with their first real pages (no placeholder routes); unused web libraries installed when used.
+- Related: TECH-027, DEP-001, FE-002.
+
+### DEC-016: Clinical corrections preserve originals
+- Status: **Approved** ("Approve the clinical correction design"; conditions: originals preserved permanently; every correction records who, when and why)
+- Final decision: Corrections are new rows (`supersedesId`/`amendsEntryId` + required reason); patient-level history changes only status with who/when/why; closed records and approved lab orders are locked; corrections to approved lab results are amended orders.
+- Files: `apps/api/prisma/schema.prisma`, `apps/api/prisma/sql/constraints.sql`, [database-schema.md](database-schema.md). Related: EMR-002, DB-014, LAB-004.
+
+### DEC-017: Seven PRD gap fixes in the schema
+- Status: **Approved** ("all seven proposed PRD gap fixes")
+- Final decision: `hospitalId` on addresses and notification deliveries; hospital tax rate and invoice prefix; prescription verification fields; READY_FOR_PICKUP status; payment reconciliation fields; correction model (DEC-016); role/profile consistency trigger for all nine roles.
+- Related: TEN-002, ROLE-002, ROLE-007, NOTIF-005, ROLE-008, EMR-011.
+
+### DEC-018: Composite tenant foreign keys (option A)
+- Status: **Approved** ("option A (composite foreign keys)"; condition: cover all relevant tenant relationships)
+- Options: A composite `(id, hospitalId)` foreign keys; B PostgreSQL RLS; C application-only.
+- Final decision: 85 composite relations in Prisma plus 3 SQL composite foreign keys; exceptions documented (ICD-10 codes, audit-log actor). Guarded by `schema-tenancy.spec.ts`.
+- Related: TEN-002, TEN-003.
+
+### DEC-019: Complete core schema (44 models, 36 enums)
+- Status: **Proposed — awaiting final "approve schema"** (revisions 1 and 2 reviewed; DEC-016..018 approved)
+- Final decision pending: approval to create and apply the initial migration on macOS.
+- Files: `apps/api/prisma/schema.prisma` (commit `e487298`). Related: SCOPE-002, DB-001..020.
+
+### DEC-020: Appointment concurrency control
+- Status: **Implemented** (Phase 3; constraints applied with the approved migration)
+- Decision: PostgreSQL exclusion constraints (doctor overlap except EMERGENCY; patient overlap) as the hard guarantee, plus a transaction with row locking in the booking service returning `409 SLOT_UNAVAILABLE`.
+- Related: APPT-002, APPT-004, APPT-006, TEST-012.
+
+### DEC-021: Where the agent team runs
+- Status: **Superseded by DEC-022**
+- History: 11:54 approved option (a), run the team in local Claude Code. 12:25: "Stop all Agent Teams and OpenRouter troubleshooting… Use the current Claude Code session. Do not spawn teammates."
+
+### DEC-022: Working mode until Agent Teams are verified
+- Status: **Approved, final** (13:46: "We are abandoning Agent Teams and sub-agents… work as a SINGLE Claude Code session.")
+- Current state: work proceeds solo in the current session. The latest brief asks for a five-role team once enabled and approved. Blockers: Agent Teams run only in interactive local Claude Code; local Claude Code returned `401 User not found` through OpenRouter (unresolved); this chat session cannot spawn agent teams.
+- Pending: owner decision on resolving local authentication and approving the team plan in [MEMORY.md](MEMORY.md).
+
+### DEC-023: Redis-backed rate limiting and shared-types build
+- Status: **Proposed** (implemented in Phase 0)
+- Decision: Custom `ThrottlerStorage` with an atomic Redis Lua script; `@medcore/types` built by a `prepare` script and before `test:int`.
+- Related: CACHE-003, SEC-005, API-005.
+
+### DEC-024: pgcrypto via two parameterised raw-SQL helpers
+- Status: **Approved** (roadmap baseline, contradiction C2)
+- Context: PRD says "never use raw()" and also requires pgcrypto, which Prisma cannot call.
+- Decision: Only two reviewed, parameterised helpers (Phase 4); no string-built SQL.
+- Related: SEC-008, SEC-014.
+
+### DEC-025: Migrations created on macOS
+- Status: **Proposed** (operational constraint)
+- Context: Prisma's migration engine download is blocked in the build VM.
+- Decision: The schema is written and validated in the VM; the owner runs `prisma:migrate:create`, the constraints SQL is appended and reviewed, then `prisma:migrate` applies it.
+- Related: DB-020.
+
+### DEC-026: bcryptjs for bcrypt hashing
+- Status: **Proposed** (Phase 1B implementation)
+- Decision: `bcryptjs` (pure JavaScript bcrypt, cost 12) instead of the native `bcrypt` package: same algorithm and hash format (`$2b$12$`), no native build step on macOS, the build VM or CI.
+- Related: AUTH-011, SEC-001.
+
+### DEC-027: @nestjs/jwt 11
+- Status: **Proposed**
+- Decision: `@nestjs/jwt` 11 (CommonJS). Version 12 is ESM-only and cannot be loaded by the CommonJS API under Jest.
+- Related: DEC-014.
+
+### DEC-028: Auth endpoint details not spelled out in the PRD
+- Status: **Proposed** (Phase 1B implementation)
+- Additions: `GET /auth/csrf` (issues the CSRF cookie); `POST /auth/verify-email/resend`; `POST /auth/verify-phone/send` (signed-in user); development-only `GET/DELETE /api/dev/sms-inbox` (not routed in production, DEC-011).
+- Behaviour: login requires a verified email (403 EMAIL_NOT_VERIFIED); suspended hospitals cannot sign in; resend and forgot-password give the same answer whether or not the account exists; the CSRF token rotates at login and refresh and is also returned in the response body; reset tokens are single use, 30 minutes, and revoke every session; refresh-token reuse revokes every session of the user; patient MRN format `MRN-{year}-{6-digit sequence}` per hospital.
+- Related: AUTH-001..010, SEC-010.
+
+### DEC-029: Tenant scoping mechanism and users endpoint rules
+- Status: **Proposed** (Phase 1C implementation of the approved row-per-tenant design)
+- Decision: AsyncLocalStorage request context + `TenantGuard` + a Prisma query extension (`TenantPrismaService`); other tenants' records answer 404; Super Admin uses the unscoped client and those requests are audited. Users endpoints: list for administrators (Super Admin may filter by hospital); get/patch for self or administrator; `isActive` and delete for administrators only, never on oneself; delete is a soft delete that signs the user out everywhere; email and role are not editable here (email change needs a verification flow; roles change with staff management in Phase 2). The audit interceptor logs every successful write with the redacted body.
+- Related: TEN-003/004, API-012, SEC-012, ROLE-011.
+
+### DEC-030: Audit entries store metadata, never values
+- Status: **Proposed** (owner request 14:17: "Prefer safe, redacted audit metadata")
+- Decision: generic write audits record method, route, entity, actor, hospital, IP, user agent and the **names** of submitted fields. Values are stored only for fields a route lists as safe in `@Audit(action, entity, safeFields)` and only as short scalars, still redacted. Every entry, from any source, passes `safeChanges()`: sensitive keys redacted, any `body` key dropped, strings cut at 200 characters, nesting limited. Auth audit entries carry only the opaque session id (not a credential: a refresh requires the signed token). Before/after values for clinical data are not stored in the audit log; the clinical tables keep originals and corrections themselves (DEC-016).
+- Related: SEC-012, AUTH-012, DB-013.
+
+### DEC-031: Hand-written foreign keys and unique constraints are also declared in schema.prisma
+- Status: **Proposed** (owner request 14:33 after `prisma:drift` reported four DROPs)
+- Finding: the initial migration (`20261116085814_init`, applied by the owner on macOS) contains, from `constraints.sql`, three composite same-tenant foreign keys (`hospitals_address_same_tenant_fkey`, `notifications_recipient_same_tenant_fkey`, `notification_deliveries_same_tenant_fkey`) and one unique constraint (`notifications_id_hospital_key`). Prisma Migrate owns all foreign keys and unique constraints: anything in the database that `schema.prisma` does not declare is drift and would be dropped by the next generated migration. CHECK constraints, exclusion constraints, triggers, functions and expression/partial indexes are outside Prisma's model and are not reported, which matches the drift output.
+- Decision: keep all four (they are intentional tenant-isolation guarantees, DEC-018) and declare them in `schema.prisma` with identical names, columns and actions: `@@unique([id, hospitalId], map: "notifications_id_hospital_key")` and three additional relation fields (`addressSameTenant`, `recipientSameTenant`, `notificationSameTenant`) with `onDelete` as in SQL and `onUpdate: NoAction`. The existing single-column relations stay, so platform-level rows (hospitalId NULL) keep their plain foreign keys. The database is unchanged; no new migration is needed if the drift check comes back empty.
+- Guard: `src/infra/prisma/sql-drift.spec.ts` fails if any `ADD CONSTRAINT … FOREIGN KEY|UNIQUE` in hand-written SQL lacks a matching `map:` in the schema.
+- Related: DEC-018, DEC-025, migration-review.md M-02.
+
+### DEC-032: Hospital ids after DEC-031
+- Status: **Approved** (owner, 14:53: "I approve DEC-032"). Implemented as migration `20261116092500_hospital_id_db_default` (created, not yet applied)
+- Root cause of the 14:41 integration failures: DEC-031 made `hospitals.id` part of the declared foreign key `hospitals_address_same_tenant_fkey` (`[addressId, id]`). Prisma does not apply `@default(uuid())` to a field that is also a relation scalar: `HospitalCreateInput` loses `id` and an insert without an explicit id sends NULL (`Null constraint violation on the fields: (id)`). The database column has no default (Prisma generates ids client-side), so every `hospital.create()` without an id fails. All three failing suites create hospitals first.
+- Interim (no database change): every hospital insert passes `id: randomUUID()` (the three integration suites). No application code creates hospitals yet; Phase 2 onboarding must do the same until the permanent fix.
+- Permanent fix (proposed): one migration `ALTER TABLE "hospitals" ALTER COLUMN "id" SET DEFAULT gen_random_uuid();` with `@default(dbgenerated("gen_random_uuid()"))` in `schema.prisma`. The database then generates ids whatever Prisma omits. Checked on a disposable PostgreSQL 16 copy of the applied migration: insert without id succeeds. Nothing is created in the repository until approved.
+- Related: DEC-031, M-02.
+
+### DEC-033: Design tokens approved
+- Status: **Approved** (owner, 2026-11-16 15:19: "Approve tokens")
+- Decision: the tokens and component standards in [DESIGN.md](DESIGN.md) (sage `#52714D` primary, tomato `#C8432B` accent used sparingly, off-white `#FAF8F3` background, text `#1E2420`, error `#B42318`; IBM Plex Sans with Source Serif 4) are the design system. Unblocks Phase 1D and every styled screen.
+- Related: frontend-design-system.md §11.18, P1D-01.
+
+### DEC-034: Execution mode
+- Status: **Approved** (owner, 15:19: "Real team on my Mac")
+- Decision: development continues as a real Claude Code Agent Team launched from Claude Code in the owner's Mac terminal, once its sign-in works. Teammates use the lead's model (`model: inherit`) at `effort: medium` from `.claude/agents/*.md`; the model must be confirmed as Opus 5.5 with `/model` before launch. The cloud chat session cannot create a team (no team tools). Supersedes DEC-022.
+
+### DEC-035: Single-session development (final)
+- Status: **Approved** (owner, 15:28: "We are permanently proceeding with ONE SINGLE CLAUDE CODE SESSION.") Supersedes DEC-034.
+
+### DEC-036: Frontend session handling
+- Status: **Approved** (owner, 2026-11-16 17:24, as built)
+- Decision: the access token stays in memory (Zustand), never in browser storage; the page restores a session with `POST /auth/refresh` from the httpOnly cookie; refreshes are single-flight and serialised across tabs with the Web Locks API so two tabs never replay the same rotated token; logout is broadcast to other tabs. Route protection is client-side for rendering only. Fonts are self-hosted through `@fontsource` packages (no runtime third-party requests). The web app sends `X-Frame-Options: DENY`, `nosniff`, a strict referrer policy and a restrictive permissions policy.
+
+### DEC-037: Phase 2 account and file rules
+- Status: **Approved** (owner, 2026-11-16 17:24, as built; set-password links stay at 72 h)
+- Decision: accounts created by staff (hospital admin, staff, doctors, reception-registered patients) start with an unusable password placeholder and receive a single-use 72-hour "set your password" link (the existing reset flow); staff never choose or see passwords; a failed welcome email does not fail the request and can be resent (`POST /staff/:userId/invite`, or forgot password). Hospital codes are immutable after creation. Suspending a hospital revokes every session of its users. Roles never change in place (DEC-017): a different role means a new account. Doctor signatures: PNG or JPEG detected from the file's magic bytes (declared type must match), at most 512 KB, stored through `StorageService` (local disk in development, path-safe generated keys) with a `FileAttachment` row (sha256, size). Nurses may change bed status only. Departments and rooms that are referenced cannot be deleted (409 IN_USE).
+
+
+### DEC-038: Phase 3 booking rules
+- Status: **Approved** (owner, 2026-11-16 17:24) with one change: patients cannot cancel online within 2 hours of the start (`400 CANCELLATION_TOO_LATE`); reception, doctors and admins still can. Leave keeps existing bookings (as built). `GET /doctors/me` approved.
+- Decision: schedules and exceptions are stored as hospital-local wall-clock times and converted with the hospital's IANA time zone, so DST and travelling viewers always see hospital time. Slots are generated per local date, cached in Redis for 60 s (`slots:{doctorId}:{date}`) and invalidated on every booking, status change and schedule change. Booking runs in a transaction that locks the doctor row, re-checks overlaps, and relies on the exclusion constraints as the final guard; conflicts return `409 SLOT_UNAVAILABLE` or `PATIENT_DOUBLE_BOOKED`. Patients and reception book; doctors do not book (they manage availability). Emergency bookings are reception-only, start CONFIRMED, take the hospital default slot length and may overlap the doctor's other appointments. New regular bookings start PENDING; reception, doctors or admins confirm. Only the doctor starts and completes a consultation. Patients may only cancel, at least 2 hours before the start time (`PATIENT_CANCEL_NOTICE_MS`), with a reason; NO_SHOW only after the start time. Rescheduling (reception or the patient) moves to a free slot and returns the appointment to PENDING. Reminders are BullMQ delayed jobs 24 h and 1 h before, re-checked at send time. Adding leave does not cancel existing bookings automatically. `GET /doctors/me` added so a doctor's screens can find their own profile (mirrors `GET /patients/me`).
+- Related: SCOPE-007..009, APPT-001..006, CACHE-002, DEC-020.
+
+### DEC-039: Phase 4 medical record rules
+- Status: **Approved** (owner, 2026-11-16 22:00, exactly as described); verified on macOS 22:10 (integration 15/15, Playwright 30/30)
+- Decision: (1) The consultation starts with `POST /medical-records` (chief complaint required), which moves the appointment from CONFIRMED to IN_PROGRESS and creates the record in one transaction; `PATCH /appointments/:id/status` no longer accepts IN_PROGRESS (`START_FROM_ENCOUNTER`), so every consultation has a record (EMR-001). Completing the appointment closes the record. (2) Only the treating doctor writes encounter content; nurses may add vitals and attachments; doctors and nurses maintain patient-level history. Readers: doctors and nurses of the hospital and the patient (own only); hospital admins and other roles have no clinical access (API-019). Every record, chart, history and file view is audited. (3) Nothing clinical is edited or deleted: notes become addenda after closing; corrections are new rows with a reason, at most one per row; history entries can be marked RESOLVED or ENTERED_IN_ERROR (final, with reason). (4) Notes, treatment plan and diagnosis text are encrypted with pgcrypto (AES-256) using `EMR_ENCRYPTION_KEY`; chief complaint and symptoms stay plain text as in the approved schema. (5) Attachments: PDF, PNG, JPEG, WebP detected from content, name must match, max 20 MB. (6) ICD-10 codes are optional and come from a reference table loaded with `pnpm --filter @medcore/api icd10:load` (bundled starter subset of public-domain ICD-10-CM; the full file loads the same way). (7) Unit tests no longer load the developer's `.env` (throttler options moved out of AppModule).
+- Owner action: `EMR_ENCRYPTION_KEY` is configured in the development `.env` (checked 21:01 without reading the value); back it up, because encrypted values cannot be read without it.
+- Related: SCOPE-010/011, EMR-001..012, SEC-013/014, DEC-016, DEC-024.
+
+### DEC-040: Phases 5–7 plan decisions (D1–D10)
+- Status: **Approved** (owner, 2026-11-16 22:10), with the plan's scope and Essential items; Recommended and Optional extras in its section 12 are not approved.
+- Decisions: D1 PDFKit for PDFs (replaces the roadmap's Puppeteer). D2 the shared medicine catalogue is built in Phase 5. D3 prescriptions are never edited after issue; cancellation needs a reason and is allowed only before any dispensing. D4 allergy conflicts need explicit acknowledgement and a recorded reason. D5 domain events now; email, SMS and in-app delivery in Phase 9. D6 Phase 8 creates invoice lines for lab tests and dispensed medicines. D7 a rejected lab report returns to the technician for correction. D8 reference range and unit are copied onto each lab result. D9 dispensing sets READY_FOR_PICKUP and hand-over sets DISPENSED. D10 no medicine category, unit or supplier management screens.
+- Plan: https://claude.ai/artifact/2MDDoYb1Ps8Cw1QSZvqf8Y
+- Migration M-05 (prescription cancel fields, allergy override reason, two CHECKs) approved by the owner 2026-11-16.
+- Implementation notes (Phase 5): PDFs use PDFKit's standard Helvetica fonts (no font files shipped); allergy matching is by medicine and generic name, case-insensitive, on active uncorrected allergies, and is advisory; issuing requires the doctor's stored signature (RX-007); prescriptions are read by doctors, nurses, pharmacists and the patient (own); the PDF by doctors, pharmacists and the patient (own).
+- Migration M-06 (lab order CANCELLED status with reason fields, rejection fields, result unit and reference snapshot, three CHECKs) approved by the owner 2026-11-16.
+- Implementation notes (Phase 6): the most specific range wins (gender and age band each count) and a value equal to a limit is normal; radiology tests have no ranges and take text findings; a submitted order needs every result or an attached PDF report; the reviewer must be a senior technician (`StaffProfile.isSeniorLabTechnician`) who entered none of the current results; the report PDF is generated on request, not queued.
+- Related: SCOPE-012..014, RX-*, LAB-*, PHARM-*, DEC-024, DEC-039.
+
+### DEC-041: BullMQ job ids use "-" instead of ":" (defect fix)
+- Status: **Proposed** (implementation-level fix, 2026-11-16 23:30, after the owner's Phase 6 Mac run)
+- Problem: the Phase 6 integration log showed "Could not queue the PDF for prescription … Custom Id cannot contain :". BullMQ 6 refuses a custom job id with a ":" unless it has exactly three ":"-separated parts (kept only for old repeatable jobs). The PDF id `prescription:<uuid>` has two, so every `queue.add` threw. Issuing still succeeded (the error is caught and logged by design), but no prescription PDF was ever generated in the running app, and "Request again" failed the same way. Tests missed it: unit tests replace the queue with an inline fake, and the integration test called the renderer directly.
+- Decision: PDF job ids are `{kind}-{id}` (`pdfJobId`). Appointment reminder ids (`reminder:{id}:{offset}`, accepted today only by the three-part exception that BullMQ marks for removal) move to `reminder-{id}-{offset}` (`reminderJobId`); cancelling also removes the old-form ids, so reminders queued before the change are still replaced. Leftover old jobs cannot send a wrong reminder: the sender skips cancelled or moved appointments.
+- Tests: `src/testing/validating-queue.ts` runs BullMQ's own option validation without Redis; used by `infra/pdf/pdf-jobs.spec.ts` (fails on the old id) and `reminders.spec.ts`. `test/prescriptions.int-spec.ts` now waits for the real queue and worker to store the PDF instead of calling the renderer.
+- Verified: owner's macOS `pnpm test:int` 23:15, 9/9 suites, 17/17 tests, prescription PDF stored through the real queue and worker.
+- Owner action: prescriptions issued before this fix have no PDF; the prescribing doctor can press "Request again" on each.
+- Related: RX-002, APPT-005, DEC-040 D1/D5.
+
+### DEC-042: Phase 7 pharmacy rules and migrations M-07, M-08, M-09
+- Status: business rules **Approved** (owner, 2026-11-16 23:17). Migrations approved 2026-11-17 13:38 (see DEC-044) and applied on macOS 2026-11-17; drift empty; integration 19/19, Playwright 50/50.
+- Approved rules: (1) low stock means available stock strictly below the reorder level (PHARM-003); the Phase 5 stock badge follows the same rule (`isLowStock` in `@medcore/types`). (2) The expiry report runs at 02:00 in each hospital's own time zone. (3) Only VERIFIED hospitals are processed. (4) The nightly run quarantines expired batches automatically, recording a stock movement without changing the quantity.
+- M-07 `medicines.lowStockSince` (nullable): set once per crossing with a conditional update, so one `stock.low` event per crossing even under concurrent dispensing; cleared on restock or deactivation. M-08 `expiry_reports`: one row per hospital and local day (unique key makes runs idempotent), items JSON must be an array, hospital FK RESTRICT. M-09 (found necessary while finalising M-08): the existing schema required a performer on every stock movement and forbade zero quantities, and the ledger and dispenses were not append-only although the plan relies on it. M-09 allows a missing performer only on QUARANTINE rows with a reason, fixes ledger signs (QUARANTINE quantity = units set aside, positive, excluded from the quantity balance), links DISPENSE rows to dispenses, requires reasons for adjustments and quarantines, and adds append-only triggers on `stock_movements` and `dispenses`.
+- Tenant isolation: every pharmacy query names the hospital explicitly in addition to the tenant-scoped client; no raw SQL; Super Admin has no stock routes; the nightly job uses the base client and passes the processed hospital into every query and its transaction. No route takes an expiry-report id (the report is read through `GET /pharmacy/alerts` for the caller's hospital only).
+- Implementation notes: FIFO = earliest expiry, then earliest receipt (`allocateFifo`, shared by server and dispense preview); a batch expiring today is expired; dispensing requires verification, locks the prescription row first, decrements each batch conditionally (`quantity >= n`, ACTIVE, unexpired) and answers 422 `MEDICINE_EXPIRED` when only expired stock remains (TEST-014) or 422 `INSUFFICIENT_STOCK`; the job scheduler `expiry-sweep` runs at minute 7 every hour and processes each hospital past 02:00 local without today's report, each in its own transaction; one hospital failing is logged (and sent to Sentry when configured) and retried next hour. The API has no single-medicine route (PRD API-024 lists search only), so the stock view opens from the inventory list. Suppliers are not exposed (D10).
+- Related: SCOPE-014, PHARM-001..006, TEST-014, CACHE-002, NOTIF-008, DEC-040, DEC-041.
+
+### DEC-043: No timed jobs in integration tests; stock accounting across quarantine
+- Status: **Approved** as instructed by the owner (2026-11-16 23:50); verified on macOS 2026-11-17 (integration 19/19 with timed jobs off; `pnpm dev` runs the scheduler).
+- Timed jobs: new setting `SCHEDULED_JOBS` (`on`/`off`; unset = on, except `NODE_ENV=test`), rule in `scheduledJobsEnabled` (`config/env.ts`). `pharmacyJobs()` (the AppModule import) registers the expiry worker and its schedule only when enabled, so `pnpm dev` and production keep the hourly scheduler. `test/load-env.ts` always forces `SCHEDULED_JOBS=off` for integration tests, overriding `.env` and the shell. The test app then has no worker for the pharmacy queue, so even a schedule left in Redis by a development run is never processed by a test app. Integration tests call `ExpirySweep.runHospital` only for hospitals they create.
+- Accounting: `batch.quantity` is the physical count on hand. RECEIPT, DISPENSE and ADJUSTMENT change it and the ledger. QUARANTINE changes only the status; its figure is the number of physical units set aside at that moment (not the original receipt), excluded from the ledger balance (`ledgerBalance`). Invariant: ledger balance = quantity, before and after quarantine. Available stock = ACTIVE, unexpired batches (`availableUnits`), so quarantined and expired units are on hand but not available. Quarantine therefore leaves physical units and balances unchanged and lowers available stock by exactly the quarantined units; the nightly run on already-expired stock changes neither, because expired units were already unavailable. Destroying quarantined stock is a separate reasoned ADJUSTMENT, which lowers physical units but not available stock.
+- Related: DEC-042, PHARM-003/004/005, TEST-014.
+
+### DEC-044: System quarantine Layer A, prescription history (M-09 revised, M-10)
+- Status: **Approved** (owner, 2026-11-17 13:38): M-07, M-08, M-09 with Layer A, and M-10. Layer B is a **mandatory** Phase 14 task (P14-09), recorded as interim risk R-11. Validated on PostgreSQL 16; **applied on macOS 2026-11-17** (backfill: 4 ISSUED and 4 CANCELLED events, no BASELINE), drift empty, integration 19/19, Playwright 50/50.
+- System quarantine (M-09, Layer A): the database cannot tell two processes that share a login apart, so it guarantees the content instead. A movement without a performer must link `expiryReportId`, and the trigger accepts it only when the report is the same hospital's, was created in the same transaction (`medcore_same_tx`), is dated today in the hospital time zone and lists the batch as QUARANTINED, and the batch expired by that date, was quarantined in the same transaction and the row's quantity equals its physical quantity; at most one system row per batch. Batches: new ones are ACTIVE, QUARANTINED is final, DEPLETED holds no units, and every quarantine of a batch with units has its ledger row in the same transaction (checked at commit). A reason alone no longer marks a system row.
+- Layer B (P14-09, mandatory): separate database accounts for migrations (owner), the application and background jobs; the application account cannot insert expiry reports or system rows and never connects as owner or superuser; the job worker uses its own connection setting. Until then, any process with the application's credentials could write a system quarantine, but only a correct one.
+- Prescription history (M-10): append-only `prescription_events` (ISSUED, VERIFIED, DISPENSED, HANDED_OVER, CANCELLED, BASELINE; `status` = status after the event; actor required except BASELINE; reason for CANCELLED). The status workflow is enforced by triggers: allowed moves only (ISSUED to PARTIALLY_DISPENSED, READY_FOR_PICKUP or CANCELLED; PARTIALLY_DISPENSED to READY_FOR_PICKUP; READY_FOR_PICKUP to DISPENSED); never edited after issue; PDF attached once; verification once, while ISSUED; cancellation fields only when cancelling; dispensing statuses need verification and dispenses (READY needs every item complete); no cancel once dispensed. At commit, every new prescription, status change and verification needs its event from the same transaction, and every event must be written with the change it records. Dispenses need a verified, waiting prescription (row lock taken, so a concurrent cancel serialises), never exceed the prescribed quantity, and must come with their status update in the same transaction.
+- Backfill (owner instruction 2026-11-17 13:38): evidence only. ISSUED for every prescription (prescribing doctor, issue time), VERIFIED where stored, CANCELLED where stored; never DISPENSED or HANDED_OVER for existing rows; BASELINE only when stored facts cannot explain the current status. The migration stops, changing nothing, if stored facts contradict the workflow (verification before issue or after cancellation, dispensing without verification or before it, dispenses on ISSUED or CANCELLED prescriptions).
+- Application changes: issue, cancel, verify, dispense and hand-over each write their event in the same transaction (cancel, verify and hand-over only when the conditional update changed the row); the PDF is attached with a conditional update and a losing render rolls back and removes its file; the nightly run quarantines first, then writes the report, then the linked ledger rows; refilling an empty batch reactivates it in one update; `GET /prescriptions/:id` returns `history`; the pharmacy prescription screen shows it.
+- Related: DEC-040 D3/D9, DEC-042, DEC-043, PHARM-004/006, RX-002.
+
+
+## Phase 8 — Billing and payments (approved 2026-11-17 19:09)
+
+The owner approved the Phase 8 plan ("MedCore HMS — Phase 8 Billing & Payments Implementation Plan",
+Claude Doc, section 16) on 2026-11-17 19:09 IST, including decisions Q1a–Q1g and Q2–Q19. DEC-045 to
+DEC-054 record them; DEC-055 records the M-11a review. Tax rules below summarise the law as researched for
+the plan (sources listed there); each hospital's accountant must confirm its own configuration (DEC-054).
+
+### DEC-045: Configurable, versioned tax classifications (Q1a)
+- Status: **Approved** (owner, 2026-11-17 19:09).
+- A single hospital-wide tax rate is rejected: one outpatient visit mixes exempt healthcare services
+  (consultation, lab and radiology by a clinical establishment, SAC 9993) with taxable medicines.
+- Each hospital keeps `tax_classifications` (name, goods or service, HSN or SAC code; SAC codes start with
+  99, HSN codes never do). Classifications are never deleted; only the name and active flag change.
+  What deactivation means for versions: DEC-059.
+- `tax_classification_versions` hold what applies from a date: treatment EXEMPT, NIL_RATED or TAXABLE,
+  rate (0 unless TAXABLE; TAXABLE above 0 and at most 40), whether prices include tax. The version in force
+  on a date has the latest start on or before it; a rate change is a new version. No version starts before
+  today (hospital time zone); a version can be edited or deleted only before it takes effect.
+- Medicines need their own HSN-based classification (nil-rated supported); no rate is ever assumed. An
+  unclassified medicine can still be dispensed, but its invoice cannot be finalised until it is classified.
+- Rejected alternatives: GST rules hard-coded in MedCore (law changes need releases; MedCore would make tax
+  decisions); an external tax service (network dependency, cost, patient data leaving MedCore).
+- Related: BILL-002, BILL-008; M-11a (DEC-055).
+
+### DEC-046: Defaults, confirmation and the Phase 8 pharmacy assumption (Q1b, Q1e)
+- Status: **Approved** (owner, 2026-11-17 19:09).
+- Hospital defaults exist for consultations and lab tests only (service classifications). Rooms follow the
+  statutory rule (DEC-049); medicines need their own classification; other lines are chosen by staff.
+- New hospitals get suggested defaults, which the hospital admin must confirm before the first invoice
+  (`hospitals.taxSetupConfirmedAt/ById`, same-tenant user).
+- Q1e: all Phase 8 pharmacy lines are outpatient sales (taxable at the medicine's rate). Medicines given to
+  inpatients as part of treatment are exempt, but MedCore has no admissions model; that treatment depends on
+  a future admissions phase.
+
+### DEC-047: Supply classification kept separate from GST collection (Q1c)
+- Status: **Approved** (owner, 2026-11-17 19:09).
+- `hospital_gst_registrations`: dated rows (REGULAR, COMPOSITION, UNREGISTERED); the one in force on a date
+  has the latest start on or before it; no row means unregistered. Never edited, never backdated; a row not
+  yet in force may be deleted to correct a mistake.
+- A line's classification always describes the supply: a medicine stays TAXABLE at its statutory rate even
+  when the hospital cannot collect GST. Only a REGULAR registration in force on the service date collects
+  GST; otherwise tax is 0, the reason (UNREGISTERED or COMPOSITION) is stored, and the rate is kept for
+  reference. Document type follows (tax invoice; invoice-cum-bill of supply under Rule 46A; bill of supply,
+  with the composition declaration where applicable).
+
+### DEC-048: GSTIN validation
+- Status: **Approved** (owner, 2026-11-17 19:09).
+- Offline checks, in the database and the API: 15 characters, state code 01–38, PAN pattern, entity
+  character, "Z", mod-36 check character; the registration's chosen state equals the GSTIN's state code.
+  This proves a number is well formed, not that it is active: the hospital admin attests to the details
+  (`attestedById`, `attestedAt`). No GST-portal lookup (outside service, out of scope).
+- Revision 2 (owner review 2026-11-18): accepted format is a normal or composition taxpayer registration,
+  `^[0-9]{2}[A-Z]{3}[ABCFGHJLPT][A-Z][0-9]{4}[A-Z][1-9A-Z]Z[0-9A-Z]$`, PAN serial not 0000, state 01 to 38,
+  Luhn mod 36. Refused by design: tax deductor and tax collector registrations, UIN, non-resident and OIDAR
+  formats, PAN holder type K, lower case (the API upper-cases input before saving). Verified against real
+  issued GSTINs and an independent implementation (python-stdnum 2.2): sources, accepted and refused
+  formats and every test vector are recorded in the proposal's `validation/gstin_reference.md`.
+
+### DEC-049: Statutory room rule
+- Status: **Approved** (owner, 2026-11-17 19:09).
+- Notification 04/2022-CT(Rate), from 18 July 2022: a room other than ICU, CCU, ICCU or NICU with a charge
+  exceeding ₹5,000 per day per patient is taxed at 5% without input tax credit, on the whole room charge;
+  exactly ₹5,000 stays exempt. The threshold is tested on the per-day charge to the patient before any
+  discount.
+- Stored as platform reference data (`statutory_room_tax_rules`, append-only, seeded by M-11a), changed only
+  by a reviewed migration. Rooms gain `criticalCareUnit` (ICU, CCU, ICCU, NICU); a room of type ICU or with
+  a critical-care unit is exempt at any price.
+
+### DEC-050: One GSTIN per MedCore hospital (Q1g A)
+- Status: **Approved** (owner, 2026-11-17 19:09).
+- Enforced by the exclusion constraint `hospital_gst_registrations_gstin_one_hospital` (same GSTIN, different
+  hospital refused, race-safe). The same GSTIN may recur in one hospital (for example composition to
+  regular). The API answers `409 GSTIN_UNAVAILABLE` with a message that names no hospital and never passes
+  the database error text on (it contains the other hospital's id; SECURITY R-12). Sharing a GSTIN between
+  hospitals (chains) is a later decision.
+
+### DEC-051: Line arithmetic, discount allocation and snapshots (Q1d)
+- Status: **Approved** (owner, 2026-11-17 19:09).
+- Exact decimals, half-up to 0.01 once per step. gross = quantity × unit price; net = gross − discount
+  share. GST not collected: taxable = net, tax 0. Added on top: tax = round(net × r / 100). Price includes
+  tax: taxable = round(net × 100 / (100 + r)), tax = net − taxable. Invoice: subtotal = Σ taxable,
+  tax = Σ tax, discount = Σ shares, total = subtotal + tax; balance = total − succeeded payments.
+- Discounts (accountant only, Q2 B): shared in proportion to gross, remainder to the largest line (earliest on
+  ties), tax recomputed per line; the database checks the shares add up exactly.
+- Every line stores its classification and version, name, HSN or SAC, treatment, rate, price-includes-tax,
+  collection flag and reason, service date, gross, share, taxable value, tax and total (room lines also the
+  rule version, per-day charge and critical-care flag). Issued invoices never change when settings do.
+  Implemented in M-11b.
+
+### DEC-052: Document numbering (Q1f A)
+- Status: **Approved** (owner, 2026-11-17 19:09).
+- Separate series per document type and financial year (1 April to 31 March, hospital time), scoped to the
+  GSTIN (or the hospital when unregistered), because numbers must be unique per GSTIN and a GSTIN can outlive
+  a registration record. Format `PREFIX/YY-YY/NNNNN` (prefix 1–4 of A–Z 0–9), at most 16 characters
+  (Rule 46(b)); 99,999 per series and year, then `SERIES_EXHAUSTED`.
+- Allocated only at finalising, under the series row lock in the finalise transaction (gap-free: no
+  PostgreSQL sequences). Drafts have no number. Uniqueness: (scope, year, prefix) on series; (series,
+  serial), (scope, year, number) and (hospital, year, number) on invoices; numbers built by a trigger; issued
+  numbers immutable and never reused. Read-only documents-issued report for GSTR-1. Implemented in M-11b.
+
+### DEC-053: Issued documents are immutable; correction requests
+- Status: **Approved** (owner, 2026-11-17 19:09).
+- Drafts may be voided by receptionists or accountants with a reason (no number consumed). Finalised, partly
+  paid and paid documents are never cancelled, edited, renumbered or deleted in MedCore, whatever the date;
+  database triggers refuse it.
+- A needed correction or cancellation is blocked with an explanation that the accountant must handle it
+  through the legally appropriate process outside MedCore, and recorded as an append-only, audited
+  correction request; the accountant may add append-only outcome notes (for example an external credit-note
+  reference) that never change the document.
+- Distinguished: ordinary corrections (drafts; late-charge invoices, Q19 A); IRP e-invoice cancellation (not
+  applicable: Phase 8 bills patients, B2C, no IRN); GST credit notes (Section 34; out of scope, Q3 A).
+- Q7 B is limited to late-charge invoices in Phase 8; corrected invoices wait for credit-note support. Known
+  limitation: a balance credited outside MedCore still shows as due (accountant review item).
+
+### DEC-054: Phase 8 scope, workflow decisions and release gate
+- Status: **Approved** (owner, 2026-11-17 19:09).
+- Q2 B accountant-only discounts; Q3 A refunds and credit notes out of scope; Q4 A lines added when
+  services are rendered; Q5 A manual room lines; Q6 A lab price copied when ordered; Q7 B as limited by
+  DEC-053; Q8 A finalised invoices in the patient portal; Q9 A cash partial, online whole balance; Q10 A
+  Razorpay live-test, Stripe through FakeProvider; Q11 A Razorpay UPI and netbanking only; Q12 A receptionists
+  start online checkout; Q13 A accountant cash reversal with reason; Q14 A one platform test account;
+  Q15 A reimbursement tracking, never reduces the balance; Q16 A doctors have no invoice access; Q17 A
+  receipt email carries a portal link; Q18 A staff finalise explicitly; Q19 A separate late-charge invoice.
+- Platform-account isolation: a payment's hospital comes only from MedCore's own record (composite keys);
+  webhooks find payments by stored provider reference; metadata naming another hospital is held; checkout
+  idempotency keys are MedCore payment ids; reconciliation runs per hospital.
+- FakeProvider is the default for development and all automated tests. No external account is set up and no
+  credential requested without telling the owner first; keys go into `.env` by the owner only.
+- Out of scope: refunds, credit notes, e-invoicing, B2B billing, cashless insurance, admissions and inpatient
+  tax treatment, per-hospital provider accounts.
+- **Mandatory production-release gate:** review by the hospital's accountant of tax classifications and HSN
+  codes, numbering format and document types, immutability and correction requests, handling of corrections
+  and credit notes outside MedCore, the externally credited balance limitation, B2C dynamic QR needs, and the
+  outpatient pharmacy assumption (TASKS 8-G1).
+
+### DEC-055: M-11a tax configuration, validated and moved into the project (not yet applied)
+- Status: **Approved for drafting and PostgreSQL 16 validation** (owner, 2026-11-17 19:09) and **for moving
+  into the project** (owner, 2026-11-19 17:30). Applying it to the owner's database needs a separate
+  approval. M-11b to M-14 are each presented separately.
+- Moved into the project on 2026-11-19 (local commit, not pushed): the migration into
+  `prisma/migrations/20261117200000_tax_configuration/`, the proposed schema into `prisma/schema.prisma`, and
+  the test changes that describe the migrated database (T-MIG-001 counts, T-TEN-001 scoped-model count, the
+  schema-tenancy model count and global list (T-TEN-001d), new T-MIG-TAX-002..013). Until it is applied on
+  macOS, `prisma migrate deploy` lists it as pending and the integration tests that need it fail; unit tests
+  pass. `apps/api/prisma/proposed/20261117200000_tax_configuration/` stays as the review and validation
+  record (rollback script, validation scripts and results).
+- Contents (revision 3): 4 enums, 5 tables, 3 nullable columns on `lab_tests`, `medicines`, `rooms`,
+  3 on `hospitals` (`taxSetupConfirmedAt`, `taxSetupConfirmedById`, `taxTimezoneLockedAt`), 9 functions,
+  CHECKs, 1 exclusion constraint, 11 triggers (2 of them deferred constraint triggers), 1 seeded room-rule
+  row; no existing row changed. Database totals after it: 51 tables, 53 triggers, 3 exclusion constraints.
+- Revision 2 (owner review 2026-11-18 22:24): rollback guard also requires the seeded room rule to be
+  unchanged; effective dates use the hospital's tax date (DEC-058) and are checked again at commit; the
+  same-day rule (DEC-056); the hospital time zone is locked once tax data exists (DEC-057); GSTIN check
+  verified independently (DEC-048).
+- Revision 3 (owner review 2026-11-18 22:47): writers of effective-dated rows hold row locks until they
+  commit, hospital row first, and the limits of the time checks are documented (DEC-058).
+- Revision 4 (owner review 2026-11-19 15:55): assigning a classification (lab test, medicine, hospital
+  default) serialises with deactivating it at every isolation level (DEC-058); a new version needs an
+  active classification (DEC-059). Function bodies only: no object added or removed, so the contents and
+  totals above, the Prisma schema and `rollback.sql` are unchanged.
+  Review and macOS commands: [migration-review.md](migration-review.md) section 11.
+
+### DEC-056: Same-day rule for effective-dated tax data
+- Status: **Approved** (owner, 2026-11-18 22:47).
+- The first classification version of a classification, and the first GST registration of a hospital,
+  may start on the hospital's current tax date (today). Once a version or registration is in force,
+  every later one must start after the tax date (tomorrow or later). This keeps an invoice issued earlier
+  today from ever falling under different tax data than one issued later today.
+- Enforced by the M-11a triggers (statement time and again at commit); behaviour tests and T-MIG-TAX-003,
+  T-MIG-TAX-006 cover both cases.
+
+### DEC-057: Hospital time zone is locked once tax data exists
+- Status: **Approved** (owner, 2026-11-18 22:47).
+- The first tax date computed for a hospital stamps `hospitals.taxTimezoneLockedAt`; from then on the
+  database refuses any change to `timezone` or to the stamp (trigger `hospitals_tax_timezone`).
+- API (8-B2): an attempt to change a locked time zone returns **HTTP 409 `TIMEZONE_LOCKED`**, checked
+  before the update and also mapped from the database error, with a message naming no other record.
+- UI (8-B2): hospital settings show the time zone as locked (read-only field with the reason), never an
+  editable control that then fails.
+- Corrections: only by a reviewed migration (presented and approved like any other), never through normal
+  application operations.
+
+### DEC-058: Commit-time checks, the freeze margin and the row-lock protocol
+- Status: **Approved** (owner, 2026-11-18 23:25, with M-11a revision 3).
+- Effective dates are judged against the hospital's *tax date*: its local date ten minutes ahead of the
+  database clock (`clock_timestamp()`). Checks run when each statement runs and again at commit (deferred
+  constraint triggers).
+- What this does **not** guarantee: a transaction can pass its commit-time check and become visible later
+  without limit (storage stall, synchronous-replication wait, demonstrated in `validation/timing_tests.sh`);
+  `SET CONSTRAINTS ALL IMMEDIATE` (or `SET CONSTRAINTS ... IMMEDIATE`) moves the commit-time check earlier,
+  which any client may do; a database superuser can disable triggers (R-11). So the ten-minute margin is a
+  safety margin for normal operation, **not an absolute guarantee** about midnight.
+- What does hold, independent of timing: every writer of a version or registration locks the hospital
+  row, and a version writer then also locks the classification row (`FOR NO KEY UPDATE`, which does not
+  block foreign-key checks), until it commits. The fixed order (hospital, then classification) means a
+  transaction that writes both kinds cannot deadlock with a reader. Side effect, accepted because tax
+  configuration changes are rare: tax configuration writes for one hospital run one at a time, and an
+  update of that hospital's row (for example its settings) waits until such a writer commits. A reader
+  that takes `FOR SHARE` in the same order (hospital row, then classification row) waits for any such
+  writer and then sees its final committed values. M-11b's line trigger must take these locks before
+  resolving and validating line snapshots (TASKS 8-A2), so an issued line always matches the final
+  committed tax data even when the time checks were bypassed or a commit was stalled.
+- Operational controls (P14-09): `idle_in_transaction_session_timeout` and `statement_timeout` for the
+  application role, Prisma interactive-transaction timeouts, `transaction_timeout` once on PostgreSQL 17,
+  no synchronous replication without review.
+- Revision 4 (approved with DEC-059, owner 2026-11-19 16:53): assigning a classification to a lab test,
+  medicine or hospital default also locks the hospital row first and then writes the classification row
+  without changing it. A lock alone is not enough: under REPEATABLE READ a deactivation whose snapshot
+  predates the assignment's commit would not see the new default. The write makes PostgreSQL serialise the
+  two: under READ COMMITTED the later one waits and then sees the other's result (refused); under
+  REPEATABLE READ and SERIALIZABLE the later one fails with a serialization error, which the API must
+  retry or report (8-B2). Revision 3 let both commit at READ COMMITTED and REPEATABLE READ, leaving a
+  default on an inactive classification (reproduced in `validation/classification_race_tests.sh`).
+- Limitation: renaming or deactivating a classification locks that row before any trigger runs, so the
+  database cannot take the hospital row first for that statement. A transaction that updates a
+  classification and then writes a version, registration or assignment for the same hospital takes the
+  locks in the reverse order and can deadlock with a concurrent locking reader; PostgreSQL then cancels
+  one of them (no hang). Not tested. The tax settings API locks the hospital row at the start of every
+  tax-settings transaction (8-B2); R-16.
+
+### DEC-059: Classification lifecycle: deactivation and versions
+- Status: **Approved** (owner, 2026-11-19 16:53, with M-11a revision 4).
+- Versions already recorded stay valid when their classification is deactivated; deactivation is allowed
+  while versions exist.
+- A new version cannot be created while the classification is inactive.
+- A future version (one not yet in force) can still be corrected or withdrawn after deactivation.
+- A version in force stays immutable, whether the classification is active or not (DEC-045).
+- Reactivating a classification permits new versions again.
+- Enforced by `tax_classification_versions_rules`, which reads the active flag under the classification
+  row lock, so a concurrent deactivation is either seen or causes a serialization error. Tests: behaviour
+  checks (one per rule), `classification_race_tests.sh` (versions against deactivation at three isolation
+  levels), T-MIG-TAX-012.
+
+## Phases 8–10 execution (architecture review approved 2026-11-19 19:10)
+
+Owner decisions on the Phases 8–10 architecture review (D1–D6) and related approvals. Each entry says
+whether it is approved scope from the PRD or earlier decisions, or a new requirement.
+
+### DEC-060: Patient-facing pages are built with their backend (D1 B)
+- Status: **Approved** (owner, 2026-11-19 19:10). Scope unchanged; order of work only.
+- Portal billing pages (finalised invoices, online checkout, payment history, receipts) are built in Phase 8
+  with the billing API; the portal and staff notification inbox in Phase 9 with the notification API.
+  Phase 10 is the hardening of the existing portal: one ownership check, a patient-isolation suite, the
+  dashboard summary, reschedule in the portal if missing, mobile and accessibility, and the PRD journeys.
+- The existing portal is extended, never rebuilt. Alternative rejected: strictly sequential phases (each
+  API reopened and tested twice).
+
+### DEC-061: Isolated E2E database and signed-in Playwright tests (approvals 1 and 2)
+- Status: **Approved** (owner, 2026-11-19 19:10). Test infrastructure brought forward from Phase 14
+  (seed data); no product scope.
+- A disposable database `medcore_e2e` in the development PostgreSQL container. Its name is a constant in
+  code, never read from configuration; every E2E command refuses any other database, refuses production
+  settings, and refuses a development database with that name. Only that database is ever dropped, through
+  the `postgres` maintenance database.
+- The E2E stack is fully separate from development: web 3100, API 3101, Redis database 1, file storage
+  `apps/api/var/storage-e2e`, Next.js build folder `.next-e2e`, development SMS inbox only.
+- A seed (`apps/api/src/cli/seed-e2e.ts`) creates two verified hospitals, one account per role, a senior lab
+  technician, a doctor with a weekly schedule, and three patients (two in hospital A). The shared password
+  comes from `E2E_PASSWORD` in `.env` (owner sets it; never committed or printed). Clinical and billing
+  scenarios are created through the real API by the tests.
+- Playwright starts the E2E servers itself, signs in each seeded account once through the real sign-in
+  page, and saves its browser state to `e2e/.auth/` (git-ignored).
+
+### DEC-062: Durable notifications and Socket.IO (D2 B, D3 A; approvals 3 and 4)
+- Status: **Approved** (owner, 2026-11-19 19:10). Implements PRD NOTIF-001/NOTIF-010 and TECH-024.
+- The `notifications` row (with a duplicate-prevention key) is written inside the business transaction;
+  one delivery job per channel is enqueued after commit; a sweeper re-enqueues deliveries still pending
+  after a set time. Reuses `notifications` and `notification_deliveries` (one delivery per notification and
+  channel, already unique). Needs migration M-15. In-memory domain events (DEC-040 D5) stay for other
+  subscribers. Alternatives rejected: events alone (lost on restart), a separate outbox table (same
+  guarantee, more parts).
+- Real-time delivery by Socket.IO on one API instance, one room per user, authenticated with the existing
+  access cookie; the Redis adapter only when a second instance exists.
+
+### DEC-063: Cancellation and rescheduling notifications (D4 B; approval 5)
+- Status: **Approved** (owner, 2026-11-19 19:10). **New requirement** beyond the PRD's eight triggers.
+- "Appointment cancelled" and "Appointment rescheduled" go to the patient by email and in-app.
+- No notification preferences in Phase 9 (deferred; the eight PRD triggers are transactional).
+
+### DEC-064: Double-payment prevention (D5 A)
+- Status: **Approved** (owner, 2026-11-19 19:10). Enforces DEC-054 (online pays the whole balance) and Q3 A
+  (no refunds).
+- While an online checkout is open for an invoice, cash is refused; staff cancel the checkout first.
+  Enforced in the database (M-12), including concurrent requests and webhook races: at most one open online
+  checkout per invoice, and succeeded payments may never exceed the invoice total. A success webhook for a
+  checkout that was cancelled is held for the accountant, never applied.
+
+### DEC-065: No clinical information in email or SMS (D6 A; approval 6)
+- Status: **Approved** (owner, 2026-11-19 19:10). **New requirement** (content policy).
+- Email and SMS say only what is ready or changed and link to the signed-in portal; no diagnoses, test or
+  medicine names, or results. In-app titles follow the same rule; details appear only on authenticated
+  pages. Links never carry tokens or patient data.
+
+### DEC-066: M-11b review decisions 1 to 8 (owner review 2026-11-19 21:38 and 21:44)
+- Status: **Approved** (owner, 2026-11-19 21:44). Recorded in the M-11b proposal (revision 2). Revision 2
+  moved into `prisma/migrations` with its schema on 2026-11-19 21:52 (owner approval); **not applied** on
+  macOS until a separate approval, preceded by the read-only invoice count.
+- 1: billing writes run at READ COMMITTED; the billing triggers refuse other isolation levels (the DEC-058
+  lock protocol gives exact reads only at READ COMMITTED). 2: a voided original draft can be replaced by a
+  new original; an issued original never. 3: lines of a draft can be removed; issued lines never change.
+  5: the database allocates the document number when an invoice is finalised. 6: consultation and lab
+  lines with no usable classification are stored unclassified (as medicines), so clinical work is never
+  blocked; finalising stays blocked. 8: a room charge dated before 18 July 2022, and GST collected under an
+  earlier regular registration on a document issued when the hospital is no longer regular, are refused
+  (this replaces the plan's acceptance line "a room charge before 18 July 2022 is exempt").
+- 4 (resolved): **voiding a draft releases its sources and keeps its lines.** Each line has `releasedAt`,
+  set by the database (only by the void of its draft, never by a direct update, never on an issued or
+  draft invoice). A consultation (the visit), lab order item or dispense can be on at most one unreleased
+  line, enforced by partial unique indexes, so a replacement draft can bill the same consultation, lab and
+  pharmacy charges and nothing is ever billed twice, under any concurrency. Voided invoices and their
+  lines are kept unchanged apart from `releasedAt`, for audit.
+- 7 (resolved): **automatic prefixes** reuse the hospital's latest prefix for the document type (defaults
+  TI, ICB, BOS), or the first free of `<first three characters><2..9>`. A prefix is unique per GSTIN
+  scope and year **and per hospital and year** (unique index on series, which also binds series opened by
+  hand), so a hospital never prints the same number twice in a year, even after a registration or GSTIN
+  change. DEC-052 unchanged otherwise: series per document type, gap-free numbering, at most 16
+  characters. The automatic suffix convention is part of the accountant review (8-G1).

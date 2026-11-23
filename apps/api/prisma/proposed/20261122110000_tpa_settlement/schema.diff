@@ -1,0 +1,8 @@
+# schema.prisma changes for M-13 (NOT APPLIED)
+enum PaymentMethod {
+  STRIPE_CARD
+  RAZORPAY_UPI
+  RAZORPAY_NETBANKING
+  CASH
++ TPA_SETTLEMENT
+}

@@ -1,0 +1,13 @@
+# schema.prisma changes for M-15 (NOT APPLIED)
+model Notification {
+  ...
++ /// "<type>:<entityId>" for notifications sent at most once; NULL for repeatable ones (M-15).
++ dedupeKey   String?
+  ...
++ @@unique([recipientId, dedupeKey])
+}
+
+model NotificationDelivery {
+  ...
++ @@index([status, updatedAt])
+}

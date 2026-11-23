@@ -1,0 +1,161 @@
+M-11b invoice_integrity revision 2 validation, PostgreSQL 16.15
+started 2026-11-19 21:48:23 IST; migration.sql sha256 2742c9cb17d9bc55; rollback.sql sha256 7dc939907131b0e5; schema.prisma sha256 6b70f4b12432421c
+
+######## safety_checks.sh (preconditions, existing rows, rollback)
+existing rows before: 325 dump lines, 64 live rows
+PASS migration stops on existing billing rows and changes nothing
+PASS migration applies as one multi-statement query
+PASS every existing row identical after the migration (data dump, b828c246e515)
+object counts: 55 tables, 64 triggers, 3 exclusions
+PASS rollback refused while billing rows exist
+PASS rollback applies
+PASS schema after rollback identical to before M-11b (pg_dump -s)
+PASS existing rows identical after rollback
+PASS migration applies again after rollback
+
+######## fresh scratch database m11b: 9 applied migrations + seed + M-11b
+applied: ok
+
+######## behaviour_tests.py
+PASS empty draft is created with sequence 1 and a CREATED event
+PASS invoice patient must be the visit's patient
+PASS draft cannot start with totals
+PASS draft cannot carry a document number
+PASS one open draft per visit
+PASS one live original per visit
+PASS a voided original draft can be replaced; the new one is sequence 2
+PASS late-charge invoice needs an issued original
+PASS late-charge invoice after the original is issued; original untouched
+PASS a late-charge invoice must follow an original of the same visit
+PASS invoices are never deleted, not even drafts
+PASS consultation line with the right snapshot; totals checked at commit
+PASS totals that differ from the lines are refused at commit
+PASS consultation price must be the doctor's fee
+PASS a visit is charged one consultation
+PASS wrong classification for a consultation
+PASS wrong collection flag (regular hospital collects)
+PASS lab line uses the lab default and the test price
+PASS lab line must belong to the invoice's visit
+PASS lab test's own classification wins over the default
+PASS pharmacy line: version in force on the service date (5% from 22 Sep, MRP includes tax)
+PASS pharmacy line dated before the rate change keeps the old 12% version
+PASS pharmacy line with the old version on a later date is refused
+PASS pharmacy quantity and price come from the dispense
+PASS pharmacy line of another visit is refused
+PASS unclassified medicine is stored unclassified, never blocked
+PASS unclassified medicine cannot be claimed as classified
+PASS arithmetic is checked: tax added on top must round half-up
+PASS other charge at 18% added on top
+PASS other charge needs a classification
+PASS other charge with an inactive classification is refused (DEC-059)
+PASS medicine on a deactivated classification becomes unclassified
+PASS a charge cannot be dated after today
+PASS draft line: only the snapshot and discount share can change
+PASS re-resolve: classify the medicine, update the draft line, then finalise
+PASS draft lines can be removed
+PASS room above 5,000 a day: 5% on the whole charge
+PASS room at exactly 5,000 stays exempt
+PASS room at exactly 5,000 claimed taxable is refused
+PASS ICU room exempt at any price
+PASS NICU (critical-care unit) exempt at any price
+PASS room line price is the room's daily charge
+PASS room without a daily charge is refused
+PASS manual lines record who added them
+PASS accountant discount, shared and recorded (worked example of the plan)
+PASS a receptionist cannot discount
+PASS a discount needs a reason
+PASS discount shares must add up to the discount (at commit)
+PASS a share cannot exceed its line
+PASS finalise: bill of supply for exempt lines; number, seller and events
+PASS finalise: tax invoice when every line is taxed
+PASS finalise: invoice-cum-bill of supply for mixed lines (Rule 46A)
+PASS unregistered hospital: no GST collected, bill of supply, hospital scope
+PASS two hospitals number independently
+PASS replacement draft re-bills the same consultation, lab item and dispense; finalised end to end
+PASS a source stays on at most one unreleased line: lab item already on the issued original
+PASS ... dispense already on the issued original
+PASS ... consultation already on the issued original (message, then the index)
+PASS the consultation index holds even without the friendly check
+PASS a consultation line must name its own visit
+PASS a direct update cannot release a line of a voided draft
+PASS a direct update cannot release a draft line
+PASS a direct update cannot release an issued line
+PASS a line cannot be inserted already released
+PASS a released line of a voided invoice cannot otherwise change
+PASS consecutive numbers in one series; a voided draft consumes none
+PASS only a receptionist or accountant can finalise
+PASS tax set-up must be confirmed first
+PASS an empty invoice cannot be finalised
+PASS unclassified lines block finalising
+PASS totals must match when finalising
+PASS nothing to pay cannot be finalised
+PASS the application cannot supply the number
+PASS financial year: 31 March 23:59 and 1 April 00:00 are different years
+PASS series exhaustion: 99,999 is the last number
+PASS series exhaustion refuses the next number
+PASS new registration under the same GSTIN opens a series with a new prefix
+PASS unregistered hospital registers as regular mid-year: next bill of supply uses BOS2, never BOS again
+PASS GSTIN change mid-year (regular to regular): tax invoices continue as TI2
+PASS different document types in one year get separate series and prefixes
+PASS a series opened by hand cannot reuse a prefix the hospital used this year under another scope
+PASS a series opened by hand with a free prefix is used by the next finalise
+PASS closing a series and reopening its prefix in the same year is refused
+PASS every issued number is at most 16 characters (longest form BOS2/26-27/00001)
+PASS issued: amounts cannot change
+PASS issued: cannot be voided
+PASS issued: number cannot change
+PASS issued: lines cannot change
+PASS issued: lines cannot be removed
+PASS issued: lines cannot be added
+PASS issued: payment status is not set in M-11b
+PASS issued: a receipt can be attached once
+PASS void is final
+PASS void needs a reason
+PASS a doctor cannot void
+PASS a draft cannot be paid
+PASS correction request on an issued document, with history; the document is unchanged
+PASS no correction request on a draft
+PASS a doctor cannot request a correction
+PASS only an accountant adds outcome notes
+PASS correction requests are append-only
+PASS invoice history is append-only
+PASS series are never deleted
+PASS series counter never goes down
+PASS series prefix never changes
+PASS a closed series issues nothing more; finalising opens the next prefix
+PASS prefixes are unique within a scope and year
+PASS an issued number is unique in its scope and year
+PASS a line cannot use another hospital's classification
+PASS an invoice cannot reference another hospital's visit
+PASS billing writes refuse REPEATABLE READ
+
+111/111 passed
+
+######## concurrency_tests.py (real sessions, real clock)
+PASS C1 50 concurrent finalises: serials 1..50, no gap or duplicate, counter at 51  (errors=0, serials [1, 2, 3]..[48, 49, 50], series rows [(51,)])
+PASS C2 a rolled-back finalise leaves no gap  (BOS/26-27/00001 rolled back, then BOS/26-27/00001)
+PASS C3a a line waits for an open registration writer; stale 'unregistered' snapshot refused after commit  (waited 1.5s: The line's tax snapshot does not match the tax settings in force on 2026-11-19 (gstCollected, notCollectedReason); re-resolve the line)
+PASS C3b ... and a line matching the committed registration succeeds  (waited 1.5s )
+PASS C7 a registration writer that rolls back leaves the line on the old values  (waited 1.5s )
+PASS C4 a pharmacy line waits for an open classification assignment, then refuses the stale 'unclassified' snapshot  (waited 1.5s: The line's tax snapshot does not match the tax settings in force on 2026-11-19 (unclassified, classificationId, classificationVersionId, classificationName, hsnSac, supplyType, treatment, ratePercent, priceIncludesTax, gstCollected); re-resolve the line)
+PASS C5a a finalise waits for an open line, then issues it with both lines  (total 10000.00, lines 2)
+PASS C5b a line waits for an open finalise, then is refused  (Lines of an issued or void invoice cannot change)
+PASS C6 two sessions create the visit's draft at once: exactly one succeeds  (duplicate key value violates unique constraint "invoices_appointmentId_sequence_key")
+PASS C8 a replacement draft waits for an open void, then re-bills the released lab item; one live line, both kept  (waited 1.5s, live 1, lines 2 )
+PASS C9 if the void rolls back, the replacement is refused and the lab item stays on the original draft  (duplicate key value violates unique constraint "invoices_one_draft_per_appointment"; live 1, lines 1)
+
+11/11 concurrency checks passed
+
+######## conform.js (proposed schema.prisma vs migrated database)
+  outside Prisma (partial/expression): invoices_one_draft_per_appointment
+  outside Prisma (partial/expression): invoices_one_original_per_appointment
+  outside Prisma (partial/expression): invoice_items_lab_unreleased
+  outside Prisma (partial/expression): invoice_items_dispense_unreleased
+  outside Prisma (partial/expression): invoice_items_consultation_unreleased
+  outside Prisma (partial/expression): document_number_series_one_open
+427/427 checks match
+
+######## summary
+PASS lines: 130; FAIL lines: 0; MISMATCH lines: 0
+behaviour 111/111 passed; concurrency 11/11 concurrency checks passed; conformance 427/427 checks match
+finished 2026-11-19 21:48:54 IST

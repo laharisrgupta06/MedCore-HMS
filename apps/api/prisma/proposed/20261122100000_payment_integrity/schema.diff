@@ -1,0 +1,20 @@
+# schema.prisma changes for M-12 (NOT APPLIED). Must ship in the same change as migration.sql.
+enum PaymentStatus {
+  PENDING
+  SUCCEEDED
+  FAILED
++ REVERSED
+}
+
+model Payment {
+  ...
++ reversedAt     DateTime? @db.Timestamptz(3)
++ reversedById   String?   @db.Uuid
++ reversalReason String?
++ reversedBy     User?     @relation("PaymentReversedBy", fields: [reversedById, hospitalId], references: [id, hospitalId], onDelete: Restrict)
+}
+
+model User {
+  ...
++ paymentsReversed Payment[] @relation("PaymentReversedBy")
+}

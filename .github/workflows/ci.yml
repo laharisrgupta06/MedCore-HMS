@@ -1,0 +1,86 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    name: Lint, typecheck, test, build
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: medcore
+          POSTGRES_PASSWORD: medcore_ci_only
+          POSTGRES_DB: medcore_ci
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U medcore -d medcore_ci"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+      redis:
+        image: redis:7-alpine
+        ports: ['6379:6379']
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s --health-timeout 3s --health-retries 10
+      # Local SMTP + API for the auth integration suite (email OTP read from Mailpit).
+      mailpit:
+        image: axllent/mailpit:latest
+        ports: ['1025:1025', '8025:8025']
+
+    # Throwaway values for the ephemeral CI services only. Real secrets never live in this file.
+    env:
+      NODE_ENV: test
+      DATABASE_URL: postgresql://medcore:medcore_ci_only@localhost:5432/medcore_ci?schema=public
+      REDIS_URL: redis://localhost:6379
+      JWT_ACCESS_SECRET: ci-only-access-0000000000000000000000000000000000000000
+      JWT_REFRESH_SECRET: ci-only-refresh-111111111111111111111111111111111111111
+      EMR_ENCRYPTION_KEY: ci-only-emr-key-2222222222222222222222222222222222222222
+      CORS_ORIGINS: http://localhost:3000
+      NEXT_TELEMETRY_DISABLED: '1'
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter @medcore/api prisma:generate
+      - run: pnpm --filter @medcore/api prisma:validate
+      - run: pnpm format:check
+      - run: pnpm lint
+      - run: pnpm typecheck
+      - run: pnpm test
+      - name: Apply migrations to the CI database
+        run: pnpm --filter @medcore/api prisma:deploy
+      - name: Integration tests (real PostgreSQL, Redis and Mailpit)
+        run: pnpm test:int
+      - name: Script tests (E2E and integration database guards)
+        run: pnpm test:scripts
+      # Database behaviour suites (M-11b invoice rules, M-12 payment rules, M-13, M-15) in a separate
+      # throwaway database of the same CI service: every committed migration, the M-11b fixtures,
+      # then both suites. The CI database the tests above use is not touched.
+      - name: Database rule behaviour tests on a scratch database
+        env:
+          PGPASSWORD: medcore_ci_only
+        run: |
+          PSQL="psql -h localhost -U medcore -v ON_ERROR_STOP=1 -q"
+          $PSQL -d medcore_ci -c "CREATE DATABASE medcore_proposals"
+          for f in apps/api/prisma/migrations/*/migration.sql; do $PSQL -d medcore_proposals -f "$f" > /dev/null; done
+          $PSQL -d medcore_proposals -f apps/api/prisma/proposed/20261119220000_invoice_integrity/validation/seed.sql > /dev/null
+          PSQL="psql -h localhost -U medcore" python3 apps/api/prisma/proposed/20261122100000_payment_integrity/validation/m12_behaviour_tests.py medcore_proposals --with-m11b
+      - run: pnpm build

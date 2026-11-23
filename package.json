@@ -1,0 +1,43 @@
+{
+  "name": "medcore-hms",
+  "version": "0.1.0",
+  "private": true,
+  "description": "MedCore HMS: multi-tenant hospital management platform",
+  "packageManager": "pnpm@11.28.12",
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "build": "pnpm -r --filter @medcore/types build && pnpm -r --filter '!@medcore/types' build",
+    "build:types": "pnpm --filter @medcore/types build",
+    "dev": "pnpm build:types && pnpm --parallel --filter @medcore/api --filter @medcore/web dev",
+    "lint": "eslint .",
+    "typecheck": "pnpm build:types && pnpm -r typecheck",
+    "test": "pnpm build:types && pnpm -r test",
+    "test:int": "pnpm build:types && pnpm --filter @medcore/api test:int",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "infra:up": "docker compose -f docker/compose.dev.yml --env-file .env up -d",
+    "infra:down": "docker compose -f docker/compose.dev.yml --env-file .env down",
+    "infra:ps": "docker compose -f docker/compose.dev.yml --env-file .env ps",
+    "e2e:db:prepare": "node scripts/e2e/db.mjs prepare",
+    "e2e:db:migrate": "node scripts/e2e/db.mjs migrate",
+    "e2e:db:seed": "node scripts/e2e/db.mjs seed",
+    "int:db:prepare": "node scripts/int/db.mjs prepare",
+    "int:db:migrate": "node scripts/int/db.mjs migrate",
+    "e2e:check": "node scripts/e2e/check.mjs",
+    "test:e2e": "node scripts/e2e/check.mjs && pnpm --filter @medcore/e2e test:e2e",
+    "test:scripts": "node --test scripts/e2e/env.test.mjs scripts/int/env.test.mjs"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.39.5",
+    "@next/eslint-plugin-next": "15.5.29",
+    "eslint": "^9.39.5",
+    "eslint-config-prettier": "^10.1.8",
+    "eslint-plugin-react-hooks": "^7.1.1",
+    "globals": "^16.4.0",
+    "prettier": "^3.6.2",
+    "typescript": "~5.9.3",
+    "typescript-eslint": "^8.72.2"
+  }
+}
