@@ -58,6 +58,12 @@ BEGIN
   SELECT count(*) INTO refs FROM audit_logs a WHERE a."entityId" IN (SELECT id::text FROM invoices);
   IF refs <> 0 THEN RAISE EXCEPTION 'ABORT: % audit entries reference these invoices', refs; END IF;
 
+  -- Notifications naming these invoices ("entityId" is a UUID with no foreign key, so the loop
+  -- above cannot see it). Draft invoices never notify; any match means the rows are not what the
+  -- test left behind.
+  SELECT count(*) INTO refs FROM notifications n WHERE n."entityId" IN (SELECT id FROM invoices);
+  IF refs <> 0 THEN RAISE EXCEPTION 'ABORT: % notifications reference these invoices', refs; END IF;
+
   RAISE NOTICE 'Checks passed: % invoices, all match the test pattern, % hospitals, no references', total, hospitals_n;
 END
 $checks$;
