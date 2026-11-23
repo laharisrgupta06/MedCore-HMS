@@ -276,7 +276,8 @@ describe('Phase 8 integration: tax settings API on PostgreSQL', () => {
         await a
           .post('/api/tax/registrations', {
             registrationType: 'REGULAR',
-            gstin: g.slice(0, 14) + 'A',
+            // A wrong check character: always differs from the real one (random GSTINs end in 'A' 1 in 36).
+            gstin: g.slice(0, 14) + (g[14] === 'A' ? 'B' : 'A'),
             legalName: 'L',
             effectiveFrom: later,
           })

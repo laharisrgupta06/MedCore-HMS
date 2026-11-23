@@ -1,5 +1,6 @@
-import { expect, test, type APIRequestContext } from '@playwright/test';
-import { ACCOUNTS, stateFile, type AccountKey } from '../support/accounts';
+import type { APIRequestContext } from '@playwright/test';
+import { ACCOUNTS, type AccountKey } from '../support/accounts';
+import { expect, signedInState, test } from '../support/session';
 
 /**
  * Signed-in foundations (DEC-061): every seeded role reaches its home page, and patients and other
@@ -10,7 +11,7 @@ const data = async (r: Awaited<ReturnType<APIRequestContext['get']>>) =>
 
 for (const key of Object.keys(ACCOUNTS) as AccountKey[]) {
   test.describe(`${key} signed in`, () => {
-    test.use({ storageState: stateFile(key) });
+    test.use({ account: key });
     test('reaches its home page without signing in again', async ({ page }) => {
       const home = ACCOUNTS[key].home.source.includes('portal') ? '/portal' : '/dashboard';
       await page.goto(home);
@@ -23,12 +24,26 @@ for (const key of Object.keys(ACCOUNTS) as AccountKey[]) {
 test.describe('patient isolation', () => {
   test('another patient and another hospital get 404 for a patient by id', async ({
     playwright,
+    browser,
   }) => {
-    const as = (key: AccountKey) =>
-      playwright.request.newContext({
+    // As the browser does: the access token lives in memory, so it is obtained from the refresh
+    // cookie (POST /api/auth/refresh with the CSRF double-submit) and sent as a Bearer header.
+    const as = async (key: AccountKey) => {
+      const state = await signedInState(browser, key, 'http://localhost:3100');
+      const csrf = state.cookies.find((c) => c.name === 'mc_csrf')?.value ?? '';
+      const ctx = await playwright.request.newContext({
         baseURL: 'http://localhost:3100',
-        storageState: stateFile(key),
+        storageState: state,
       });
+      const refreshed = await ctx.post('/api/auth/refresh', { headers: { 'x-csrf-token': csrf } });
+      expect(refreshed.status(), `refresh for ${key}`).toBe(200);
+      const token = (await data(refreshed)).accessToken as string;
+      await ctx.dispose();
+      return playwright.request.newContext({
+        baseURL: 'http://localhost:3100',
+        extraHTTPHeaders: { Authorization: `Bearer ${token}` },
+      });
+    };
     const owner = await as('patient-a');
     const me = await owner.get('/api/patients/me');
     expect(me.status()).toBe(200);

@@ -20,6 +20,8 @@ test('derives the E2E database, Redis index, ports and folders', () => {
   assert.equal(e.FILE_STORAGE_DIR, 'var/storage-e2e');
   assert.equal(e.NEXT_DIST_DIR, '.next-e2e');
   assert.equal(e.MEDCORE_E2E, '1');
+  // Only the disposable E2E stack raises the per-IP auth limit (many test users, one address).
+  assert.equal(e.AUTH_THROTTLE_LIMIT, '2000');
   assert.equal(e.SMS_PROVIDER, 'dev-inbox');
 });
 

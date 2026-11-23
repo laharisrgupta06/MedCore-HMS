@@ -72,6 +72,11 @@ export function e2eEnv(source) {
     NEXT_DIST_DIR: '.next-e2e',
     // Development SMS inbox, never a real SMS provider, in E2E runs.
     SMS_PROVIDER: 'dev-inbox',
+    // Every E2E browser reaches the API from 127.0.0.1, so a full run (each test signs in for its
+    // own session, and each page load refreshes it) looks like one very busy address. This raises
+    // the per-IP auth limit for this disposable stack only; the application default (PRD SEC-005:
+    // 100 per 15 minutes) is unchanged elsewhere and is tested in auth.http.spec.ts.
+    AUTH_THROTTLE_LIMIT: '2000',
   };
   assertE2eDatabaseUrl(env.DATABASE_URL);
   return env;

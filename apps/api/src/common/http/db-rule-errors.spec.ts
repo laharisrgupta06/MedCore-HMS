@@ -49,6 +49,33 @@ describe('database rule errors', () => {
     }
   });
 
+  it('ignores constraint names in the source code Prisma prints with the error', () => {
+    // Integration finding: the code frame showed a nearby pre-check naming a CHECK constraint, and a
+    // backdating refusal from a trigger was reported as that constraint's 400.
+    const e = new Prisma.PrismaClientUnknownRequestError(
+      [
+        'Invalid `tx.hospitalGstRegistration.create()` invocation in',
+        '/app/src/modules/tax/tax.module.ts:426:31',
+        '',
+        "  423   if (registered && !isValidGstin(dto.gstin ?? ''))",
+        '  424     throw new BadRequestException(CHECKS.hospital_gst_registrations_details_chk);',
+        '→ 426   tx.hospitalGstRegistration.create(',
+        'Error occurred during query execution:',
+        'ConnectorError(ConnectorError { user_facing_error: None, kind: QueryError(PostgresError { code: "23000", message: "A GST registration cannot be backdated", severity: "ERROR", detail: None, column: None, hint: None }), transient: false })',
+      ].join('\n'),
+      { clientVersion: 'test' },
+    );
+    expect(() =>
+      mapDbRuleError(e, {
+        hospital_gst_registrations_details_chk: { code: 'GSTIN_INVALID', message: 'x' },
+      }),
+    ).toThrow(
+      expect.objectContaining({
+        response: { code: 'RULE_VIOLATION', message: 'A GST registration cannot be backdated' },
+      }),
+    );
+  });
+
   it("maps a named CHECK constraint to the caller's 400", () => {
     const e = pgError(
       '23514',

@@ -27,6 +27,11 @@ import { EmrModule } from './modules/emr/emr.module';
 import { MedicinesModule } from './modules/medicines/medicines.module';
 import { TaxModule } from './modules/tax/tax.module';
 import { BillingModule } from './modules/billing/billing.module';
+import { PaymentsModule } from './modules/payments/payments.module';
+import { InsuranceModule } from './modules/insurance/insurance.module';
+import { NotificationsModule } from './modules/notifications/notifications.module';
+import { PortalModule } from './modules/portal/portal.module';
+import { AnalyticsModule } from './modules/analytics/analytics.module';
 import { PharmacyModule } from './modules/pharmacy/pharmacy.module';
 import { PrescriptionsModule } from './modules/prescriptions/prescriptions.module';
 import { LabModule } from './modules/lab/lab.module';
@@ -78,6 +83,11 @@ describe('Permissions matrix (ROLE-011)', () => {
           MedicinesModule,
           TaxModule,
           BillingModule,
+          PaymentsModule,
+          InsuranceModule,
+          NotificationsModule,
+          PortalModule,
+          AnalyticsModule,
           PrescriptionsModule,
           LabModule,
           PharmacyModule,
@@ -236,6 +246,36 @@ describe('Permissions matrix (ROLE-011)', () => {
           amendsLabOrderId: null,
         }),
       );
+      // Phase 8: one issued invoice per appointment, with one received cash payment, so the patient
+      // OWN cells on invoice and payment routes are exercised against a real foreign row.
+      const inv = push('Invoice', {
+        appointmentId: a.id,
+        patientId: a.patientId,
+        invoiceNumber: `INV-MATRIX-${key}`,
+        documentType: 'TAX_INVOICE',
+        status: 'FINALISED',
+        subtotal: '100.00',
+        discount: '0.00',
+        tax: '0.00',
+        total: '100.00',
+        receiptFileId: null,
+      });
+      invoices.set(key, inv);
+      payments.set(
+        key,
+        push('Payment', {
+          invoiceId: inv,
+          method: 'CASH',
+          provider: null,
+          providerReference: null,
+          amount: '40.00',
+          status: 'SUCCEEDED',
+          paidAt: new Date(),
+          receivedById: null,
+          reconciledAt: null,
+          reconciledById: null,
+        }),
+      );
       rxs.set(
         key,
         push('Prescription', {
@@ -315,6 +355,8 @@ describe('Permissions matrix (ROLE-011)', () => {
   });
   const records = new Map<string, string>();
   const rxs = new Map<string, string>();
+  const invoices = new Map<string, string>();
+  const payments = new Map<string, string>();
   const labOrders = new Map<string, string>();
   let labTestId = '';
   let medicineId = '';
@@ -344,6 +386,8 @@ describe('Permissions matrix (ROLE-011)', () => {
     if (path.startsWith('/api/files/')) return pair(files, true);
     if (path.startsWith('/api/prescriptions/')) return pair(rxs, true);
     if (path.startsWith('/api/pharmacy/prescriptions/')) return pair(rxs, true);
+    if (path.startsWith('/api/invoices/:id')) return pair(invoices, true);
+    if (path.startsWith('/api/payments/:id')) return pair(payments, true);
     if (path.startsWith('/api/batches/')) return [batchId, batchId];
     if (path.startsWith('/api/lab-orders/')) return pair(labOrders, true);
     if (path.startsWith('/api/lab-tests/')) return [labTestId, labTestId];

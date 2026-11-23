@@ -39,7 +39,15 @@ function same(a: unknown, b: unknown): boolean {
   return a === b;
 }
 
-const WRITES = new Set(['create', 'update', 'updateMany', 'delete', 'deleteMany', 'createMany']);
+const WRITES = new Set([
+  'create',
+  'update',
+  'updateMany',
+  'delete',
+  'deleteMany',
+  'createMany',
+  'createManyAndReturn',
+]);
 
 function isPlain(v: unknown): v is Row {
   return typeof v === 'object' && v !== null && !(v instanceof Date) && !Array.isArray(v);
@@ -137,6 +145,12 @@ const MODEL_OF: Record<string, string> = {
   labOrder: 'LabOrder',
   labOrderItem: 'LabOrderItem',
   labResult: 'LabResult',
+  invoice: 'Invoice',
+  payment: 'Payment',
+  insuranceClaim: 'InsuranceClaim',
+  webhookEvent: 'WebhookEvent',
+  notification: 'Notification',
+  notificationDelivery: 'NotificationDelivery',
 };
 
 interface Relation {
@@ -163,6 +177,16 @@ const RELATIONS: Record<string, Record<string, Relation>> = {
   },
   DoctorDepartment: { department: { model: 'Department', local: 'departmentId', foreign: 'id' } },
   Patient: { user: { model: 'User', local: 'userId', foreign: 'id' } },
+  Invoice: {
+    patient: { model: 'Patient', local: 'patientId', foreign: 'id' },
+    payments: { model: 'Payment', local: 'id', foreign: 'invoiceId', many: true },
+  },
+  Payment: {
+    invoice: { model: 'Invoice', local: 'invoiceId', foreign: 'id' },
+    receivedBy: { model: 'User', local: 'receivedById', foreign: 'id' },
+    reconciledBy: { model: 'User', local: 'reconciledById', foreign: 'id' },
+  },
+  InsuranceClaim: { invoice: { model: 'Invoice', local: 'invoiceId', foreign: 'id' } },
   Room: {
     beds: { model: 'Bed', local: 'id', foreign: 'roomId', many: true },
     department: { model: 'Department', local: 'departmentId', foreign: 'id' },
@@ -269,6 +293,8 @@ const UNIQUES: Record<string, string[][]> = {
   LabOrderItem: [['labOrderId', 'labTestId']],
   LabResult: [['labOrderItemId']],
   LabOrder: [['amendsLabOrderId']],
+  // M-15: one-time notifications; NULL keys never conflict, as in PostgreSQL.
+  Notification: [['recipientId', 'dedupeKey']],
 };
 
 /** Rows that block deletion of a parent (ON DELETE RESTRICT in the database). */
@@ -582,12 +608,21 @@ export class FakePrisma {
     return out;
   }
 
-  private project(row: Row, select?: Row): Row {
+  /** Applies a select, including nested relation selects (`{ patient: { select: { userId: true } } }`). */
+  private project(row: Row, select?: Row, model?: string): Row {
     if (!select) return row;
     return Object.fromEntries(
       Object.keys(select)
         .filter((k) => select[k])
-        .map((k) => [k, row[k]]),
+        .map((k) => {
+          const spec = select[k];
+          const rel = model ? RELATIONS[model]?.[k] : undefined;
+          if (!rel || typeof spec !== 'object' || spec === null) return [k, row[k]];
+          const nested = this.include(model!, row, { [k]: true })[k];
+          const sub = (spec as Row).select as Row | undefined;
+          const shape = (v: unknown) => (v && sub ? this.project(v as Row, sub, rel.model) : v);
+          return [k, Array.isArray(nested) ? nested.map(shape) : shape(nested)];
+        }),
     );
   }
 
@@ -961,6 +996,7 @@ export class FakePrisma {
       this.project(
         this.include(model, r, a.include as Row | undefined),
         a.select as Row | undefined,
+        model,
       );
     try {
       switch (op) {
@@ -1043,16 +1079,28 @@ export class FakePrisma {
           hit.forEach((r) => (applyData(r, a.data as Row), this.touched.add(r)));
           return Promise.resolve({ count: hit.length });
         }
-        case 'createMany': {
+        case 'createMany':
+        case 'createManyAndReturn': {
+          // skipDuplicates mirrors INSERT ... ON CONFLICT DO NOTHING: a row that would break a
+          // unique key is left out and nothing is thrown.
+          const created: Row[] = [];
           for (const d of a.data as Row[]) {
             const row = { ...this.defaults(model), ...d };
             guardPharmacy(model, [row], 'create');
-            this.checkUnique(model, row);
+            try {
+              this.checkUnique(model, row);
+            } catch (e) {
+              if (a.skipDuplicates && e instanceof Prisma.PrismaClientKnownRequestError) continue;
+              throw e;
+            }
             this.workflow(model, null, row);
             rows.push(row);
             this.touched.add(row);
+            created.push(row);
           }
-          return Promise.resolve({ count: (a.data as Row[]).length });
+          return Promise.resolve(
+            op === 'createMany' ? { count: created.length } : created.map((r) => shape(r)),
+          );
         }
         default:
           throw new Error(`FakePrisma: unsupported operation ${model}.${op}`);
@@ -1076,6 +1124,7 @@ export class FakePrisma {
       'deleteMany',
       'updateMany',
       'createMany',
+      'createManyAndReturn',
     ];
     return Object.fromEntries(
       ops.map((op) => [
@@ -1115,6 +1164,8 @@ export class FakePrisma {
   expiryReport = this.delegate('ExpiryReport');
   prescriptionEvent = this.delegate('PrescriptionEvent');
   labOrder = this.delegate('LabOrder');
+  notification = this.delegate('Notification');
+  notificationDelivery = this.delegate('NotificationDelivery');
 
   /** Query extensions, as used by TenantPrismaService. */
   $extends(ext: { query?: { $allModels?: { $allOperations?: Hook } } }): unknown {

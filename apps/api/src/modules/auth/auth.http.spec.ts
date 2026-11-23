@@ -283,6 +283,27 @@ describe('Auth HTTP flows (in-memory Prisma and Redis)', () => {
       expect(t.prisma.actions().filter((a) => a === 'auth.login_failed')).toHaveLength(2);
     });
 
+    it('locks one account after 10 failed sign-ins, the same way for unknown emails, and a success resets it (Phase 12)', async () => {
+      await registerAndVerify();
+      for (let i = 0; i < 10; i++)
+        expect((await login('asha@example.com', 'Wrong-password-1')).res.status).toBe(401);
+      // Locked: even the right password is refused, without saying whether the account exists.
+      const locked = await login('asha@example.com', PASSWORD);
+      expect(locked.res.status).toBe(429);
+      expect(locked.res.body.error.code).toBe('RATE_LIMITED');
+      for (let i = 0; i < 10; i++) await login('ghost@example.com', 'Wrong-password-1');
+      const ghost = await login('ghost@example.com', PASSWORD);
+      expect(ghost.res.status).toBe(429);
+      expect(ghost.res.body.error).toEqual(locked.res.body.error);
+      // Another account is unaffected; after the window, a success clears the counter.
+      await t.redis.flushall();
+      expect((await login('asha@example.com', 'Wrong-password-1')).res.status).toBe(401);
+      expect((await login()).res.status).toBe(200);
+      for (let i = 0; i < 9; i++)
+        expect((await login('asha@example.com', 'Wrong-password-1')).res.status).toBe(401);
+      expect((await login()).res.status).toBe(200);
+    }, 90_000); // about 30 bcrypt (cost 12) comparisons
+
     it('issues an access token and secure cookies, and /me returns role permissions', async () => {
       await registerAndVerify();
       const { res, token } = await login();
@@ -402,6 +423,19 @@ describe('Auth HTTP flows (in-memory Prisma and Redis)', () => {
         .expect(200);
       expect(res.body.data.message).toMatch(/If an account exists/);
       expect(t.emails).toHaveLength(0);
+    });
+
+    it('sends at most one reset email per address per minute, silently (Phase 12)', async () => {
+      await registerAndVerify();
+      const before = t.emails.length;
+      const { agent, csrf } = await client(app);
+      for (let i = 0; i < 3; i++)
+        await agent
+          .post('/api/auth/forgot-password')
+          .set(CSRF_HEADER, csrf)
+          .send({ email: 'asha@example.com' })
+          .expect(200);
+      expect(t.emails.length - before).toBe(1);
     });
 
     it('resets with a single-use link and signs out every device', async () => {

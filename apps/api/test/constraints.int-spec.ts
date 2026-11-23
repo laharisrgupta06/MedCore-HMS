@@ -83,7 +83,7 @@ const at = (h: number, m = 0) => new Date(Date.UTC(2031, 0, 15, h, m));
 beforeAll(requireMigration);
 
 describe('T-MIG-001: database objects exist', () => {
-  it('has 55 tables, 64 triggers, three exclusion constraints and the extensions', async () => {
+  it('has 55 tables, 66 triggers, three exclusion constraints and the extensions', async () => {
     const [tables] = await prisma.$queryRaw<{ c: bigint }[]>`
       SELECT count(*) AS c FROM information_schema.tables
       WHERE table_schema = 'public' AND table_name <> '_prisma_migrations'`;
@@ -98,8 +98,9 @@ describe('T-MIG-001: database objects exist', () => {
     // 11 triggers (counts measured on PostgreSQL 16 after each migration, T-MIG-PH-002). M-11a adds
     // 5 tables, 11 triggers and 1 exclusion constraint (measured on PostgreSQL 16, T-MIG-TAX-001).
     // M-11b adds 4 tables and 11 triggers (measured on PostgreSQL 16, T-MIG-INV-001; named below).
+    // M-12 adds 2 triggers; M-13 and M-15 add none (measured on PostgreSQL 16; named below).
     expect(Number(tables!.c)).toBe(55);
-    expect(Number(triggers!.c)).toBe(64);
+    expect(Number(triggers!.c)).toBe(66);
     expect(Number(exclusions!.c)).toBe(3);
     expect(ext.map((e) => e.extname)).toEqual(expect.arrayContaining(['pgcrypto', 'btree_gist']));
     // The Phase 7 objects by name, so a missing one cannot hide behind a correct total.
@@ -212,6 +213,33 @@ describe('T-MIG-001: database objects exist', () => {
         'invoices_rules',
         'invoices_seriesId_serial_key',
         'invoices_totals_at_commit',
+      ].sort(),
+    );
+    // M-12 payment rules, M-13 TPA settlement and M-15 notification key by name. The API opens
+    // payments only when payments_invoice_status exists and TPA posting only when the enum value does.
+    const paymentNames = await prisma.$queryRaw<{ n: string }[]>`
+      SELECT tgname AS n FROM pg_trigger WHERE NOT tgisinternal AND tgname IN (
+        'payments_invoice_status', 'payments_invoice_consistency')
+      UNION ALL
+      SELECT conname FROM pg_constraint WHERE conname IN (
+        'payments_reversal_complete', 'payments_reversedById_hospitalId_fkey', 'payments_provider_chk')
+      UNION ALL
+      SELECT e.enumlabel FROM pg_enum e JOIN pg_type t ON t.oid = e.enumtypid
+       WHERE (t.typname, e.enumlabel) IN (('PaymentStatus', 'REVERSED'), ('PaymentMethod', 'TPA_SETTLEMENT'))
+      UNION ALL
+      SELECT indexname FROM pg_indexes WHERE schemaname = 'public' AND indexname IN (
+        'notifications_recipientId_dedupeKey_key', 'notification_deliveries_status_updatedAt_idx')`;
+    expect(paymentNames.map((x) => x.n).sort()).toEqual(
+      [
+        'REVERSED',
+        'TPA_SETTLEMENT',
+        'notification_deliveries_status_updatedAt_idx',
+        'notifications_recipientId_dedupeKey_key',
+        'payments_invoice_consistency',
+        'payments_invoice_status',
+        'payments_provider_chk',
+        'payments_reversal_complete',
+        'payments_reversedById_hospitalId_fkey',
       ].sort(),
     );
   });
@@ -394,7 +422,12 @@ describe('T-MIG-006: invoice drafts under M-11b (TEST-015, DEC-051, DEC-053)', (
     const { h, dept } = await hospital();
     const doc = await doctor(h.id);
     const pat = await patient(h.id);
-    const rc = await prisma.user.create({ data: userData('RECEPTIONIST', h.id) });
+    // Staff users need their staff profile in the same transaction (role/profile rule, constraints.sql).
+    const rc = await prisma.$transaction(async (tx) => {
+      const u = await tx.user.create({ data: userData('RECEPTIONIST', h.id) });
+      await tx.staffProfile.create({ data: { hospitalId: h.id, userId: u.id } });
+      return u;
+    });
     const appt = await prisma.appointment.create({
       data: {
         hospitalId: h.id,

@@ -84,8 +84,28 @@ describe('Phase 8 integration: invoices through the API on PostgreSQL', () => {
             emailVerifiedAt: new Date(),
           },
         });
-        if (role !== 'PATIENT')
-          await tx.staffProfile.create({ data: { hospitalId: hid, userId: u.id } });
+        // Each role's profile in the same transaction (role/profile rule, checked at commit).
+        if (role === 'DOCTOR')
+          await tx.doctor.create({
+            data: {
+              hospitalId: hid,
+              userId: u.id,
+              registrationNumber: `R-${run}-${n}`,
+              specialisation: 'General',
+              consultationFee: 500,
+            },
+          });
+        else if (role === 'PATIENT')
+          await tx.patient.create({
+            data: {
+              hospitalId: hid,
+              userId: u.id,
+              mrn: `INTI-${run}-${n}`,
+              dateOfBirth: new Date('1990-01-01'),
+              gender: 'FEMALE',
+            },
+          });
+        else await tx.staffProfile.create({ data: { hospitalId: hid, userId: u.id } });
         return u;
       });
     const [admin, rcU, acU, drU, phU, ptU, rcB] = await Promise.all([
@@ -171,24 +191,8 @@ describe('Phase 8 integration: invoices through the API on PostgreSQL', () => {
     const dept = await prisma.department.create({
       data: { hospitalId: A.id, name: `General ${run}` },
     });
-    const doctor = await prisma.doctor.create({
-      data: {
-        hospitalId: A.id,
-        userId: drU.id,
-        registrationNumber: `R-${run}`,
-        specialisation: 'General',
-        consultationFee: 500,
-      },
-    });
-    const patient = await prisma.patient.create({
-      data: {
-        hospitalId: A.id,
-        userId: ptU.id,
-        mrn: `INTI-${run}`,
-        dateOfBirth: new Date('1990-01-01'),
-        gender: 'FEMALE',
-      },
-    });
+    const doctor = await prisma.doctor.findFirstOrThrow({ where: { userId: drU.id } });
+    const patient = await prisma.patient.findFirstOrThrow({ where: { userId: ptU.id } });
     const start = new Date();
     const appt = await prisma.appointment.create({
       data: {

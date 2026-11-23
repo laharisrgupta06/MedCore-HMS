@@ -31,6 +31,7 @@ import { StorageModule } from '../infra/storage/storage.service';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { FakePrisma } from './fake-prisma';
+import { NotificationWriter } from '../modules/notifications/notification.writer';
 import { REMINDER_SCHEDULER } from '../modules/appointments/reminders';
 import { CHARGE_RECORDER } from '../modules/billing/charges';
 import type { AutomaticCharge } from '../modules/billing/billing.service';
@@ -88,6 +89,8 @@ export async function createAuthTestApp(
       useValue: { send: (m: SmsMessage) => (sms.push(m), Promise.resolve()) },
     },
     DomainEvents,
+    // Notifications are staged inside business transactions; no delivery queue in tests.
+    NotificationWriter,
     PdfService,
     PdfRenderers,
     // PDFs render inline in tests (the app uses the BullMQ pdf queue); failures surface in the test.
@@ -148,6 +151,7 @@ export async function createAuthTestApp(
           CHARGE_RECORDER,
           FIELD_CRYPTO,
           DomainEvents,
+          NotificationWriter,
           PdfService,
           PdfRenderers,
           PDF_JOBS,

@@ -1,5 +1,3 @@
-import { resolve } from 'node:path';
-
 /**
  * Seeded E2E accounts (apps/api/src/cli/seed-e2e.ts, DEC-061). The e-mail scheme matches the seed;
  * the password is E2E_PASSWORD from the repository-root .env, never written in the repository.
@@ -33,7 +31,3 @@ export const ACCOUNTS: Record<AccountKey, { email: string; home: RegExp }> = {
   'hospital-admin-b': { email: 'e2e-hospital-admin-b@medcore.test', home: /\/dashboard/ },
   'patient-b': { email: 'e2e-patient-b@medcore.test', home: /\/portal/ },
 };
-
-/** Saved browser state for an account (absolute path), written by global-setup.ts. */
-export const stateFile = (key: AccountKey): string =>
-  resolve(__dirname, '..', '.auth', `${key}.json`);

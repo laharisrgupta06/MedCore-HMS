@@ -4,45 +4,48 @@ import { BullReminderScheduler, sendReminder } from './reminders';
 /** APPT-005: reminders 24 h and 1 h before, skipped when the appointment changed. */
 describe('appointment reminders', () => {
   const start = new Date('2030-03-04T04:30:00.000Z');
-  const row = (over: Record<string, unknown> = {}, phoneVerified = true) => ({
+  const row = (over: Record<string, unknown> = {}) => ({
     id: 'a1',
+    hospitalId: 'h1',
     status: 'CONFIRMED',
     scheduledAt: start,
     hospital: { name: 'City Hospital', timezone: 'Asia/Kolkata' },
-    doctor: { user: { firstName: 'Dee', lastName: 'Rao' } },
-    patient: {
-      user: {
-        email: 'p@example.com',
-        firstName: 'Pat',
-        phone: '+919800000000',
-        phoneVerifiedAt: phoneVerified ? new Date() : null,
-      },
-    },
+    patient: { userId: 'u-patient' },
     ...over,
   });
-  const setup = (r: unknown) => {
-    const mail = { send: jest.fn().mockResolvedValue(undefined) };
-    const sms = { send: jest.fn().mockResolvedValue(undefined) };
-    const prisma = { appointment: { findUnique: jest.fn().mockResolvedValue(r) } };
-    return { mail, sms, prisma };
+  const setup = (r: unknown, staged = [{ id: 'd1', channel: 'EMAIL' }]) => {
+    const tx = {
+      $queryRaw: jest.fn().mockResolvedValue([]),
+      appointment: { findUnique: jest.fn().mockResolvedValue(r) },
+    };
+    const prisma = { $transaction: (fn: (t: unknown) => unknown) => fn(tx) };
+    const writer = {
+      stage: jest.fn().mockResolvedValue(staged),
+      dispatch: jest.fn().mockResolvedValue(undefined),
+    };
+    return { prisma, writer, tx };
   };
   const job = { appointmentId: 'a1', scheduledAt: start.toISOString(), offset: '24h' as const };
 
-  it('emails the patient in hospital-local time and texts a verified phone', async () => {
-    const { mail, sms, prisma } = setup(row());
-    expect(await sendReminder(prisma as never, mail as never, sms as never, job)).toBe('sent');
-    const sent = mail.send.mock.calls[0][0];
-    expect(sent.to).toBe('p@example.com');
-    expect(sent.text).toContain('Dr Dee Rao at City Hospital is tomorrow');
-    expect(sent.text).toContain('10:00'); // 04:30 UTC = 10:00 IST
-    expect(sms.send).toHaveBeenCalledWith(expect.objectContaining({ to: '+919800000000' }));
+  it('locks the appointment and stages one durable reminder in hospital-local time', async () => {
+    const { prisma, writer, tx } = setup(row());
+    expect(await sendReminder(prisma as never, writer as never, job)).toBe('sent');
+    expect(tx.$queryRaw).toHaveBeenCalled();
+    const input = writer.stage.mock.calls[0][1];
+    expect(input.recipientIds).toEqual(['u-patient']);
+    expect(input.hospitalId).toBe('h1');
+    expect(input.content.type).toBe('appointment.reminder.24h');
+    expect(input.content.once).toBe('same-body');
+    expect(input.content.channels).toEqual(['IN_APP', 'EMAIL', 'SMS']);
+    expect(input.content.body).toContain('10:00'); // 04:30 UTC = 10:00 IST
+    expect(input.content.body).toContain('City Hospital');
+    expect(writer.dispatch).toHaveBeenCalledWith([{ id: 'd1', channel: 'EMAIL' }]);
   });
 
-  it('does not text an unverified phone', async () => {
-    const { mail, sms, prisma } = setup(row({}, false));
-    await sendReminder(prisma as never, mail as never, sms as never, job);
-    expect(mail.send).toHaveBeenCalled();
-    expect(sms.send).not.toHaveBeenCalled();
+  it('reports a duplicate (already reminded for this time) as skipped and queues nothing', async () => {
+    const { prisma, writer } = setup(row(), []);
+    expect(await sendReminder(prisma as never, writer as never, job)).toBe('skipped');
+    expect(writer.dispatch).not.toHaveBeenCalled();
   });
 
   it.each([
@@ -51,10 +54,9 @@ describe('appointment reminders', () => {
     ['rescheduled', row({ scheduledAt: new Date('2030-03-05T04:30:00.000Z') })],
     ['deleted', null],
   ])('skips a %s appointment', async (_, r) => {
-    const { mail, sms, prisma } = setup(r);
-    expect(await sendReminder(prisma as never, mail as never, sms as never, job)).toBe('skipped');
-    expect(mail.send).not.toHaveBeenCalled();
-    expect(sms.send).not.toHaveBeenCalled();
+    const { prisma, writer } = setup(r);
+    expect(await sendReminder(prisma as never, writer as never, job)).toBe('skipped');
+    expect(writer.stage).not.toHaveBeenCalled();
   });
 
   it('queues only reminders still in the future, with stable job ids, replacing earlier ones', async () => {
